@@ -76,20 +76,59 @@ class OrdenTrabajoOut(BaseModel):
     id: int
     numero_ot: str
     cliente: Optional[str]
-    diseno: Optional[str]
     fecha_creacion: datetime
 
 
-class EntregaCreate(BaseModel):
-    numero_ot: str
-    cliente: Optional[str] = None
-    diseno: Optional[str] = None
+class MaterialPedidoIn(BaseModel):
+    material_id: int
+    cantidad_requerida: Optional[float] = None
+
+
+class ProcesoDetalleIn(BaseModel):
     proceso_id: int
     maquina_id: int
+    diseno: Optional[str] = None
+    materiales: List[MaterialPedidoIn] = Field(min_length=1)
+
+
+class OtDetalleCreate(BaseModel):
+    """Define (o amplía) la estructura completa de una OT: uno o varios
+    procesos, cada uno con su propio diseño/máquina y los materiales que
+    pide con su cantidad requerida. No registra ninguna entrega todavía."""
+
+    numero_ot: str
+    cliente: Optional[str] = None
+    procesos: List[ProcesoDetalleIn] = Field(min_length=1)
+
+
+class MaterialPedidoOut(BaseModel):
+    ot_material_id: int
     material_id: int
-    # solo se usa si es el primer pedido de este material para esta OT+proceso;
-    # en entregas parciales posteriores contra el mismo pedido se ignora.
-    cantidad_requerida: Optional[float] = None
+    codigo_mp: str
+    unidad: str
+    cantidad_requerida: Optional[float]
+    total_entregado: float
+    total_devuelto: float
+
+
+class ProcesoDetalleOut(BaseModel):
+    ot_proceso_id: int
+    proceso_id: int
+    proceso: str
+    maquina_id: int
+    maquina: str
+    diseno: Optional[str]
+    materiales: List[MaterialPedidoOut]
+
+
+class OtDetalleOut(BaseModel):
+    numero_ot: str
+    cliente: Optional[str]
+    procesos: List[ProcesoDetalleOut]
+
+
+class EntregaCreate(BaseModel):
+    ot_material_id: int
     fecha: date
     bobinas: List[float] = Field(min_length=1)
 
@@ -100,6 +139,7 @@ class EntregaOut(BaseModel):
     numero_ot: str
     proceso: str
     maquina: str
+    diseno: Optional[str]
     codigo_mp: str
     unidad: str
     usuario: str
@@ -131,8 +171,10 @@ class PedidoMaterialOut(BaseModel):
 
     ot_material_id: int
     numero_ot: str
+    cliente: Optional[str]
     proceso: str
     maquina: str
+    diseno: Optional[str]
     codigo_mp: str
     unidad: str
     cantidad_requerida: Optional[float]

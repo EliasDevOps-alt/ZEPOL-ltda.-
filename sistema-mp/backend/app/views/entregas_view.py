@@ -23,6 +23,7 @@ def _serializar(entrega: Entrega) -> schemas.EntregaOut:
         numero_ot=ot_proceso.ot.numero_ot,
         proceso=ot_proceso.proceso.nombre,
         maquina=ot_proceso.maquina.nombre,
+        diseno=ot_proceso.diseno,
         codigo_mp=ot_material.material.codigo_mp,
         unidad=ot_material.material.unidad,
         usuario=entrega.usuario.inicial,

@@ -8,6 +8,7 @@ import { RegistrarDevolucion } from './pages/RegistrarDevolucion'
 import { Consulta } from './pages/Consulta'
 import { Materiales } from './pages/Materiales'
 import { Historial } from './pages/Historial'
+import { DetalleOt } from './pages/DetalleOt'
 
 function RutaPrivada({ children }: { children: ReactNode }) {
   const { sesion } = useAuth()
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="consulta" element={<Consulta />} />
         <Route path="materiales" element={<Materiales />} />
         <Route path="entrega/historial" element={<Historial />} />
+        <Route path="entrega/detalle" element={<DetalleOt />} />
       </Route>
     </Routes>
   )

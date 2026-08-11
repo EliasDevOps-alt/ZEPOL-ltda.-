@@ -2,7 +2,7 @@ import { useState } from 'react'
 import type { ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ChevronDown, ClipboardList, PackageCheck, PackageX, Boxes, History, LogOut } from 'lucide-react'
+import { ChevronDown, ClipboardList, FileEdit, PackageCheck, PackageX, Boxes, History, LogOut } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useAuth } from '@renderer/lib/AuthContext'
 
@@ -18,7 +18,10 @@ const NAV_ITEMS: NavItem[] = [
     to: '/entrega',
     label: 'Registrar Entrega',
     icon: PackageCheck,
-    children: [{ to: '/entrega/historial', label: 'Historial de OT', icon: History }]
+    children: [
+      { to: '/entrega/detalle', label: 'Detalle de OT', icon: FileEdit },
+      { to: '/entrega/historial', label: 'Historial de OT', icon: History }
+    ]
   },
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },

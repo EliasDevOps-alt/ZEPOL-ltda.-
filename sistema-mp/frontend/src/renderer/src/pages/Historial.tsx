@@ -118,9 +118,7 @@ export function Historial() {
                   )}
                 >
                   <p className="font-medium">OT {ot.numero_ot}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {ot.cliente ?? 'Sin cliente'} {ot.diseno ? `· ${ot.diseno}` : ''}
-                  </p>
+                  <p className="text-xs text-muted-foreground">{ot.cliente ?? 'Sin cliente'}</p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(ot.fecha_creacion).toLocaleDateString('es-BO')}
                   </p>
@@ -146,9 +144,7 @@ export function Historial() {
                 <CardContent className="flex flex-wrap items-baseline justify-between gap-2 pt-6">
                   <div>
                     <p className="text-lg font-semibold">OT {otSeleccionada}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {otActual?.cliente ?? '—'} {otActual?.diseno ? `· ${otActual.diseno}` : ''}
-                    </p>
+                    <p className="text-sm text-muted-foreground">{otActual?.cliente ?? '—'}</p>
                   </div>
                   {consumo.data && consumo.data.length > 0 && (
                     <p className="text-sm text-muted-foreground">
@@ -182,6 +178,7 @@ export function Historial() {
                         <CardTitle className="text-base">{pedido.codigo_mp}</CardTitle>
                         <p className="text-sm text-muted-foreground">
                           {pedido.proceso} · {pedido.maquina}
+                          {pedido.diseno ? ` · diseño: ${pedido.diseno}` : ''}
                         </p>
                       </div>
                       <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ESTILO_ESTADO[pedido.estado_entrega])}>

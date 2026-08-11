@@ -11,6 +11,8 @@ import type {
   MaterialCreate,
   MaterialUpdate,
   OrdenTrabajo,
+  OtDetalleCreate,
+  OtDetalleOut,
   Proceso,
   Usuario
 } from './types'
@@ -86,6 +88,14 @@ export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt
 export function listarOrdenes(baseUrl: string, token: string, q?: string) {
   const qs = q ? `?q=${encodeURIComponent(q)}` : ''
   return request<OrdenTrabajo[]>(baseUrl, `/ordenes-trabajo${qs}`, { token })
+}
+
+export function guardarDetalleOt(baseUrl: string, token: string, data: OtDetalleCreate) {
+  return request<OtDetalleOut>(baseUrl, '/ordenes-trabajo/detalle', { method: 'POST', token, body: data })
+}
+
+export function obtenerDetalleOt(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/detalle`, { token })
 }
 
 export function consultarConsumo(baseUrl: string, token: string, numeroOt: string) {

@@ -92,7 +92,10 @@ export function Consulta() {
               <tbody>
                 {consumo.data.map((row) => (
                   <tr key={row.ot_material_id} className="border-b border-border last:border-0">
-                    <td className="p-3">{row.proceso}</td>
+                    <td className="p-3">
+                      {row.proceso}
+                      {row.diseno && <p className="text-xs text-muted-foreground">{row.diseno}</p>}
+                    </td>
                     <td className="p-3">{row.maquina}</td>
                     <td className="p-3">{row.codigo_mp}</td>
                     <td className="p-3 text-right">
