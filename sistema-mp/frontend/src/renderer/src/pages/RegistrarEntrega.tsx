@@ -117,7 +117,7 @@ export function RegistrarEntrega() {
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
         <Link
-          to={numeroOt ? `/historial?ot=${encodeURIComponent(numeroOt)}` : '/historial'}
+          to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
         >
           <History className="h-4 w-4" />
@@ -172,7 +172,7 @@ export function RegistrarEntrega() {
                 Acumulado del pedido: {confirmacion.total_entregado_pedido} {confirmacion.unidad}
               </p>
             )}
-            <Link to={`/historial?ot=${encodeURIComponent(confirmacion.numero_ot)}`} className="text-primary hover:underline">
+            <Link to={`/entrega/historial?ot=${encodeURIComponent(confirmacion.numero_ot)}`} className="text-primary hover:underline">
               Ver historial de esta OT →
             </Link>
           </div>
