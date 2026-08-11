@@ -36,6 +36,12 @@ def actualizar_material(db: Session, material_id: int, data: schemas.MaterialUpd
     if material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
+    if data.codigo_mp != material.codigo_mp:
+        existente = db.scalar(select(Material).where(Material.codigo_mp == data.codigo_mp))
+        if existente is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Ya existe un material con código {data.codigo_mp}")
+        material.codigo_mp = data.codigo_mp
+
     material.descripcion = data.descripcion
     material.unidad = data.unidad
     material.activo = data.activo

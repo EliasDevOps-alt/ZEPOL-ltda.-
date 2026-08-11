@@ -66,6 +66,7 @@ class MaterialCreate(BaseModel):
 
 
 class MaterialUpdate(BaseModel):
+    codigo_mp: str
     descripcion: Optional[str] = None
     unidad: str
     activo: bool = True

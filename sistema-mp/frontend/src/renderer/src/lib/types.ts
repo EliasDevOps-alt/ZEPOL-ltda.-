@@ -94,6 +94,7 @@ export interface MaterialCreate {
 }
 
 export interface MaterialUpdate {
+  codigo_mp: string
   descripcion?: string | null
   unidad: string
   activo: boolean

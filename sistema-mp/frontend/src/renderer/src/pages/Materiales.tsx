@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Search, Trash2, X } from 'lucide-react'
@@ -38,6 +38,11 @@ export function Materiales() {
   const [buscado, setBuscado] = useState('')
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const formRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (form) formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, [form])
 
   const materiales = useQuery({
     queryKey: ['materiales-admin', buscado],
@@ -54,6 +59,7 @@ export function Materiales() {
         })
       }
       return api.actualizarMaterial(apiBaseUrl, token, data.id, {
+        codigo_mp: data.codigo_mp,
         descripcion: data.descripcion || null,
         unidad: data.unidad,
         activo: data.activo
@@ -120,7 +126,7 @@ export function Materiales() {
       </div>
 
       {form && (
-        <Card className="mb-6 border-primary/40">
+        <Card ref={formRef} className="mb-6 border-primary/40">
           <CardHeader className="flex-row items-center justify-between">
             <CardTitle>{form.id === null ? 'Nuevo material' : `Editar ${form.codigo_mp}`}</CardTitle>
             <button onClick={() => setForm(null)} className="text-muted-foreground hover:text-foreground">
@@ -134,7 +140,6 @@ export function Materiales() {
                   <Label>Código MP</Label>
                   <Input
                     value={form.codigo_mp}
-                    disabled={form.id !== null}
                     onChange={(e) => setForm({ ...form, codigo_mp: e.target.value })}
                     placeholder="LDPE-1"
                   />
@@ -205,6 +210,7 @@ export function Materiales() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-left text-muted-foreground">
+                <th className="p-3">#</th>
                 <th className="p-3">Código</th>
                 <th className="p-3">Descripción</th>
                 <th className="p-3">Unidad</th>
@@ -213,8 +219,9 @@ export function Materiales() {
               </tr>
             </thead>
             <tbody>
-              {materiales.data?.map((m) => (
+              {materiales.data?.map((m, i) => (
                 <tr key={m.id} className="border-b border-border last:border-0">
+                  <td className="p-3 text-muted-foreground">{i + 1}</td>
                   <td className="p-3 font-medium">{m.codigo_mp}</td>
                   <td className="p-3 text-muted-foreground">{m.descripcion}</td>
                   <td className="p-3">{m.unidad}</td>
