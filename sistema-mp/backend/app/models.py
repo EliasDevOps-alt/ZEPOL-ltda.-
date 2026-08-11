@@ -78,14 +78,15 @@ class Material(Base):
 
 
 class OrdenTrabajo(Base):
-    """El cliente es único por OT. El diseño NO vive aquí: cada proceso de la
-    OT puede tener su propio diseño (ver OtProceso.diseno)."""
+    """El cliente y el diseño son únicos por OT (una OT es un solo pedido de
+    un solo cliente para un solo diseño, aunque pase por varios procesos)."""
 
     __tablename__ = "ordenes_trabajo"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     numero_ot: Mapped[str] = mapped_column(String(30), unique=True)
     cliente: Mapped[Optional[str]] = mapped_column(String(150))
+    diseno: Mapped[Optional[str]] = mapped_column(String(150))
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
@@ -93,9 +94,8 @@ class OrdenTrabajo(Base):
 
 
 class OtProceso(Base):
-    """Un paso de la OT en un proceso concreto (ej. OT 2121 -> Laminación en NORD,
-    diseño "pipocas"). Bajo este mismo paso pueden pedirse varios materiales
-    distintos (OtMaterial)."""
+    """Un paso de la OT en un proceso concreto (ej. OT 2121 -> Laminación en NORD).
+    Bajo este mismo paso pueden pedirse varios materiales distintos (OtMaterial)."""
 
     __tablename__ = "ot_procesos"
     __table_args__ = (
@@ -111,7 +111,6 @@ class OtProceso(Base):
     # declarada en __table_args__, que además obliga a que la máquina
     # pertenezca al proceso elegido.
     maquina_id: Mapped[int] = mapped_column()
-    diseno: Mapped[Optional[str]] = mapped_column(String(150))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot: Mapped["OrdenTrabajo"] = relationship(back_populates="procesos")

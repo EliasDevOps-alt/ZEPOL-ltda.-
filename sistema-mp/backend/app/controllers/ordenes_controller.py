@@ -14,14 +14,10 @@ def listar_ordenes(db: Session, q: Optional[str], limite: int = 100) -> List[Ord
     stmt = select(OrdenTrabajo)
     if q:
         like = f"%{q.lower()}%"
-        stmt = (
-            stmt.outerjoin(OtProceso, OtProceso.ot_id == OrdenTrabajo.id)
-            .where(
-                OrdenTrabajo.numero_ot.ilike(like)
-                | OrdenTrabajo.cliente.ilike(like)
-                | OtProceso.diseno.ilike(like)
-            )
-            .distinct()
+        stmt = stmt.where(
+            OrdenTrabajo.numero_ot.ilike(like)
+            | OrdenTrabajo.cliente.ilike(like)
+            | OrdenTrabajo.diseno.ilike(like)
         )
     stmt = stmt.order_by(OrdenTrabajo.fecha_creacion.desc()).limit(limite)
     return db.scalars(stmt).all()
@@ -35,19 +31,23 @@ def _estado_pendiente(db: Session) -> EstadoSid:
 
 
 def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
-    """Crea o amplía la OT: agrega procesos (con su diseño/máquina) y, dentro
-    de cada uno, los materiales pedidos con su cantidad. Si el proceso o el
-    material ya existían para esta OT, actualiza diseño/cantidad en vez de
-    duplicar — así esta misma acción sirve para crear la OT o para agregarle
-    más procesos/materiales después."""
+    """Crea o amplía la OT: fija cliente/diseño (únicos para toda la OT) y
+    agrega procesos (con su máquina) y, dentro de cada uno, los materiales
+    pedidos con su cantidad. Si el proceso o el material ya existían para
+    esta OT, actualiza la cantidad en vez de duplicar — así esta misma
+    acción sirve para crear la OT o para agregarle más procesos/materiales
+    después."""
 
     ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
     if ot is None:
-        ot = OrdenTrabajo(numero_ot=data.numero_ot, cliente=data.cliente)
+        ot = OrdenTrabajo(numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno)
         db.add(ot)
         db.flush()
-    elif data.cliente:
-        ot.cliente = data.cliente
+    else:
+        if data.cliente:
+            ot.cliente = data.cliente
+        if data.diseno:
+            ot.diseno = data.diseno
 
     for proceso_in in data.procesos:
         maquina = db.get(Maquina, proceso_in.maquina_id)
@@ -62,16 +62,9 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
             )
         )
         if ot_proceso is None:
-            ot_proceso = OtProceso(
-                ot_id=ot.id,
-                proceso_id=proceso_in.proceso_id,
-                maquina_id=proceso_in.maquina_id,
-                diseno=proceso_in.diseno,
-            )
+            ot_proceso = OtProceso(ot_id=ot.id, proceso_id=proceso_in.proceso_id, maquina_id=proceso_in.maquina_id)
             db.add(ot_proceso)
             db.flush()
-        elif proceso_in.diseno:
-            ot_proceso.diseno = proceso_in.diseno
 
         for material_in in proceso_in.materiales:
             material = db.get(Material, material_in.material_id)

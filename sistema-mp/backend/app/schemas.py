@@ -76,6 +76,7 @@ class OrdenTrabajoOut(BaseModel):
     id: int
     numero_ot: str
     cliente: Optional[str]
+    diseno: Optional[str]
     fecha_creacion: datetime
 
 
@@ -87,17 +88,18 @@ class MaterialPedidoIn(BaseModel):
 class ProcesoDetalleIn(BaseModel):
     proceso_id: int
     maquina_id: int
-    diseno: Optional[str] = None
     materiales: List[MaterialPedidoIn] = Field(min_length=1)
 
 
 class OtDetalleCreate(BaseModel):
     """Define (o amplía) la estructura completa de una OT: uno o varios
-    procesos, cada uno con su propio diseño/máquina y los materiales que
-    pide con su cantidad requerida. No registra ninguna entrega todavía."""
+    procesos (cada uno con su máquina) y los materiales que cada uno pide
+    con su cantidad requerida. Cliente y diseño son únicos para toda la OT.
+    No registra ninguna entrega todavía."""
 
     numero_ot: str
     cliente: Optional[str] = None
+    diseno: Optional[str] = None
     procesos: List[ProcesoDetalleIn] = Field(min_length=1)
 
 
@@ -117,13 +119,13 @@ class ProcesoDetalleOut(BaseModel):
     proceso: str
     maquina_id: int
     maquina: str
-    diseno: Optional[str]
     materiales: List[MaterialPedidoOut]
 
 
 class OtDetalleOut(BaseModel):
     numero_ot: str
     cliente: Optional[str]
+    diseno: Optional[str]
     procesos: List[ProcesoDetalleOut]
 
 

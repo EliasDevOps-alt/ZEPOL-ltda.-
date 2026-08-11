@@ -48,25 +48,24 @@ CREATE TABLE materiales (
 -- Órdenes de trabajo
 -- ============================================================
 
--- El cliente es único por OT. El diseño NO vive aquí: cada proceso de la OT
--- puede tener su propio diseño (ver ot_procesos.diseno).
+-- El cliente y el diseño son únicos por OT (una OT es un solo pedido de un
+-- solo cliente para un solo diseño, aunque pase por varios procesos).
 CREATE TABLE ordenes_trabajo (
     id              SERIAL PRIMARY KEY,
     numero_ot       VARCHAR(30) NOT NULL UNIQUE,
     cliente         VARCHAR(150),
+    diseno          VARCHAR(150),
     fecha_creacion  TIMESTAMP   NOT NULL DEFAULT now(),
     activo          BOOLEAN     NOT NULL DEFAULT TRUE
 );
 
--- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD
--- con el diseño "pipocas". Bajo ese mismo paso pueden pedirse varios materiales
--- distintos (ver ot_materiales).
+-- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD.
+-- Bajo ese mismo paso pueden pedirse varios materiales distintos (ver ot_materiales).
 CREATE TABLE ot_procesos (
     id          SERIAL PRIMARY KEY,
     ot_id       INTEGER   NOT NULL REFERENCES ordenes_trabajo(id),
     proceso_id  INTEGER   NOT NULL,
     maquina_id  INTEGER   NOT NULL,
-    diseno      VARCHAR(150),
     creado_en   TIMESTAMP NOT NULL DEFAULT now(),
 
     -- fuerza que la máquina elegida pertenezca realmente al proceso elegido
@@ -157,9 +156,9 @@ SELECT
     om.id                       AS ot_material_id,
     ot.numero_ot,
     ot.cliente,
+    ot.diseno,
     p.nombre                    AS proceso,
     mq.nombre                   AS maquina,
-    otp.diseno,
     mat.codigo_mp,
     mat.unidad,
     es.nombre                   AS estado_sid,

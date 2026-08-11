@@ -31,6 +31,7 @@ export interface OrdenTrabajo {
   id: number
   numero_ot: string
   cliente: string | null
+  diseno: string | null
   fecha_creacion: string
 }
 
@@ -42,13 +43,13 @@ export interface MaterialPedidoIn {
 export interface ProcesoDetalleIn {
   proceso_id: number
   maquina_id: number
-  diseno?: string | null
   materiales: MaterialPedidoIn[]
 }
 
 export interface OtDetalleCreate {
   numero_ot: string
   cliente?: string | null
+  diseno?: string | null
   procesos: ProcesoDetalleIn[]
 }
 
@@ -68,13 +69,13 @@ export interface ProcesoDetalleOut {
   proceso: string
   maquina_id: number
   maquina: string
-  diseno: string | null
   materiales: MaterialPedidoOut[]
 }
 
 export interface OtDetalleOut {
   numero_ot: string
   cliente: string | null
+  diseno: string | null
   procesos: ProcesoDetalleOut[]
 }
 

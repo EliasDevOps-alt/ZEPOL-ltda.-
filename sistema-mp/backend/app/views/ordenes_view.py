@@ -18,6 +18,7 @@ def _serializar_detalle(ot: OrdenTrabajo) -> schemas.OtDetalleOut:
     return schemas.OtDetalleOut(
         numero_ot=ot.numero_ot,
         cliente=ot.cliente,
+        diseno=ot.diseno,
         procesos=[
             schemas.ProcesoDetalleOut(
                 ot_proceso_id=otp.id,
@@ -25,7 +26,6 @@ def _serializar_detalle(ot: OrdenTrabajo) -> schemas.OtDetalleOut:
                 proceso=otp.proceso.nombre,
                 maquina_id=otp.maquina_id,
                 maquina=otp.maquina.nombre,
-                diseno=otp.diseno,
                 materiales=[
                     schemas.MaterialPedidoOut(
                         ot_material_id=om.id,

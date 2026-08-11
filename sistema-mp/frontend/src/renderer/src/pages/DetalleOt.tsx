@@ -23,12 +23,11 @@ interface FilaMaterial {
 interface BloqueProceso {
   procesoId: string
   maquinaId: string
-  diseno: string
   materiales: FilaMaterial[]
 }
 
 function bloqueVacio(): BloqueProceso {
-  return { procesoId: '', maquinaId: '', diseno: '', materiales: [{ materialId: '', cantidad: '' }] }
+  return { procesoId: '', maquinaId: '', materiales: [{ materialId: '', cantidad: '' }] }
 }
 
 function BloqueProcesoEditor({
@@ -72,7 +71,7 @@ function BloqueProcesoEditor({
   return (
     <div className="rounded-lg border border-border p-4">
       <div className="mb-4 flex items-start justify-between gap-2">
-        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid flex-1 grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs">Proceso</Label>
             <Select
@@ -109,10 +108,6 @@ function BloqueProcesoEditor({
                 ))}
               </SelectContent>
             </Select>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs">Diseño</Label>
-            <Input value={bloque.diseno} onChange={(e) => onChange({ ...bloque, diseno: e.target.value })} />
           </div>
         </div>
         {removible && (
@@ -185,6 +180,7 @@ export function DetalleOt() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [cliente, setCliente] = useState('')
+  const [diseno, setDiseno] = useState('')
   const [bloques, setBloques] = useState<BloqueProceso[]>([bloqueVacio()])
   const [error, setError] = useState<string | null>(null)
   const [confirmacion, setConfirmacion] = useState<OtDetalleOut | null>(null)
@@ -196,11 +192,11 @@ export function DetalleOt() {
     mutationFn: () => api.obtenerDetalleOt(apiBaseUrl, token, numeroOt),
     onSuccess: (detalle) => {
       setCliente(detalle.cliente ?? '')
+      setDiseno(detalle.diseno ?? '')
       setBloques(
         detalle.procesos.map((p) => ({
           procesoId: String(p.proceso_id),
           maquinaId: String(p.maquina_id),
-          diseno: p.diseno ?? '',
           materiales: p.materiales.map((m) => ({
             materialId: String(m.material_id),
             cantidad: m.cantidad_requerida != null ? String(m.cantidad_requerida) : ''
@@ -220,12 +216,12 @@ export function DetalleOt() {
       api.guardarDetalleOt(apiBaseUrl, token, {
         numero_ot: numeroOt,
         cliente: cliente || null,
+        diseno: diseno || null,
         procesos: bloques
           .filter((b) => b.procesoId && b.maquinaId)
           .map((b) => ({
             proceso_id: Number(b.procesoId),
             maquina_id: Number(b.maquinaId),
-            diseno: b.diseno || null,
             materiales: b.materiales
               .filter((m) => m.materialId)
               .map((m) => ({
@@ -269,7 +265,7 @@ export function DetalleOt() {
   return (
     <div className="max-w-3xl">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Detalle de OT</h1>
+        <h1 className="text-2xl font-semibold">Crear OT</h1>
         <Link
           to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
@@ -280,9 +276,9 @@ export function DetalleOt() {
       </div>
 
       <p className="mb-6 text-sm text-muted-foreground">
-        Define la estructura completa de la OT: sus procesos, cada uno con su propio diseño y máquina, y los
-        materiales que necesita con su cantidad. Después, en "Registrar Entrega" solo eliges el pedido y cargas
-        las bobinas entregadas.
+        Define la estructura completa de la OT: cliente y diseño (únicos para toda la OT), sus procesos con su
+        máquina, y los materiales que cada uno necesita con su cantidad. Después, en "Registrar Entrega" solo
+        eliges el pedido y cargas las bobinas entregadas.
       </p>
 
       {(procesos.isError || materiales.isError) && (
@@ -311,14 +307,10 @@ export function DetalleOt() {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_1fr_auto]">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label>OT</Label>
                 <Input value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="2121" />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label>Cliente</Label>
-                <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="La Estrella" />
               </div>
               <div className="flex items-end">
                 <Button
@@ -330,6 +322,14 @@ export function DetalleOt() {
                   <Upload className="h-4 w-4" />
                   Cargar OT existente
                 </Button>
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Cliente</Label>
+                <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="La Estrella" />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <Label>Diseño</Label>
+                <Input value={diseno} onChange={(e) => setDiseno(e.target.value)} placeholder="pipocas" />
               </div>
             </div>
 
