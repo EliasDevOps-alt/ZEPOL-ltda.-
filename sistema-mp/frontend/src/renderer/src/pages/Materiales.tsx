@@ -141,6 +141,18 @@ export function Materiales() {
         </Button>
       </div>
 
+      {procesos.isError && (
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <span>
+            No se pudieron cargar los procesos:{' '}
+            {procesos.error instanceof ApiError ? procesos.error.message : 'no se pudo conectar con el servidor'}
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={() => procesos.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+
       {form && (
         <Card className="mb-6 border-primary/40">
           <CardHeader className="flex-row items-center justify-between">

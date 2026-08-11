@@ -115,6 +115,18 @@ export function RegistrarEntrega() {
     <div className="max-w-2xl">
       <h1 className="mb-6 text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
 
+      {procesos.isError && (
+        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
+          <span>
+            No se pudieron cargar los procesos:{' '}
+            {procesos.error instanceof ApiError ? procesos.error.message : 'no se pudo conectar con el servidor'}
+          </span>
+          <Button type="button" variant="outline" size="sm" onClick={() => procesos.refetch()}>
+            Reintentar
+          </Button>
+        </div>
+      )}
+
       {confirmacion && (
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
