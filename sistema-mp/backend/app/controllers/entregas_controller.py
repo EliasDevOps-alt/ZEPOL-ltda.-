@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -23,12 +23,14 @@ def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate
     return entrega
 
 
-def listar_entregas_por_ot(db: Session, numero_ot: str) -> List[Entrega]:
-    return db.scalars(
+def listar_entregas_por_ot(db: Session, numero_ot: Optional[str] = None) -> List[Entrega]:
+    stmt = (
         select(Entrega)
         .join(OtMaterial, OtMaterial.id == Entrega.ot_material_id)
         .join(OtProceso, OtProceso.id == OtMaterial.ot_proceso_id)
         .join(OrdenTrabajo, OrdenTrabajo.id == OtProceso.ot_id)
-        .where(OrdenTrabajo.numero_ot == numero_ot)
         .order_by(Entrega.id)
-    ).all()
+    )
+    if numero_ot is not None:
+        stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot)
+    return db.scalars(stmt).all()

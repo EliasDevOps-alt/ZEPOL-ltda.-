@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from .. import schemas, security
@@ -44,8 +44,6 @@ def listar_devoluciones(
 ):
     if ot_material_id is not None:
         devoluciones = devoluciones_controller.listar_devoluciones_por_pedido(db, ot_material_id)
-    elif numero_ot is not None:
-        devoluciones = devoluciones_controller.listar_devoluciones_por_ot(db, numero_ot)
     else:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Debes indicar ot_material_id o numero_ot")
+        devoluciones = devoluciones_controller.listar_devoluciones_por_ot(db, numero_ot)
     return [_serializar(d) for d in devoluciones]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -40,12 +40,14 @@ def listar_devoluciones_por_pedido(db: Session, ot_material_id: int) -> List[Dev
     ).all()
 
 
-def listar_devoluciones_por_ot(db: Session, numero_ot: str) -> List[Devolucion]:
-    return db.scalars(
+def listar_devoluciones_por_ot(db: Session, numero_ot: Optional[str] = None) -> List[Devolucion]:
+    stmt = (
         select(Devolucion)
         .join(OtMaterial, OtMaterial.id == Devolucion.ot_material_id)
         .join(OtProceso, OtProceso.id == OtMaterial.ot_proceso_id)
         .join(OrdenTrabajo, OrdenTrabajo.id == OtProceso.ot_id)
-        .where(OrdenTrabajo.numero_ot == numero_ot)
         .order_by(Devolucion.id)
-    ).all()
+    )
+    if numero_ot is not None:
+        stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot)
+    return db.scalars(stmt).all()

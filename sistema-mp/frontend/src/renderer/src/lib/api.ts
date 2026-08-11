@@ -69,8 +69,9 @@ export function registrarEntrega(baseUrl: string, token: string, data: EntregaCr
   return request<Entrega>(baseUrl, '/entregas', { method: 'POST', token, body: data })
 }
 
-export function listarEntregas(baseUrl: string, token: string, numeroOt: string) {
-  return request<Entrega[]>(baseUrl, `/entregas?numero_ot=${encodeURIComponent(numeroOt)}`, { token })
+export function listarEntregas(baseUrl: string, token: string, numeroOt?: string) {
+  const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
+  return request<Entrega[]>(baseUrl, `/entregas${qs}`, { token })
 }
 
 export function registrarDevolucion(baseUrl: string, token: string, data: DevolucionCreate) {
@@ -81,8 +82,9 @@ export function listarDevoluciones(baseUrl: string, token: string, otMaterialId:
   return request<Devolucion[]>(baseUrl, `/devoluciones?ot_material_id=${otMaterialId}`, { token })
 }
 
-export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt: string) {
-  return request<Devolucion[]>(baseUrl, `/devoluciones?numero_ot=${encodeURIComponent(numeroOt)}`, { token })
+export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt?: string) {
+  const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
+  return request<Devolucion[]>(baseUrl, `/devoluciones${qs}`, { token })
 }
 
 export function listarOrdenes(baseUrl: string, token: string, q?: string) {
@@ -98,8 +100,9 @@ export function obtenerDetalleOt(baseUrl: string, token: string, numeroOt: strin
   return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/detalle`, { token })
 }
 
-export function consultarConsumo(baseUrl: string, token: string, numeroOt: string) {
-  return request<Consumo[]>(baseUrl, `/consumo?numero_ot=${encodeURIComponent(numeroOt)}`, { token })
+export function consultarConsumo(baseUrl: string, token: string, numeroOt?: string) {
+  const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
+  return request<Consumo[]>(baseUrl, `/consumo${qs}`, { token })
 }
 
 export function listarMaterialesAdmin(baseUrl: string, token: string, opts: { q?: string } = {}) {

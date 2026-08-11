@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
@@ -46,6 +46,6 @@ def registrar_entrega(
 
 
 @router.get("", response_model=List[schemas.EntregaOut])
-def listar_entregas(numero_ot: str, db: Session = Depends(get_db)):
+def listar_entregas(numero_ot: Optional[str] = None, db: Session = Depends(get_db)):
     entregas = entregas_controller.listar_entregas_por_ot(db, numero_ot)
     return [_serializar(e) for e in entregas]

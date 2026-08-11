@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -16,11 +16,14 @@ def _estado_entrega(cantidad_requerida: float | None, total_entregado: float) ->
     return "PENDIENTE"
 
 
-def consultar_consumo(db: Session, numero_ot: str) -> List[Dict[str, Any]]:
-    filas = db.execute(
-        text("SELECT * FROM vista_consumo WHERE numero_ot = :numero_ot ORDER BY ot_material_id"),
-        {"numero_ot": numero_ot},
-    ).mappings().all()
+def consultar_consumo(db: Session, numero_ot: Optional[str] = None) -> List[Dict[str, Any]]:
+    if numero_ot is not None:
+        filas = db.execute(
+            text("SELECT * FROM vista_consumo WHERE numero_ot = :numero_ot ORDER BY ot_material_id"),
+            {"numero_ot": numero_ot},
+        ).mappings().all()
+    else:
+        filas = db.execute(text("SELECT * FROM vista_consumo ORDER BY numero_ot, ot_material_id")).mappings().all()
 
     resultado = []
     for fila in filas:

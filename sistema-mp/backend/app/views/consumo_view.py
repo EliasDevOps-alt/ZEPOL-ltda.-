@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
@@ -13,6 +13,6 @@ router = APIRouter(prefix="/consumo", tags=["consumo"], dependencies=[Depends(se
 
 
 @router.get("", response_model=List[schemas.ConsumoOut])
-def consultar_consumo(numero_ot: str, db: Session = Depends(get_db)):
+def consultar_consumo(numero_ot: Optional[str] = None, db: Session = Depends(get_db)):
     filas = consumo_controller.consultar_consumo(db, numero_ot)
     return [schemas.ConsumoOut(**fila) for fila in filas]
