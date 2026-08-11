@@ -97,9 +97,9 @@ export function RegistrarDevolucion() {
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 flex items-center gap-3 rounded-md border border-primary/30 bg-primary/10 p-4"
+          className="mb-6 flex items-center gap-3 rounded-md border border-success/30 bg-success/10 p-4"
         >
-          <CheckCircle2 className="h-5 w-5 text-primary" />
+          <CheckCircle2 className="h-5 w-5 text-success" />
           <p className="text-sm">Devolución registrada — {confirmacion.total_devuelto} devueltos.</p>
         </motion.div>
       )}

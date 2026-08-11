@@ -53,10 +53,17 @@ export function Login() {
         transition={{ duration: 0.3 }}
         className="w-full max-w-sm"
       >
-        <Card>
+        <Card className="overflow-hidden">
+          <div
+            className="h-1.5 w-full"
+            style={{
+              background:
+                'linear-gradient(90deg, var(--color-accent-red), var(--color-accent-orange), var(--color-accent-gold), var(--color-primary), var(--color-accent-blue), var(--color-accent-magenta))'
+            }}
+          />
           <CardHeader>
-            <CardTitle>ZEPOL - Control de Materia Prima</CardTitle>
-            <CardDescription>Inicia sesión para continuar</CardDescription>
+            <CardTitle className="text-2xl text-primary">ZEPOL</CardTitle>
+            <CardDescription>Control de Materia Prima — Envases Flexibles</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">

@@ -9,6 +9,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/u
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
+import { cn } from '@renderer/lib/utils'
+import type { Consumo } from '@renderer/lib/types'
+
+const ESTILO_ESTADO_ENTREGA: Record<Consumo['estado_entrega'], string> = {
+  COMPLETO: 'bg-success/10 text-success',
+  PARCIAL: 'bg-warning/10 text-warning',
+  PENDIENTE: 'bg-muted text-muted-foreground',
+  'SIN REQUERIMIENTO': 'bg-muted text-muted-foreground'
+}
+
+function BadgeEstado({ estado }: { estado: Consumo['estado_entrega'] }) {
+  return (
+    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ESTILO_ESTADO_ENTREGA[estado])}>
+      {estado}
+    </span>
+  )
+}
 
 export function Consulta() {
   const { apiBaseUrl } = useConfig()
@@ -90,8 +107,10 @@ export function Consulta() {
                     <td className="p-3 text-right font-medium">
                       {row.consumo_neto} {row.unidad}
                     </td>
-                    <td className="p-3">{row.estado_entrega}</td>
-                    <td className="p-3">{row.estado_sid}</td>
+                    <td className="p-3">
+                      <BadgeEstado estado={row.estado_entrega} />
+                    </td>
+                    <td className="p-3 text-muted-foreground">{row.estado_sid}</td>
                   </tr>
                 ))}
               </tbody>

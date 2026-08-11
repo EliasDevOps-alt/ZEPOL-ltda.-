@@ -287,7 +287,7 @@ export function Materiales() {
                   </td>
                   <td className="p-3">
                     {m.activo ? (
-                      <span className="text-xs text-primary">Activo</span>
+                      <span className="text-xs text-success">Activo</span>
                     ) : (
                       <span className="text-xs text-muted-foreground">Inactivo</span>
                     )}
