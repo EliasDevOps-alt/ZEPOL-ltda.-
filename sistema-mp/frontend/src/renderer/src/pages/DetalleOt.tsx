@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -9,6 +9,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
+import { Combobox } from '@renderer/components/ui/combobox'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -54,6 +55,15 @@ function BloqueProcesoEditor({
     queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(bloque.procesoId)),
     enabled: !!bloque.procesoId
   })
+
+  const materialOptions = useMemo(
+    () =>
+      materiales.map((m) => ({
+        value: String(m.id),
+        label: m.codigo_mp + (m.descripcion ? ` — ${m.descripcion}` : '')
+      })),
+    [materiales]
+  )
 
   function actualizarMaterial(i: number, cambios: Partial<FilaMaterial>) {
     const materiales = bloque.materiales.map((m, idx) => (idx === i ? { ...m, ...cambios } : m))
@@ -129,18 +139,13 @@ function BloqueProcesoEditor({
             <div key={i} className="flex items-end gap-2">
               <div className="flex flex-1 flex-col gap-1.5">
                 {i === 0 && <Label className="text-xs">Código MP</Label>}
-                <Select value={fila.materialId} onValueChange={(v) => actualizarMaterial(i, { materialId: v })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {materiales.map((m) => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        {m.codigo_mp} {m.descripcion ? `— ${m.descripcion}` : ''}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Combobox
+                  value={fila.materialId}
+                  onChange={(v) => actualizarMaterial(i, { materialId: v })}
+                  options={materialOptions}
+                  placeholder="Buscar código MP..."
+                  emptyText="Sin materiales activos que coincidan"
+                />
               </div>
               <div className="flex w-36 flex-col gap-1.5">
                 {i === 0 && <Label className="text-xs">Cantidad requerida ({material?.unidad ?? ''})</Label>}
