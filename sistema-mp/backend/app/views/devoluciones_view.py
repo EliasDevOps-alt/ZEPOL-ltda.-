@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from typing import List
+
+from fastapi import APIRouter, Depends, status
+from sqlalchemy.orm import Session
+
+from .. import schemas, security
+from ..controllers import devoluciones_controller
+from ..controllers.pedidos_controller import total_devuelto_pedido
+from ..database import get_db
+from ..models import Devolucion, Usuario
+
+router = APIRouter(prefix="/devoluciones", tags=["devoluciones"], dependencies=[Depends(security.get_current_usuario)])
+
+
+def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
+    return schemas.DevolucionOut(
+        id=devolucion.id,
+        ot_material_id=devolucion.ot_material_id,
+        usuario=devolucion.usuario.inicial,
+        fecha=devolucion.fecha,
+        bobinas=[float(b.cantidad) for b in sorted(devolucion.bobinas, key=lambda b: b.numero)],
+        total_devuelto=sum(float(b.cantidad) for b in devolucion.bobinas),
+        total_devuelto_pedido=total_devuelto_pedido(devolucion.ot_material),
+    )
+
+
+@router.post("", response_model=schemas.DevolucionOut, status_code=status.HTTP_201_CREATED)
+def registrar_devolucion(
+    data: schemas.DevolucionCreate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    devolucion = devoluciones_controller.registrar_devolucion(db, usuario, data)
+    return _serializar(devolucion)
+
+
+@router.get("", response_model=List[schemas.DevolucionOut])
+def listar_devoluciones(ot_material_id: int, db: Session = Depends(get_db)):
+    devoluciones = devoluciones_controller.listar_devoluciones_por_pedido(db, ot_material_id)
+    return [_serializar(d) for d in devoluciones]
