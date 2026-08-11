@@ -23,8 +23,8 @@ def listar_maquinas(proceso_id: int, db: Session = Depends(get_db)):
 
 
 @router.get("/materiales", response_model=List[schemas.MaterialOut])
-def listar_materiales(proceso_id: int, db: Session = Depends(get_db)):
-    return catalogos_controller.listar_materiales_por_proceso(db, proceso_id)
+def listar_materiales(db: Session = Depends(get_db)):
+    return catalogos_controller.listar_materiales(db)
 
 
 @router.get("/estados-sid", response_model=List[schemas.EstadoSidOut])

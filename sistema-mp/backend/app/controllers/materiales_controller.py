@@ -8,25 +8,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import Material, MaterialProceso
+from ..models import Material
 
 
-def _set_procesos(db: Session, material_id: int, proceso_ids: List[int]) -> None:
-    db.query(MaterialProceso).filter(MaterialProceso.material_id == material_id).delete()
-    for proceso_id in proceso_ids:
-        db.add(MaterialProceso(material_id=material_id, proceso_id=proceso_id))
-
-
-def listar_materiales(db: Session, q: Optional[str], sin_proceso: bool) -> List[Material]:
+def listar_materiales(db: Session, q: Optional[str]) -> List[Material]:
     stmt = select(Material).order_by(Material.codigo_mp)
     if q:
         like = f"%{q.lower()}%"
         stmt = stmt.where(Material.codigo_mp.ilike(like) | Material.descripcion.ilike(like))
-    materiales = db.scalars(stmt).all()
-
-    if sin_proceso:
-        materiales = [m for m in materiales if not m.procesos]
-    return materiales
+    return db.scalars(stmt).all()
 
 
 def crear_material(db: Session, data: schemas.MaterialCreate) -> Material:
@@ -36,8 +26,6 @@ def crear_material(db: Session, data: schemas.MaterialCreate) -> Material:
 
     material = Material(codigo_mp=data.codigo_mp, descripcion=data.descripcion, unidad=data.unidad)
     db.add(material)
-    db.flush()
-    _set_procesos(db, material.id, data.procesos)
     db.commit()
     db.refresh(material)
     return material
@@ -51,7 +39,6 @@ def actualizar_material(db: Session, material_id: int, data: schemas.MaterialUpd
     material.descripcion = data.descripcion
     material.unidad = data.unidad
     material.activo = data.activo
-    _set_procesos(db, material.id, data.procesos)
     db.commit()
     db.refresh(material)
     return material

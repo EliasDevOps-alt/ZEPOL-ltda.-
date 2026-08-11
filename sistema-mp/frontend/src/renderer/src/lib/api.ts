@@ -10,6 +10,7 @@ import type {
   MaterialAdmin,
   MaterialCreate,
   MaterialUpdate,
+  OrdenTrabajo,
   Proceso,
   Usuario
 } from './types'
@@ -54,8 +55,8 @@ export function listarMaquinas(baseUrl: string, token: string, procesoId: number
   return request<Maquina[]>(baseUrl, `/catalogos/maquinas?proceso_id=${procesoId}`, { token })
 }
 
-export function listarMateriales(baseUrl: string, token: string, procesoId: number) {
-  return request<Material[]>(baseUrl, `/catalogos/materiales?proceso_id=${procesoId}`, { token })
+export function listarMateriales(baseUrl: string, token: string) {
+  return request<Material[]>(baseUrl, '/catalogos/materiales', { token })
 }
 
 export function listarEstadosSid(baseUrl: string, token: string) {
@@ -78,18 +79,22 @@ export function listarDevoluciones(baseUrl: string, token: string, otMaterialId:
   return request<Devolucion[]>(baseUrl, `/devoluciones?ot_material_id=${otMaterialId}`, { token })
 }
 
+export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt: string) {
+  return request<Devolucion[]>(baseUrl, `/devoluciones?numero_ot=${encodeURIComponent(numeroOt)}`, { token })
+}
+
+export function listarOrdenes(baseUrl: string, token: string, q?: string) {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : ''
+  return request<OrdenTrabajo[]>(baseUrl, `/ordenes-trabajo${qs}`, { token })
+}
+
 export function consultarConsumo(baseUrl: string, token: string, numeroOt: string) {
   return request<Consumo[]>(baseUrl, `/consumo?numero_ot=${encodeURIComponent(numeroOt)}`, { token })
 }
 
-export function listarMaterialesAdmin(
-  baseUrl: string,
-  token: string,
-  opts: { q?: string; sinProceso?: boolean } = {}
-) {
+export function listarMaterialesAdmin(baseUrl: string, token: string, opts: { q?: string } = {}) {
   const params = new URLSearchParams()
   if (opts.q) params.set('q', opts.q)
-  if (opts.sinProceso) params.set('sin_proceso', 'true')
   const qs = params.toString()
   return request<MaterialAdmin[]>(baseUrl, `/materiales${qs ? `?${qs}` : ''}`, { token })
 }

@@ -13,7 +13,6 @@ from ..models import (
     EstadoSid,
     Maquina,
     Material,
-    MaterialProceso,
     OrdenTrabajo,
     OtMaterial,
     OtProceso,
@@ -40,14 +39,6 @@ def _obtener_o_crear_pedido(
     material = db.get(Material, data.material_id)
     if material is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
-    permitido = db.scalar(
-        select(MaterialProceso).where(
-            MaterialProceso.material_id == data.material_id,
-            MaterialProceso.proceso_id == data.proceso_id,
-        )
-    )
-    if permitido is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"{material.codigo_mp} no está habilitado para este proceso")
 
     ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
     if ot is None:

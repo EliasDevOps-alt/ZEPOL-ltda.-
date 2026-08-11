@@ -20,13 +20,12 @@ def _serializar(material: Material) -> schemas.MaterialAdminOut:
         descripcion=material.descripcion,
         unidad=material.unidad,
         activo=material.activo,
-        procesos=[schemas.ProcesoOut.model_validate(p) for p in material.procesos],
     )
 
 
 @router.get("", response_model=List[schemas.MaterialAdminOut])
-def listar_materiales(q: Optional[str] = None, sin_proceso: bool = False, db: Session = Depends(get_db)):
-    materiales = materiales_controller.listar_materiales(db, q, sin_proceso)
+def listar_materiales(q: Optional[str] = None, db: Session = Depends(get_db)):
+    materiales = materiales_controller.listar_materiales(db, q)
     return [_serializar(m) for m in materiales]
 
 

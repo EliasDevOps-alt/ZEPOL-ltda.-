@@ -44,15 +44,6 @@ CREATE TABLE materiales (
     activo      BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
--- Qué materiales están permitidos en cada proceso (muchos a muchos).
--- No se infiere por prefijo del código: un proceso puede combinar resina base
--- + aditivos + masterbatch, así que la relación se declara explícitamente.
-CREATE TABLE material_procesos (
-    material_id  INTEGER NOT NULL REFERENCES materiales(id) ON DELETE CASCADE,
-    proceso_id   INTEGER NOT NULL REFERENCES procesos(id) ON DELETE CASCADE,
-    PRIMARY KEY (material_id, proceso_id)
-);
-
 -- ============================================================
 -- Órdenes de trabajo
 -- ============================================================
@@ -99,8 +90,9 @@ CREATE TABLE ot_materiales (
     -- el proceso_id debe coincidir con el del paso de OT elegido
     FOREIGN KEY (ot_proceso_id, proceso_id) REFERENCES ot_procesos(id, proceso_id),
 
-    -- el material pedido debe estar habilitado para ese proceso (material_procesos)
-    FOREIGN KEY (material_id, proceso_id) REFERENCES material_procesos(material_id, proceso_id),
+    -- cualquier material activo del catálogo puede pedirse en cualquier proceso
+    -- (confirmado por planta: ej. Extrusión admite cualquier materia prima,
+    -- no tiene sentido restringir por proceso)
 
     UNIQUE (ot_proceso_id, material_id)  -- un solo pedido por material dentro del mismo paso
 );

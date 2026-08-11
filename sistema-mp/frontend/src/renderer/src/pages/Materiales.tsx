@@ -10,7 +10,6 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import { cn } from '@renderer/lib/utils'
 import type { MaterialAdmin } from '@renderer/lib/types'
 
 interface FormState {
@@ -19,7 +18,6 @@ interface FormState {
   descripcion: string
   unidad: string
   activo: boolean
-  procesos: number[]
 }
 
 const FORM_VACIO: FormState = {
@@ -27,8 +25,7 @@ const FORM_VACIO: FormState = {
   codigo_mp: '',
   descripcion: '',
   unidad: 'kg',
-  activo: true,
-  procesos: []
+  activo: true
 }
 
 export function Materiales() {
@@ -39,18 +36,12 @@ export function Materiales() {
 
   const [q, setQ] = useState('')
   const [buscado, setBuscado] = useState('')
-  const [sinProceso, setSinProceso] = useState(false)
   const [form, setForm] = useState<FormState | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const procesos = useQuery({
-    queryKey: ['procesos'],
-    queryFn: () => api.listarProcesos(apiBaseUrl, token)
-  })
-
   const materiales = useQuery({
-    queryKey: ['materiales-admin', buscado, sinProceso],
-    queryFn: () => api.listarMaterialesAdmin(apiBaseUrl, token, { q: buscado, sinProceso })
+    queryKey: ['materiales-admin', buscado],
+    queryFn: () => api.listarMaterialesAdmin(apiBaseUrl, token, { q: buscado })
   })
 
   const guardar = useMutation({
@@ -59,15 +50,13 @@ export function Materiales() {
         return api.crearMaterial(apiBaseUrl, token, {
           codigo_mp: data.codigo_mp,
           descripcion: data.descripcion || null,
-          unidad: data.unidad,
-          procesos: data.procesos
+          unidad: data.unidad
         })
       }
       return api.actualizarMaterial(apiBaseUrl, token, data.id, {
         descripcion: data.descripcion || null,
         unidad: data.unidad,
-        activo: data.activo,
-        procesos: data.procesos
+        activo: data.activo
       })
     },
     onSuccess: () => {
@@ -100,18 +89,7 @@ export function Materiales() {
       codigo_mp: material.codigo_mp,
       descripcion: material.descripcion ?? '',
       unidad: material.unidad,
-      activo: material.activo,
-      procesos: material.procesos.map((p) => p.id)
-    })
-  }
-
-  function toggleProceso(procesoId: number) {
-    if (!form) return
-    setForm({
-      ...form,
-      procesos: form.procesos.includes(procesoId)
-        ? form.procesos.filter((id) => id !== procesoId)
-        : [...form.procesos, procesoId]
+      activo: material.activo
     })
   }
 
@@ -140,18 +118,6 @@ export function Materiales() {
           Nuevo material
         </Button>
       </div>
-
-      {procesos.isError && (
-        <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
-          <span>
-            No se pudieron cargar los procesos:{' '}
-            {procesos.error instanceof ApiError ? procesos.error.message : 'no se pudo conectar con el servidor'}
-          </span>
-          <Button type="button" variant="outline" size="sm" onClick={() => procesos.refetch()}>
-            Reintentar
-          </Button>
-        </div>
-      )}
 
       {form && (
         <Card className="mb-6 border-primary/40">
@@ -191,27 +157,6 @@ export function Materiales() {
                 />
               </div>
 
-              <div className="flex flex-col gap-1.5">
-                <Label>Procesos habilitados</Label>
-                <div className="flex flex-wrap gap-2">
-                  {procesos.data?.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => toggleProceso(p.id)}
-                      className={cn(
-                        'rounded-full border px-3 py-1 text-sm transition-colors',
-                        form.procesos.includes(p.id)
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-border hover:bg-muted'
-                      )}
-                    >
-                      {p.nombre}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
               {form.id !== null && (
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -249,14 +194,6 @@ export function Materiales() {
               <Search className="h-4 w-4" />
               Buscar
             </Button>
-            <label className="flex items-center gap-2 whitespace-nowrap pb-2 text-sm">
-              <input
-                type="checkbox"
-                checked={sinProceso}
-                onChange={(e) => setSinProceso(e.target.checked)}
-              />
-              Sin proceso asignado
-            </label>
           </form>
         </CardContent>
       </Card>
@@ -271,7 +208,6 @@ export function Materiales() {
                 <th className="p-3">Código</th>
                 <th className="p-3">Descripción</th>
                 <th className="p-3">Unidad</th>
-                <th className="p-3">Procesos</th>
                 <th className="p-3">Estado</th>
                 <th className="p-3"></th>
               </tr>
@@ -282,21 +218,6 @@ export function Materiales() {
                   <td className="p-3 font-medium">{m.codigo_mp}</td>
                   <td className="p-3 text-muted-foreground">{m.descripcion}</td>
                   <td className="p-3">{m.unidad}</td>
-                  <td className="p-3">
-                    <div className="flex flex-wrap gap-1">
-                      {m.procesos.length === 0 && (
-                        <span className="text-xs text-destructive">Sin asignar</span>
-                      )}
-                      {m.procesos.map((p) => (
-                        <span
-                          key={p.id}
-                          className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
-                        >
-                          {p.nombre}
-                        </span>
-                      ))}
-                    </div>
-                  </td>
                   <td className="p-3">
                     {m.activo ? (
                       <span className="text-xs text-success">Activo</span>

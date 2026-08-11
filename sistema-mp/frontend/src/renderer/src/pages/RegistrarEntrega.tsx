@@ -1,8 +1,9 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CheckCircle2 } from 'lucide-react'
+import { CheckCircle2, History } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -47,9 +48,8 @@ export function RegistrarEntrega() {
     enabled: !!procesoId
   })
   const materiales = useQuery({
-    queryKey: ['materiales', procesoId],
-    queryFn: () => api.listarMateriales(apiBaseUrl, token, Number(procesoId)),
-    enabled: !!procesoId
+    queryKey: ['materiales'],
+    queryFn: () => api.listarMateriales(apiBaseUrl, token)
   })
 
   const material = materiales.data?.find((m) => String(m.id) === materialId)
@@ -70,7 +70,9 @@ export function RegistrarEntrega() {
     onSuccess: (entrega) => {
       setConfirmacion(entrega)
       setError(null)
-      queryClient.invalidateQueries({ queryKey: ['entregas', numeroOt] })
+      queryClient.invalidateQueries({ queryKey: ['entregas', entrega.numero_ot] })
+      queryClient.invalidateQueries({ queryKey: ['consumo', entrega.numero_ot] })
+      queryClient.invalidateQueries({ queryKey: ['ordenes-trabajo'] })
       setNumeroOt('')
       setCliente('')
       setDiseno('')
@@ -93,7 +95,6 @@ export function RegistrarEntrega() {
   function handleProcesoChange(value: string) {
     setProcesoId(value)
     setMaquinaId('')
-    setMaterialId('')
   }
 
   function handleSubmit(e: FormEvent) {
@@ -113,15 +114,34 @@ export function RegistrarEntrega() {
 
   return (
     <div className="max-w-2xl">
-      <h1 className="mb-6 text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
+        <Link
+          to={numeroOt ? `/historial?ot=${encodeURIComponent(numeroOt)}` : '/historial'}
+          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+        >
+          <History className="h-4 w-4" />
+          Ver historial
+        </Link>
+      </div>
 
-      {procesos.isError && (
+      {(procesos.isError || materiales.isError) && (
         <div className="mb-6 flex items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           <span>
-            No se pudieron cargar los procesos:{' '}
-            {procesos.error instanceof ApiError ? procesos.error.message : 'no se pudo conectar con el servidor'}
+            No se pudo cargar {procesos.isError ? 'los procesos' : 'los materiales'}:{' '}
+            {(procesos.error ?? materiales.error) instanceof ApiError
+              ? (procesos.error ?? materiales.error)?.message
+              : 'no se pudo conectar con el servidor'}
           </span>
-          <Button type="button" variant="outline" size="sm" onClick={() => procesos.refetch()}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              procesos.refetch()
+              materiales.refetch()
+            }}
+          >
             Reintentar
           </Button>
         </div>
@@ -152,6 +172,9 @@ export function RegistrarEntrega() {
                 Acumulado del pedido: {confirmacion.total_entregado_pedido} {confirmacion.unidad}
               </p>
             )}
+            <Link to={`/historial?ot=${encodeURIComponent(confirmacion.numero_ot)}`} className="text-primary hover:underline">
+              Ver historial de esta OT →
+            </Link>
           </div>
         </motion.div>
       )}
@@ -218,9 +241,9 @@ export function RegistrarEntrega() {
 
             <div className="flex flex-col gap-1.5">
               <Label>Código MP</Label>
-              <Select value={materialId} onValueChange={setMaterialId} disabled={!procesoId}>
+              <Select value={materialId} onValueChange={setMaterialId}>
                 <SelectTrigger>
-                  <SelectValue placeholder={procesoId ? 'Selecciona' : 'Elige un proceso primero'} />
+                  <SelectValue placeholder="Selecciona" />
                 </SelectTrigger>
                 <SelectContent>
                   {materiales.data?.map((m) => (
@@ -228,11 +251,6 @@ export function RegistrarEntrega() {
                       {m.codigo_mp} {m.descripcion ? `— ${m.descripcion}` : ''}
                     </SelectItem>
                   ))}
-                  {procesoId && materiales.data?.length === 0 && (
-                    <p className="px-3 py-2 text-xs text-muted-foreground">
-                      Sin materiales habilitados para este proceso todavía.
-                    </p>
-                  )}
                 </SelectContent>
               </Select>
               {material && <p className="text-xs text-muted-foreground">Unidad: {material.unidad}</p>}

@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
-import { ClipboardList, PackageCheck, PackageX, Boxes, LogOut } from 'lucide-react'
+import { ClipboardList, PackageCheck, PackageX, Boxes, History, LogOut } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useAuth } from '@renderer/lib/AuthContext'
 
@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/entrega', label: 'Registrar Entrega', icon: PackageCheck },
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
+  { to: '/historial', label: 'Historial de OT', icon: History },
   { to: '/materiales', label: 'Materiales', icon: Boxes }
 ]
 

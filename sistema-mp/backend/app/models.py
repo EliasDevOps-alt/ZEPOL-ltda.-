@@ -76,26 +76,6 @@ class Material(Base):
     unidad: Mapped[str] = mapped_column(String(10))
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # de solo lectura: la asignación real se administra por fila en MaterialProceso
-    # (ver materiales_controller._set_procesos), no reasignando esta colección.
-    procesos: Mapped[List["Proceso"]] = relationship(
-        secondary="material_procesos", viewonly=True, order_by="Proceso.nombre"
-    )
-
-
-class MaterialProceso(Base):
-    """Qué materiales están permitidos en cada proceso (muchos a muchos).
-
-    No se infiere por prefijo del código: un proceso puede combinar resina
-    base + aditivos + masterbatch, así que la relación se declara a mano.
-    """
-
-    __tablename__ = "material_procesos"
-    __table_args__ = (UniqueConstraint("material_id", "proceso_id"),)
-
-    material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id", ondelete="CASCADE"), primary_key=True)
-    proceso_id: Mapped[int] = mapped_column(ForeignKey("procesos.id", ondelete="CASCADE"), primary_key=True)
-
 
 class OrdenTrabajo(Base):
     __tablename__ = "ordenes_trabajo"
@@ -141,9 +121,6 @@ class OtMaterial(Base):
     __tablename__ = "ot_materiales"
     __table_args__ = (
         ForeignKeyConstraint(["ot_proceso_id", "proceso_id"], ["ot_procesos.id", "ot_procesos.proceso_id"]),
-        ForeignKeyConstraint(
-            ["material_id", "proceso_id"], ["material_procesos.material_id", "material_procesos.proceso_id"]
-        ),
         UniqueConstraint("ot_proceso_id", "material_id"),
     )
 

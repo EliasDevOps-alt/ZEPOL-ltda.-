@@ -3,7 +3,15 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .views import auth_view, catalogos_view, consumo_view, devoluciones_view, entregas_view, materiales_view
+from .views import (
+    auth_view,
+    catalogos_view,
+    consumo_view,
+    devoluciones_view,
+    entregas_view,
+    materiales_view,
+    ordenes_view,
+)
 
 app = FastAPI(title="ZEPOL - Control de Materia Prima")
 
@@ -23,6 +31,7 @@ app.include_router(entregas_view.router)
 app.include_router(devoluciones_view.router)
 app.include_router(consumo_view.router)
 app.include_router(materiales_view.router)
+app.include_router(ordenes_view.router)
 
 
 @app.get("/health")

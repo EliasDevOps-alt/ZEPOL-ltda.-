@@ -27,27 +27,32 @@ export interface EstadoSid {
   nombre: string
 }
 
+export interface OrdenTrabajo {
+  id: number
+  numero_ot: string
+  cliente: string | null
+  diseno: string | null
+  fecha_creacion: string
+}
+
 export interface MaterialAdmin {
   id: number
   codigo_mp: string
   descripcion: string | null
   unidad: string
   activo: boolean
-  procesos: Proceso[]
 }
 
 export interface MaterialCreate {
   codigo_mp: string
   descripcion?: string | null
   unidad: string
-  procesos: number[]
 }
 
 export interface MaterialUpdate {
   descripcion?: string | null
   unidad: string
   activo: boolean
-  procesos: number[]
 }
 
 export interface EntregaCreate {

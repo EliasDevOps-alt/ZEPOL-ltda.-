@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -57,21 +57,27 @@ class MaterialAdminOut(BaseModel):
     descripcion: Optional[str]
     unidad: str
     activo: bool
-    procesos: List[ProcesoOut]
 
 
 class MaterialCreate(BaseModel):
     codigo_mp: str
     descripcion: Optional[str] = None
     unidad: str
-    procesos: List[int] = []
 
 
 class MaterialUpdate(BaseModel):
     descripcion: Optional[str] = None
     unidad: str
     activo: bool = True
-    procesos: List[int] = []
+
+
+class OrdenTrabajoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: int
+    numero_ot: str
+    cliente: Optional[str]
+    diseno: Optional[str]
+    fecha_creacion: datetime
 
 
 class EntregaCreate(BaseModel):

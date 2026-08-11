@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import Devolucion, DevolucionBobina, OtMaterial, Usuario
+from ..models import Devolucion, DevolucionBobina, OrdenTrabajo, OtMaterial, OtProceso, Usuario
 from .pedidos_controller import total_devuelto_pedido, total_entregado_pedido
 
 
@@ -37,4 +37,15 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
 def listar_devoluciones_por_pedido(db: Session, ot_material_id: int) -> List[Devolucion]:
     return db.scalars(
         select(Devolucion).where(Devolucion.ot_material_id == ot_material_id).order_by(Devolucion.id)
+    ).all()
+
+
+def listar_devoluciones_por_ot(db: Session, numero_ot: str) -> List[Devolucion]:
+    return db.scalars(
+        select(Devolucion)
+        .join(OtMaterial, OtMaterial.id == Devolucion.ot_material_id)
+        .join(OtProceso, OtProceso.id == OtMaterial.ot_proceso_id)
+        .join(OrdenTrabajo, OrdenTrabajo.id == OtProceso.ot_id)
+        .where(OrdenTrabajo.numero_ot == numero_ot)
+        .order_by(Devolucion.id)
     ).all()
