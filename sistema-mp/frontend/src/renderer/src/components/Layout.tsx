@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   ChevronDown,
   ClipboardList,
+  Cog,
   FileEdit,
   PackageCheck,
   PackageX,
@@ -33,7 +34,8 @@ const NAV_ITEMS: NavItem[] = [
   },
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
-  { to: '/materiales', label: 'Materiales', icon: Boxes }
+  { to: '/materiales', label: 'Materiales', icon: Boxes },
+  { to: '/maquinas', label: 'Máquinas', icon: Cog }
 ]
 
 function navLinkClasses(isActive: boolean, indent = false): string {

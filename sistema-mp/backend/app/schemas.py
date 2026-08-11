@@ -51,6 +51,25 @@ class EstadoSidOut(BaseModel):
     nombre: str
 
 
+class MaquinaAdminOut(BaseModel):
+    id: int
+    nombre: str
+    proceso_id: int
+    proceso: str
+    activo: bool
+
+
+class MaquinaCreate(BaseModel):
+    nombre: str
+    proceso_id: int
+
+
+class MaquinaUpdate(BaseModel):
+    nombre: str
+    proceso_id: int
+    activo: bool = True
+
+
 class MaterialAdminOut(BaseModel):
     id: int
     codigo_mp: str

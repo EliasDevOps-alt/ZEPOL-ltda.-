@@ -6,6 +6,9 @@ import type {
   EntregaCreate,
   EstadoSid,
   Maquina,
+  MaquinaAdmin,
+  MaquinaCreate,
+  MaquinaUpdate,
   Material,
   MaterialAdmin,
   MaterialCreate,
@@ -122,4 +125,23 @@ export function actualizarMaterial(baseUrl: string, token: string, id: number, d
 
 export function eliminarMaterial(baseUrl: string, token: string, id: number) {
   return request<void>(baseUrl, `/materiales/${id}`, { method: 'DELETE', token })
+}
+
+export function listarMaquinasAdmin(baseUrl: string, token: string, opts: { q?: string } = {}) {
+  const params = new URLSearchParams()
+  if (opts.q) params.set('q', opts.q)
+  const qs = params.toString()
+  return request<MaquinaAdmin[]>(baseUrl, `/maquinas${qs ? `?${qs}` : ''}`, { token })
+}
+
+export function crearMaquina(baseUrl: string, token: string, data: MaquinaCreate) {
+  return request<MaquinaAdmin>(baseUrl, '/maquinas', { method: 'POST', token, body: data })
+}
+
+export function actualizarMaquina(baseUrl: string, token: string, id: number, data: MaquinaUpdate) {
+  return request<MaquinaAdmin>(baseUrl, `/maquinas/${id}`, { method: 'PUT', token, body: data })
+}
+
+export function eliminarMaquina(baseUrl: string, token: string, id: number) {
+  return request<void>(baseUrl, `/maquinas/${id}`, { method: 'DELETE', token })
 }

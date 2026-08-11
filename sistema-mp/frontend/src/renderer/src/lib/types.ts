@@ -79,6 +79,25 @@ export interface OtDetalleOut {
   procesos: ProcesoDetalleOut[]
 }
 
+export interface MaquinaAdmin {
+  id: number
+  nombre: string
+  proceso_id: number
+  proceso: string
+  activo: boolean
+}
+
+export interface MaquinaCreate {
+  nombre: string
+  proceso_id: number
+}
+
+export interface MaquinaUpdate {
+  nombre: string
+  proceso_id: number
+  activo: boolean
+}
+
 export interface MaterialAdmin {
   id: number
   codigo_mp: string

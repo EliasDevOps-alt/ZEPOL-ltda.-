@@ -7,6 +7,7 @@ import { RegistrarEntrega } from './pages/RegistrarEntrega'
 import { RegistrarDevolucion } from './pages/RegistrarDevolucion'
 import { Consulta } from './pages/Consulta'
 import { Materiales } from './pages/Materiales'
+import { Maquinas } from './pages/Maquinas'
 import { Historial } from './pages/Historial'
 import { DetalleOt } from './pages/DetalleOt'
 
@@ -35,6 +36,7 @@ export default function App() {
         <Route path="devolucion" element={<RegistrarDevolucion />} />
         <Route path="consulta" element={<Consulta />} />
         <Route path="materiales" element={<Materiales />} />
+        <Route path="maquinas" element={<Maquinas />} />
         <Route path="entrega/historial" element={<Historial />} />
         <Route path="crear-ot" element={<DetalleOt />} />
       </Route>
