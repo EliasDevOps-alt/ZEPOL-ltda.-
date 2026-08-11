@@ -36,7 +36,7 @@ export default function App() {
         <Route path="consulta" element={<Consulta />} />
         <Route path="materiales" element={<Materiales />} />
         <Route path="entrega/historial" element={<Historial />} />
-        <Route path="entrega/detalle" element={<DetalleOt />} />
+        <Route path="crear-ot" element={<DetalleOt />} />
       </Route>
     </Routes>
   )

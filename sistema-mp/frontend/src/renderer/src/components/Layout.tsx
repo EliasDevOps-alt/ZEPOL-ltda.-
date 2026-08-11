@@ -14,14 +14,12 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
+  { to: '/crear-ot', label: 'Crear OT', icon: FileEdit },
   {
     to: '/entrega',
     label: 'Registrar Entrega',
     icon: PackageCheck,
-    children: [
-      { to: '/entrega/detalle', label: 'Detalle de OT', icon: FileEdit },
-      { to: '/entrega/historial', label: 'Historial de OT', icon: History }
-    ]
+    children: [{ to: '/entrega/historial', label: 'Historial de OT', icon: History }]
   },
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },

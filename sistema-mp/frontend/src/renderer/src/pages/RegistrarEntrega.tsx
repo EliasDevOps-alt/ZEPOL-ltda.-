@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CheckCircle2, History, PackagePlus, Search } from 'lucide-react'
+import { CheckCircle2, PackagePlus, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -19,6 +19,11 @@ function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
+interface BobinasPedido {
+  cantidadBobinas: string
+  bobinas: string[]
+}
+
 export function RegistrarEntrega() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -27,12 +32,10 @@ export function RegistrarEntrega() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
-  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Consumo | null>(null)
+  const [seleccion, setSeleccion] = useState<Record<number, BobinasPedido>>({})
   const [fecha, setFecha] = useState(hoyISO())
-  const [cantidadBobinas, setCantidadBobinas] = useState('')
-  const [bobinas, setBobinas] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [confirmacion, setConfirmacion] = useState<Entrega | null>(null)
+  const [confirmaciones, setConfirmaciones] = useState<Entrega[]>([])
 
   const pedidos = useQuery({
     queryKey: ['consumo', otBuscada],
@@ -41,91 +44,127 @@ export function RegistrarEntrega() {
   })
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.registrarEntrega(apiBaseUrl, token, {
-        ot_material_id: pedidoSeleccionado!.ot_material_id,
-        fecha,
-        bobinas: bobinas.map(Number)
-      }),
-    onSuccess: (entrega) => {
-      setConfirmacion(entrega)
-      setError(null)
+    mutationFn: async () => {
+      const exitos: Entrega[] = []
+      const fallidos: { codigoMp: string; mensaje: string }[] = []
+      for (const [otMaterialId, datos] of Object.entries(seleccion)) {
+        try {
+          const entrega = await api.registrarEntrega(apiBaseUrl, token, {
+            ot_material_id: Number(otMaterialId),
+            fecha,
+            bobinas: datos.bobinas.map(Number)
+          })
+          exitos.push(entrega)
+        } catch (err) {
+          const pedido = pedidos.data?.find((p) => p.ot_material_id === Number(otMaterialId))
+          fallidos.push({
+            codigoMp: pedido?.codigo_mp ?? `#${otMaterialId}`,
+            mensaje: err instanceof ApiError ? err.message : 'error de conexión'
+          })
+        }
+      }
+      return { exitos, fallidos }
+    },
+    onSuccess: ({ exitos, fallidos }) => {
+      setConfirmaciones(exitos)
+      setError(
+        fallidos.length > 0
+          ? `No se pudieron registrar: ${fallidos.map((f) => `${f.codigoMp} (${f.mensaje})`).join(', ')}`
+          : null
+      )
+      setSeleccion((prev) => {
+        const restante = { ...prev }
+        for (const e of exitos) delete restante[e.ot_material_id]
+        return restante
+      })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
       queryClient.invalidateQueries({ queryKey: ['entregas', otBuscada] })
-      setCantidadBobinas('')
-      setBobinas([])
-      setPedidoSeleccionado(null)
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Error al registrar la entrega')
+    onError: () => setError('Error al registrar las entregas')
   })
 
   function buscar(e: FormEvent) {
     e.preventDefault()
-    setConfirmacion(null)
-    setPedidoSeleccionado(null)
+    setConfirmaciones([])
+    setSeleccion({})
     setOtBuscada(numeroOt)
   }
 
-  function generarBobinas() {
-    const n = Number(cantidadBobinas)
-    if (!n || n < 1) return
-    setBobinas(Array.from({ length: n }, (_, i) => bobinas[i] ?? ''))
+  function toggleSeleccion(pedido: Consumo) {
+    setConfirmaciones([])
+    setSeleccion((prev) => {
+      const copia = { ...prev }
+      if (copia[pedido.ot_material_id]) {
+        delete copia[pedido.ot_material_id]
+      } else {
+        copia[pedido.ot_material_id] = { cantidadBobinas: '', bobinas: [] }
+      }
+      return copia
+    })
   }
 
-  const totalEntregado = bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+  function generarBobinas(otMaterialId: number) {
+    const datos = seleccion[otMaterialId]
+    const n = Number(datos.cantidadBobinas)
+    if (!n || n < 1) return
+    setSeleccion((prev) => ({
+      ...prev,
+      [otMaterialId]: { ...datos, bobinas: Array.from({ length: n }, (_, i) => datos.bobinas[i] ?? '') }
+    }))
+  }
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!pedidoSeleccionado || bobinas.length === 0) {
-      setError('Selecciona el material y al menos una bobina')
+    const pedidosSeleccionados = Object.entries(seleccion)
+    if (pedidosSeleccionados.length === 0) {
+      setError('Selecciona al menos un material')
       return
     }
-    if (bobinas.some((b) => !b || Number(b) <= 0)) {
-      setError('Todas las bobinas necesitan un peso mayor a 0')
-      return
+    for (const [, datos] of pedidosSeleccionados) {
+      if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+        setError('Cada material seleccionado necesita al menos una bobina con peso mayor a 0')
+        return
+      }
     }
     setError(null)
     mutation.mutate()
   }
 
+  const hayPedidosSeleccionados = Object.keys(seleccion).length > 0
+
   return (
     <div className="max-w-2xl">
-      <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
-        <Link
-          to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
-          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
-        >
-          <History className="h-4 w-4" />
-          Ver historial
-        </Link>
-      </div>
+      <h1 className="mb-6 text-2xl font-semibold">Registrar Entrega de Materia Prima</h1>
 
-      {confirmacion && (
+      {confirmaciones.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 flex items-center gap-3 rounded-md border border-success/30 bg-success/10 p-4"
+          className="mb-6 flex flex-col gap-2 rounded-md border border-success/30 bg-success/10 p-4"
         >
-          <CheckCircle2 className="h-5 w-5 text-success" />
-          <div className="text-sm">
-            <p>
-              Entrega registrada — {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}.
-            </p>
-            {confirmacion.cantidad_requerida ? (
-              <p className="text-muted-foreground">
-                Van {confirmacion.total_entregado_pedido} de {confirmacion.cantidad_requerida}{' '}
-                {confirmacion.unidad} requeridos para este pedido
-                {confirmacion.total_entregado_pedido >= confirmacion.cantidad_requerida
-                  ? ' — pedido completo.'
-                  : ` — faltan ${(confirmacion.cantidad_requerida - confirmacion.total_entregado_pedido).toFixed(2)} ${confirmacion.unidad}.`}
-              </p>
-            ) : (
-              <p className="text-muted-foreground">
-                Acumulado del pedido: {confirmacion.total_entregado_pedido} {confirmacion.unidad}
-              </p>
-            )}
-          </div>
+          {confirmaciones.map((confirmacion) => (
+            <div key={confirmacion.id} className="flex items-start gap-3 text-sm">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+              <div>
+                <p>
+                  {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}.
+                </p>
+                {confirmacion.cantidad_requerida ? (
+                  <p className="text-muted-foreground">
+                    Van {confirmacion.total_entregado_pedido} de {confirmacion.cantidad_requerida}{' '}
+                    {confirmacion.unidad} requeridos
+                    {confirmacion.total_entregado_pedido >= confirmacion.cantidad_requerida
+                      ? ' — pedido completo.'
+                      : ` — faltan ${(confirmacion.cantidad_requerida - confirmacion.total_entregado_pedido).toFixed(2)} ${confirmacion.unidad}.`}
+                  </p>
+                ) : (
+                  <p className="text-muted-foreground">
+                    Acumulado del pedido: {confirmacion.total_entregado_pedido} {confirmacion.unidad}
+                  </p>
+                )}
+              </div>
+            </div>
+          ))}
         </motion.div>
       )}
 
@@ -150,8 +189,8 @@ export function RegistrarEntrega() {
               <PackagePlus className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
               <p>
                 Esta OT no tiene materiales pedidos todavía.{' '}
-                <Link to="/entrega/detalle" className="text-primary hover:underline">
-                  Ve a Detalle de OT
+                <Link to="/crear-ot" className="text-primary hover:underline">
+                  Ve a Crear OT
                 </Link>{' '}
                 para definir sus procesos y materiales antes de registrar una entrega.
               </p>
@@ -161,19 +200,16 @@ export function RegistrarEntrega() {
           {pedidos.data && pedidos.data.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">
-                Materiales pedidos en esta OT — elige a cuál corresponde la entrega:
+                Materiales pedidos en esta OT — marca todos a los que corresponda la entrega:
               </p>
               {pedidos.data.map((pedido) => (
                 <button
                   key={pedido.ot_material_id}
                   type="button"
-                  onClick={() => {
-                    setPedidoSeleccionado(pedido)
-                    setConfirmacion(null)
-                  }}
+                  onClick={() => toggleSeleccion(pedido)}
                   className={cn(
                     'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
-                    pedidoSeleccionado?.ot_material_id === pedido.ot_material_id
+                    seleccion[pedido.ot_material_id]
                       ? 'border-primary bg-primary/10'
                       : 'border-border hover:bg-muted'
                   )}
@@ -194,10 +230,10 @@ export function RegistrarEntrega() {
         </CardContent>
       </Card>
 
-      {pedidoSeleccionado && (
+      {hayPedidosSeleccionados && (
         <Card>
           <CardHeader>
-            <CardTitle>Bobinas entregadas de {pedidoSeleccionado.codigo_mp}</CardTitle>
+            <CardTitle>Bobinas entregadas</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -206,53 +242,81 @@ export function RegistrarEntrega() {
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
 
-              <div className="rounded-md border border-border p-4">
-                <div className="flex items-end gap-2">
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Label>Cantidad de bobinas</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      value={cantidadBobinas}
-                      onChange={(e) => setCantidadBobinas(e.target.value)}
-                    />
-                  </div>
-                  <Button type="button" variant="outline" onClick={generarBobinas}>
-                    Generar
-                  </Button>
-                </div>
-
-                {bobinas.length > 0 && (
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {bobinas.map((valor, i) => (
-                      <div key={i} className="flex flex-col gap-1">
-                        <Label className="text-xs">N.º {i + 1}</Label>
-                        <Input
-                          type="number"
-                          step="0.01"
-                          value={valor}
-                          onChange={(e) => {
-                            const copia = [...bobinas]
-                            copia[i] = e.target.value
-                            setBobinas(copia)
-                          }}
-                        />
+              {pedidos.data
+                ?.filter((p) => seleccion[p.ot_material_id])
+                .map((pedido) => {
+                  const datos = seleccion[pedido.ot_material_id]
+                  const total = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+                  return (
+                    <div key={pedido.ot_material_id} className="rounded-md border border-border p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-medium">{pedido.codigo_mp}</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleSeleccion(pedido)}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                )}
+                      <div className="flex items-end gap-2">
+                        <div className="flex flex-1 flex-col gap-1.5">
+                          <Label>Cantidad de bobinas</Label>
+                          <Input
+                            type="number"
+                            min={1}
+                            value={datos.cantidadBobinas}
+                            onChange={(e) =>
+                              setSeleccion((prev) => ({
+                                ...prev,
+                                [pedido.ot_material_id]: { ...datos, cantidadBobinas: e.target.value }
+                              }))
+                            }
+                          />
+                        </div>
+                        <Button type="button" variant="outline" onClick={() => generarBobinas(pedido.ot_material_id)}>
+                          Generar
+                        </Button>
+                      </div>
 
-                {bobinas.length > 0 && (
-                  <p className="mt-3 text-sm font-medium">
-                    Total entregado: {totalEntregado.toFixed(2)} {pedidoSeleccionado.unidad}
-                  </p>
-                )}
-              </div>
+                      {datos.bobinas.length > 0 && (
+                        <div className="mt-4 grid grid-cols-3 gap-3">
+                          {datos.bobinas.map((valor, i) => (
+                            <div key={i} className="flex flex-col gap-1">
+                              <Label className="text-xs">N.º {i + 1}</Label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={valor}
+                                onChange={(e) => {
+                                  const copia = [...datos.bobinas]
+                                  copia[i] = e.target.value
+                                  setSeleccion((prev) => ({
+                                    ...prev,
+                                    [pedido.ot_material_id]: { ...datos, bobinas: copia }
+                                  }))
+                                }}
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {datos.bobinas.length > 0 && (
+                        <p className="mt-3 text-sm font-medium">
+                          Total: {total.toFixed(2)} {pedido.unidad}
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
               <Button type="submit" disabled={mutation.isPending}>
-                {mutation.isPending ? 'Guardando...' : 'Guardar entrega'}
+                {mutation.isPending
+                  ? 'Guardando...'
+                  : `Guardar ${Object.keys(seleccion).length > 1 ? `${Object.keys(seleccion).length} entregas` : 'entrega'}`}
               </Button>
             </form>
           </CardContent>
