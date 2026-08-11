@@ -150,6 +150,14 @@ export function Historial() {
                       {otActual?.cliente ?? '—'} {otActual?.diseno ? `· ${otActual.diseno}` : ''}
                     </p>
                   </div>
+                  {consumo.data && consumo.data.length > 0 && (
+                    <p className="text-sm text-muted-foreground">
+                      {new Set(consumo.data.map((p) => p.codigo_mp)).size}{' '}
+                      {new Set(consumo.data.map((p) => p.codigo_mp)).size === 1 ? 'material' : 'materiales'} ·{' '}
+                      {new Set(consumo.data.map((p) => p.proceso)).size}{' '}
+                      {new Set(consumo.data.map((p) => p.proceso)).size === 1 ? 'proceso' : 'procesos'}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -218,13 +226,17 @@ export function Historial() {
                             {susEntregas.map((e) => (
                               <div key={e.id} className="rounded-md border border-border p-2 text-xs">
                                 <div className="flex justify-between">
-                                  <span>{e.fecha}</span>
+                                  <span>
+                                    {e.fecha} · {e.codigo_mp}
+                                  </span>
                                   <span className="font-medium">
                                     {e.total_entregado} {e.unidad}
                                   </span>
                                 </div>
-                                <p className="text-muted-foreground">
-                                  {e.usuario} · bobinas: {e.bobinas.join(', ')}
+                                <p className="text-muted-foreground">{e.usuario}</p>
+                                <p className="mt-1 text-muted-foreground">
+                                  {e.bobinas.length} {e.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+                                  {e.bobinas.map((b) => `${b} ${e.unidad}`).join(', ')}
                                 </p>
                               </div>
                             ))}
@@ -243,13 +255,17 @@ export function Historial() {
                             {susDevoluciones.map((d) => (
                               <div key={d.id} className="rounded-md border border-border p-2 text-xs">
                                 <div className="flex justify-between">
-                                  <span>{d.fecha}</span>
+                                  <span>
+                                    {d.fecha} · {pedido.codigo_mp}
+                                  </span>
                                   <span className="font-medium">
                                     {d.total_devuelto} {pedido.unidad}
                                   </span>
                                 </div>
-                                <p className="text-muted-foreground">
-                                  {d.usuario} · bobinas: {d.bobinas.join(', ')}
+                                <p className="text-muted-foreground">{d.usuario}</p>
+                                <p className="mt-1 text-muted-foreground">
+                                  {d.bobinas.length} {d.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+                                  {d.bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
                                 </p>
                               </div>
                             ))}
