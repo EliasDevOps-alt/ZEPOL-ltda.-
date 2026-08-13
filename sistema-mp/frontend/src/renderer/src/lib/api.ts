@@ -1,4 +1,5 @@
 import type {
+  ConfiguracionExcel,
   Consumo,
   Devolucion,
   DevolucionCreate,
@@ -14,9 +15,14 @@ import type {
   MaterialCreate,
   MaterialUpdate,
   OrdenTrabajo,
+  OtBusqueda,
   OtDetalleCreate,
   OtDetalleOut,
+  OtImportada,
+  OtMaterialPendiente,
   Proceso,
+  PromoverPendienteIn,
+  PromoverPendienteOut,
   Usuario
 } from './types'
 
@@ -103,6 +109,31 @@ export function obtenerDetalleOt(baseUrl: string, token: string, numeroOt: strin
   return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/detalle`, { token })
 }
 
+export function buscarOtConFallback(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtBusqueda>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/buscar`, { token })
+}
+
+export function importarOtDesdeExcel(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtImportada>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/importar-excel`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function listarPendientes(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtMaterialPendiente[]>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/pendientes`, {
+    token
+  })
+}
+
+export function promoverPendiente(baseUrl: string, token: string, pendienteId: number, data: PromoverPendienteIn) {
+  return request<PromoverPendienteOut>(baseUrl, `/ot-materiales-pendientes/${pendienteId}/promover`, {
+    method: 'POST',
+    token,
+    body: data
+  })
+}
+
 export function consultarConsumo(baseUrl: string, token: string, numeroOt?: string) {
   const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
   return request<Consumo[]>(baseUrl, `/consumo${qs}`, { token })
@@ -144,4 +175,12 @@ export function actualizarMaquina(baseUrl: string, token: string, id: number, da
 
 export function eliminarMaquina(baseUrl: string, token: string, id: number) {
   return request<void>(baseUrl, `/maquinas/${id}`, { method: 'DELETE', token })
+}
+
+export function obtenerConfigExcel(baseUrl: string, token: string) {
+  return request<ConfiguracionExcel>(baseUrl, '/configuracion/excel-oc-mp', { token })
+}
+
+export function actualizarConfigExcel(baseUrl: string, token: string, ruta: string) {
+  return request<ConfiguracionExcel>(baseUrl, '/configuracion/excel-oc-mp', { method: 'PUT', token, body: { ruta } })
 }

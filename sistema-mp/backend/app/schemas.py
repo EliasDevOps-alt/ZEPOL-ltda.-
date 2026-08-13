@@ -100,6 +100,34 @@ class OrdenTrabajoOut(BaseModel):
     fecha_creacion: datetime
 
 
+class CamposComercialesOt(BaseModel):
+    """Columnas comerciales espejo 1:1 de la hoja 'oc mp' del Excel OC-MP
+    (ver app/services/excel_oc_mp.py) — compartidas entre lo que se lee del
+    Excel y lo que se guarda/edita en la base de datos vía 'Crear OT'."""
+
+    fecha_seguimiento_mp: Optional[date] = None
+    alm: Optional[str] = None
+    so: Optional[str] = None
+    tipo_trabajo: Optional[str] = None
+    indicador: Optional[str] = None
+    status_entrega_mp: Optional[str] = None
+    vendedor: Optional[str] = None
+    ciudad: Optional[str] = None
+    fecha_pedido: Optional[date] = None
+    fecha_entrega: Optional[date] = None
+    descripcion_producto: Optional[str] = None
+    codigo_producto: Optional[str] = None
+    total_ot: Optional[float] = None
+    entrega_mes: Optional[float] = None
+    medida: Optional[str] = None
+    equivalencia_kg: Optional[float] = None
+    pu_usd: Optional[float] = None
+    pt_usd: Optional[float] = None
+    factura_clises: Optional[str] = None
+    precio_clise_usd: Optional[float] = None
+    precio_total_pedido_usd: Optional[float] = None
+
+
 class MaterialPedidoIn(BaseModel):
     material_id: int
     cantidad_requerida: Optional[float] = None
@@ -111,16 +139,24 @@ class ProcesoDetalleIn(BaseModel):
     materiales: List[MaterialPedidoIn] = Field(min_length=1)
 
 
-class OtDetalleCreate(BaseModel):
-    """Define (o amplía) la estructura completa de una OT: uno o varios
-    procesos (cada uno con su máquina) y los materiales que cada uno pide
-    con su cantidad requerida. Cliente y diseño son únicos para toda la OT.
-    No registra ninguna entrega todavía."""
+class OtMaterialPendienteOut(BaseModel):
+    id: int
+    codigo_mp: str
+    material_id: Optional[int]
+    cantidad_requerida: Optional[float]
+
+
+class OtDetalleCreate(CamposComercialesOt):
+    """Define (o amplía) una OT: cliente, diseño y datos comerciales (únicos
+    para toda la OT) y los materiales que necesita con su cantidad. No se
+    asigna proceso ni máquina aquí —eso se decide en Registrar Entrega, al
+    momento de entregar cada material— así que los materiales quedan como
+    'pendientes' hasta ese momento. No registra ninguna entrega todavía."""
 
     numero_ot: str
     cliente: Optional[str] = None
     diseno: Optional[str] = None
-    procesos: List[ProcesoDetalleIn] = Field(min_length=1)
+    materiales: List[MaterialPedidoIn] = []
 
 
 class MaterialPedidoOut(BaseModel):
@@ -142,11 +178,63 @@ class ProcesoDetalleOut(BaseModel):
     materiales: List[MaterialPedidoOut]
 
 
-class OtDetalleOut(BaseModel):
+class OtDetalleOut(CamposComercialesOt):
     numero_ot: str
     cliente: Optional[str]
     diseno: Optional[str]
     procesos: List[ProcesoDetalleOut]
+    pendientes: List[OtMaterialPendienteOut] = []
+
+
+class MaterialExcelOut(BaseModel):
+    codigo_mp: str
+    cantidad_requerida: Optional[float] = None
+
+
+class OtExcelOut(CamposComercialesOt):
+    """Datos de una OT tal como están en la hoja 'oc mp' del Excel, cuando
+    todavía no existe en la base de datos."""
+
+    numero_ot: str
+    cliente: Optional[str] = None
+    materiales: List[MaterialExcelOut] = []
+    total: Optional[float] = None
+
+
+class ConfiguracionExcelOut(BaseModel):
+    ruta: Optional[str] = None
+
+
+class ConfiguracionExcelIn(BaseModel):
+    ruta: str
+
+
+class OtBusquedaOut(BaseModel):
+    """Resultado de buscar una OT en base de datos y, si no está ahí, en el
+    Excel OC-MP — el frontend usa 'origen' para mostrar de dónde salió."""
+
+    origen: str  # "bd" | "excel" | "no_encontrada"
+    bd: Optional[OtDetalleOut] = None
+    excel: Optional[OtExcelOut] = None
+
+
+class OtImportadaOut(BaseModel):
+    """Resultado de importar una OT desde el Excel OC-MP: la OT ya creada
+    (con sus campos comerciales) y los materiales que quedaron pendientes de
+    que se les asigne proceso y máquina en Registrar Entrega."""
+
+    ot: OtDetalleOut
+    pendientes: List[OtMaterialPendienteOut]
+
+
+class PromoverPendienteIn(BaseModel):
+    proceso_id: int
+    maquina_id: int
+    material_id: Optional[int] = None  # solo si el código de Excel no calzó con ningún material del catálogo
+
+
+class PromoverPendienteOut(BaseModel):
+    ot_material_id: int
 
 
 class EntregaCreate(BaseModel):

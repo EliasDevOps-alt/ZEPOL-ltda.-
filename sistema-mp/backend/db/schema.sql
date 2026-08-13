@@ -44,19 +44,54 @@ CREATE TABLE materiales (
     activo      BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
+-- Ajustes editables desde la app (no desde .env), como la ruta del Excel
+-- "OC-MP" que el jefe de área puede mover de carpeta por accidente.
+CREATE TABLE configuracion (
+    clave   VARCHAR(50) PRIMARY KEY,
+    valor   TEXT
+);
+
 -- ============================================================
 -- Órdenes de trabajo
 -- ============================================================
 
 -- El cliente y el diseño son únicos por OT (una OT es un solo pedido de un
 -- solo cliente para un solo diseño, aunque pase por varios procesos).
+--
+-- Las columnas desde fecha_seguimiento_mp hasta precio_total_pedido_usd son
+-- el equivalente 1:1 de las columnas comerciales de la hoja "oc mp" del
+-- Excel OC-MP (ver app/services/excel_oc_mp.py) — viven a nivel de OT
+-- completa, igual que cliente/diseño, porque son datos de la orden entera,
+-- no de un proceso en particular.
 CREATE TABLE ordenes_trabajo (
-    id              SERIAL PRIMARY KEY,
-    numero_ot       VARCHAR(30) NOT NULL UNIQUE,
-    cliente         VARCHAR(150),
-    diseno          VARCHAR(150),
-    fecha_creacion  TIMESTAMP   NOT NULL DEFAULT now(),
-    activo          BOOLEAN     NOT NULL DEFAULT TRUE
+    id                          SERIAL PRIMARY KEY,
+    numero_ot                   VARCHAR(30) NOT NULL UNIQUE,
+    cliente                     VARCHAR(150),
+    diseno                      VARCHAR(150),
+    fecha_creacion              TIMESTAMP   NOT NULL DEFAULT now(),
+    activo                      BOOLEAN     NOT NULL DEFAULT TRUE,
+
+    fecha_seguimiento_mp        DATE,
+    alm                         VARCHAR(20),
+    so                          VARCHAR(20),
+    tipo_trabajo                VARCHAR(20),
+    indicador                   VARCHAR(20),
+    status_entrega_mp           VARCHAR(50),
+    vendedor                    VARCHAR(100),
+    ciudad                      VARCHAR(100),
+    fecha_pedido                DATE,
+    fecha_entrega               DATE,
+    descripcion_producto        VARCHAR(255),
+    codigo_producto             VARCHAR(50),
+    total_ot                    NUMERIC(12,2),
+    entrega_mes                 NUMERIC(12,2),
+    medida                      VARCHAR(20),
+    equivalencia_kg             NUMERIC(12,2),
+    pu_usd                      NUMERIC(12,2),
+    pt_usd                      NUMERIC(12,2),
+    factura_clises              VARCHAR(10),
+    precio_clise_usd            NUMERIC(12,2),
+    precio_total_pedido_usd     NUMERIC(12,2)
 );
 
 -- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD.
@@ -97,6 +132,20 @@ CREATE TABLE ot_materiales (
     -- no tiene sentido restringir por proceso)
 
     UNIQUE (ot_proceso_id, material_id)  -- un solo pedido por material dentro del mismo paso
+);
+
+-- Material importado desde el Excel OC-MP que todavía no tiene proceso ni
+-- máquina asignados (la hoja "oc mp" no los maneja). Queda "pendiente" hasta
+-- que alguien lo completa en Registrar Entrega (ver ordenes_controller.
+-- promover_pendiente), momento en el que se crea el ot_procesos/ot_materiales
+-- real y esta fila se borra.
+CREATE TABLE ot_materiales_pendientes (
+    id                  SERIAL PRIMARY KEY,
+    ot_id               INTEGER   NOT NULL REFERENCES ordenes_trabajo(id),
+    codigo_mp           VARCHAR(50) NOT NULL,     -- tal cual viene del Excel
+    material_id         INTEGER   REFERENCES materiales(id),  -- NULL si el código no calza con el catálogo
+    cantidad_requerida  NUMERIC(10,2),
+    creado_en           TIMESTAMP NOT NULL DEFAULT now()
 );
 
 -- ============================================================

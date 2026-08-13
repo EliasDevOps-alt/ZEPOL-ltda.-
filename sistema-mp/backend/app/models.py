@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Numeric,
     String,
+    Text,
     Time,
     UniqueConstraint,
     func,
@@ -77,6 +78,16 @@ class Material(Base):
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
+class Configuracion(Base):
+    """Ajustes editables desde la app (no desde .env), como la ruta del
+    Excel 'OC-MP' que el jefe de área puede mover de carpeta por accidente."""
+
+    __tablename__ = "configuracion"
+
+    clave: Mapped[str] = mapped_column(String(50), primary_key=True)
+    valor: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class OrdenTrabajo(Base):
     """El cliente y el diseño son únicos por OT (una OT es un solo pedido de
     un solo cliente para un solo diseño, aunque pase por varios procesos)."""
@@ -90,7 +101,31 @@ class OrdenTrabajo(Base):
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
 
+    # Columnas comerciales espejo de la hoja "oc mp" del Excel OC-MP.
+    fecha_seguimiento_mp: Mapped[Optional[date]] = mapped_column(Date)
+    alm: Mapped[Optional[str]] = mapped_column(String(20))
+    so: Mapped[Optional[str]] = mapped_column(String(20))
+    tipo_trabajo: Mapped[Optional[str]] = mapped_column(String(20))
+    indicador: Mapped[Optional[str]] = mapped_column(String(20))
+    status_entrega_mp: Mapped[Optional[str]] = mapped_column(String(50))
+    vendedor: Mapped[Optional[str]] = mapped_column(String(100))
+    ciudad: Mapped[Optional[str]] = mapped_column(String(100))
+    fecha_pedido: Mapped[Optional[date]] = mapped_column(Date)
+    fecha_entrega: Mapped[Optional[date]] = mapped_column(Date)
+    descripcion_producto: Mapped[Optional[str]] = mapped_column(String(255))
+    codigo_producto: Mapped[Optional[str]] = mapped_column(String(50))
+    total_ot: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    entrega_mes: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    medida: Mapped[Optional[str]] = mapped_column(String(20))
+    equivalencia_kg: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    pu_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    pt_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    factura_clises: Mapped[Optional[str]] = mapped_column(String(10))
+    precio_clise_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+    precio_total_pedido_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
+
     procesos: Mapped[List["OtProceso"]] = relationship(back_populates="ot")
+    pendientes: Mapped[List["OtMaterialPendiente"]] = relationship(back_populates="ot")
 
 
 class OtProceso(Base):
@@ -150,6 +185,25 @@ class OtMaterial(Base):
     estado_sid: Mapped["EstadoSid"] = relationship()
     entregas: Mapped[List["Entrega"]] = relationship(back_populates="ot_material")
     devoluciones: Mapped[List["Devolucion"]] = relationship(back_populates="ot_material")
+
+
+class OtMaterialPendiente(Base):
+    """Material importado desde el Excel OC-MP que todavía no tiene proceso
+    ni máquina (la hoja 'oc mp' no los maneja) — queda pendiente hasta que
+    se completa en Registrar Entrega (ver ordenes_controller.promover_pendiente),
+    momento en el que se crea el OtProceso/OtMaterial real y esta fila se borra."""
+
+    __tablename__ = "ot_materiales_pendientes"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ot_id: Mapped[int] = mapped_column(ForeignKey("ordenes_trabajo.id"))
+    codigo_mp: Mapped[str] = mapped_column(String(50))
+    material_id: Mapped[Optional[int]] = mapped_column(ForeignKey("materiales.id"))
+    cantidad_requerida: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    ot: Mapped["OrdenTrabajo"] = relationship(back_populates="pendientes")
+    material: Mapped[Optional["Material"]] = relationship()
 
 
 class Entrega(Base):

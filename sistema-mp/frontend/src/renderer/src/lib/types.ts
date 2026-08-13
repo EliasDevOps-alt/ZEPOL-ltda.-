@@ -35,22 +35,43 @@ export interface OrdenTrabajo {
   fecha_creacion: string
 }
 
+// Columnas comerciales espejo 1:1 de la hoja "oc mp" del Excel OC-MP,
+// compartidas entre lo que se lee del Excel y lo que se guarda/edita en la
+// base de datos vía "Crear OT".
+export interface CamposComercialesOt {
+  fecha_seguimiento_mp?: string | null
+  alm?: string | null
+  so?: string | null
+  tipo_trabajo?: string | null
+  indicador?: string | null
+  status_entrega_mp?: string | null
+  vendedor?: string | null
+  ciudad?: string | null
+  fecha_pedido?: string | null
+  fecha_entrega?: string | null
+  descripcion_producto?: string | null
+  codigo_producto?: string | null
+  total_ot?: number | null
+  entrega_mes?: number | null
+  medida?: string | null
+  equivalencia_kg?: number | null
+  pu_usd?: number | null
+  pt_usd?: number | null
+  factura_clises?: string | null
+  precio_clise_usd?: number | null
+  precio_total_pedido_usd?: number | null
+}
+
 export interface MaterialPedidoIn {
   material_id: number
   cantidad_requerida?: number | null
 }
 
-export interface ProcesoDetalleIn {
-  proceso_id: number
-  maquina_id: number
-  materiales: MaterialPedidoIn[]
-}
-
-export interface OtDetalleCreate {
+export interface OtDetalleCreate extends CamposComercialesOt {
   numero_ot: string
   cliente?: string | null
   diseno?: string | null
-  procesos: ProcesoDetalleIn[]
+  materiales: MaterialPedidoIn[]
 }
 
 export interface MaterialPedidoOut {
@@ -72,11 +93,58 @@ export interface ProcesoDetalleOut {
   materiales: MaterialPedidoOut[]
 }
 
-export interface OtDetalleOut {
+export interface OtDetalleOut extends CamposComercialesOt {
   numero_ot: string
   cliente: string | null
   diseno: string | null
   procesos: ProcesoDetalleOut[]
+  pendientes: OtMaterialPendiente[]
+}
+
+export interface OtMaterialPendiente {
+  id: number
+  codigo_mp: string
+  material_id: number | null
+  cantidad_requerida: number | null
+}
+
+export interface OtImportada {
+  ot: OtDetalleOut
+  pendientes: OtMaterialPendiente[]
+}
+
+export interface PromoverPendienteIn {
+  proceso_id: number
+  maquina_id: number
+  material_id?: number | null
+}
+
+export interface PromoverPendienteOut {
+  ot_material_id: number
+}
+
+export interface MaterialExcel {
+  codigo_mp: string
+  cantidad_requerida: number | null
+}
+
+// Datos de una OT tal como están en la hoja "oc mp" del Excel, cuando
+// todavía no existe en la base de datos.
+export interface OtExcel extends CamposComercialesOt {
+  numero_ot: string
+  cliente: string | null
+  materiales: MaterialExcel[]
+  total: number | null
+}
+
+export interface ConfiguracionExcel {
+  ruta: string | null
+}
+
+export interface OtBusqueda {
+  origen: 'bd' | 'excel' | 'no_encontrada'
+  bd: OtDetalleOut | null
+  excel: OtExcel | null
 }
 
 export interface MaquinaAdmin {

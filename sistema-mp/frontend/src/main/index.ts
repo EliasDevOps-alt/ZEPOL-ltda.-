@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 
@@ -46,6 +46,15 @@ app.whenReady().then(() => {
   ipcMain.handle('config:set', (_event, config: AppConfig) => {
     writeConfig(config)
     return readConfig()
+  })
+  ipcMain.handle('dialog:elegirArchivoExcel', async () => {
+    const resultado = await dialog.showOpenDialog({
+      title: 'Localizar archivo Excel OC-MP',
+      properties: ['openFile'],
+      filters: [{ name: 'Excel', extensions: ['xlsx', 'xlsm'] }]
+    })
+    if (resultado.canceled || resultado.filePaths.length === 0) return null
+    return resultado.filePaths[0]
   })
 
   createWindow()

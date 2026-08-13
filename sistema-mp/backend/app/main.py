@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from .views import (
     auth_view,
     catalogos_view,
+    configuracion_view,
     consumo_view,
     devoluciones_view,
     entregas_view,
@@ -34,6 +35,8 @@ app.include_router(consumo_view.router)
 app.include_router(materiales_view.router)
 app.include_router(maquinas_view.router)
 app.include_router(ordenes_view.router)
+app.include_router(ordenes_view.router_pendientes)
+app.include_router(configuracion_view.router)
 
 
 @app.get("/health")

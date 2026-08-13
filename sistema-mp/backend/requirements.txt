@@ -6,3 +6,5 @@ alembic
 python-dotenv
 bcrypt
 python-jose[cryptography]
+openpyxl
+msoffcrypto-tool
