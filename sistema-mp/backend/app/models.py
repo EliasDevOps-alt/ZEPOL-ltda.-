@@ -76,6 +76,10 @@ class Material(Base):
     descripcion: Mapped[Optional[str]] = mapped_column(String(255))
     unidad: Mapped[str] = mapped_column(String(10))
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Cargos de tinta (Laminación, FLaminación, Superficie): aparecen como
+    # "material" en el Excel OC-MP pero no son materia prima física, así que
+    # Registrar Entrega/Devolución los excluyen de la lista de pedidos.
+    es_tinta: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class Configuracion(Base):
@@ -175,7 +179,10 @@ class OtMaterial(Base):
     proceso_id: Mapped[int] = mapped_column(ForeignKey("procesos.id"))
     material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
     cantidad_requerida: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
-    estado_sid_id: Mapped[int] = mapped_column(ForeignKey("estados_sid.id"))
+    estado_sid_id: Mapped[int] = mapped_column(ForeignKey("estados_sid.id"))  # estado del SID de la ENTREGA
+    # El SID de la devolución es un trámite independiente del de la entrega,
+    # por eso es un campo aparte en vez de reutilizar estados_sid.
+    sid_devolucion_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_proceso: Mapped["OtProceso"] = relationship(

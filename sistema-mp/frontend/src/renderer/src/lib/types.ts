@@ -20,6 +20,7 @@ export interface Material {
   codigo_mp: string
   descripcion: string | null
   unidad: string
+  es_tinta: boolean
 }
 
 export interface EstadoSid {
@@ -106,6 +107,7 @@ export interface OtMaterialPendiente {
   codigo_mp: string
   material_id: number | null
   cantidad_requerida: number | null
+  es_tinta: boolean
 }
 
 export interface OtImportada {
@@ -172,12 +174,14 @@ export interface MaterialAdmin {
   descripcion: string | null
   unidad: string
   activo: boolean
+  es_tinta: boolean
 }
 
 export interface MaterialCreate {
   codigo_mp: string
   descripcion?: string | null
   unidad: string
+  es_tinta?: boolean
 }
 
 export interface MaterialUpdate {
@@ -185,6 +189,7 @@ export interface MaterialUpdate {
   descripcion?: string | null
   unidad: string
   activo: boolean
+  es_tinta: boolean
 }
 
 export interface EntregaCreate {
@@ -235,11 +240,24 @@ export interface Consumo {
   maquina: string
   diseno: string | null
   codigo_mp: string
+  descripcion: string | null
   unidad: string
+  es_tinta: boolean
   estado_sid: string
+  sid_devolucion_completado: boolean
   cantidad_requerida: number | null
   total_entregado: number
   total_devuelto: number
   consumo_neto: number
   estado_entrega: 'PENDIENTE' | 'PARCIAL' | 'COMPLETO' | 'SIN REQUERIMIENTO'
+}
+
+export interface EstadoSidUpdate {
+  ot_material_id: number
+  estado_sid: string
+}
+
+export interface SidDevolucionUpdate {
+  ot_material_id: number
+  sid_devolucion_completado: boolean
 }

@@ -20,7 +20,11 @@ router_pendientes = APIRouter(
 
 def _serializar_pendiente(p: OtMaterialPendiente) -> schemas.OtMaterialPendienteOut:
     return schemas.OtMaterialPendienteOut(
-        id=p.id, codigo_mp=p.codigo_mp, material_id=p.material_id, cantidad_requerida=p.cantidad_requerida
+        id=p.id,
+        codigo_mp=p.codigo_mp,
+        material_id=p.material_id,
+        cantidad_requerida=p.cantidad_requerida,
+        es_tinta=p.material.es_tinta if p.material is not None else False,
     )
 
 

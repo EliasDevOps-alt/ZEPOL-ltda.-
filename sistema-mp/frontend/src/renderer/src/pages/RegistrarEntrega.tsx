@@ -283,6 +283,11 @@ export function RegistrarEntrega() {
     enabled: !!otBuscada
   })
 
+  // Los cargos de tinta (Laminación, FLaminación, Superficie) no se entregan
+  // en planta — se registran en Crear OT, pero no aparecen aquí.
+  const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
+  const pendientesVisibles = useMemo(() => pendientes.data?.filter((p) => !p.es_tinta), [pendientes.data])
+
   const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
@@ -435,9 +440,9 @@ export function RegistrarEntrega() {
           </form>
 
           {pedidos.isSuccess &&
-            pedidos.data.length === 0 &&
+            pedidosVisibles?.length === 0 &&
             pendientes.isSuccess &&
-            pendientes.data.length === 0 && (
+            pendientesVisibles?.length === 0 && (
               <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
                 <PackagePlus className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
                 <p>
@@ -450,12 +455,12 @@ export function RegistrarEntrega() {
               </div>
             )}
 
-          {pedidos.data && pedidos.data.length > 0 && (
+          {pedidosVisibles && pedidosVisibles.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">
                 Materiales pedidos en esta OT — marca todos a los que corresponda la entrega:
               </p>
-              {pedidos.data.map((pedido) => (
+              {pedidosVisibles.map((pedido) => (
                 <button
                   key={pedido.ot_material_id}
                   type="button"
@@ -483,7 +488,7 @@ export function RegistrarEntrega() {
         </CardContent>
       </Card>
 
-      {pendientes.data && pendientes.data.length > 0 && (
+      {pendientesVisibles && pendientesVisibles.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Materiales pendientes de asignar (vienen del Excel)</CardTitle>
@@ -497,7 +502,7 @@ export function RegistrarEntrega() {
               <Label>Fecha</Label>
               <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="max-w-40" />
             </div>
-            {pendientes.data.map((pendiente) => (
+            {pendientesVisibles.map((pendiente) => (
               <PendienteCard
                 key={pendiente.id}
                 pendiente={pendiente}
@@ -524,7 +529,7 @@ export function RegistrarEntrega() {
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
 
-              {pedidos.data
+              {pedidosVisibles
                 ?.filter((p) => seleccion[p.ot_material_id])
                 .map((pedido) => {
                   const datos = seleccion[pedido.ot_material_id]

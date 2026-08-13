@@ -9,6 +9,7 @@ import { Consulta } from './pages/Consulta'
 import { Materiales } from './pages/Materiales'
 import { Maquinas } from './pages/Maquinas'
 import { ConfiguracionExcel } from './pages/ConfiguracionExcel'
+import { RegistroSid } from './pages/RegistroSid'
 import { Historial } from './pages/Historial'
 import { DetalleOt } from './pages/DetalleOt'
 
@@ -39,6 +40,7 @@ export default function App() {
         <Route path="materiales" element={<Materiales />} />
         <Route path="maquinas" element={<Maquinas />} />
         <Route path="configuracion/excel" element={<ConfiguracionExcel />} />
+        <Route path="sid" element={<RegistroSid />} />
         <Route path="entrega/historial" element={<Historial />} />
         <Route path="crear-ot" element={<DetalleOt />} />
       </Route>

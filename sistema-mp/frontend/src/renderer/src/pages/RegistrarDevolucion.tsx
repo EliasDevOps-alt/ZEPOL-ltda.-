@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { CheckCircle2, Search } from 'lucide-react'
@@ -38,6 +38,10 @@ export function RegistrarDevolucion() {
     queryFn: () => api.consultarConsumo(apiBaseUrl, token, otBuscada!),
     enabled: !!otBuscada
   })
+
+  // Los cargos de tinta (Laminación, FLaminación, Superficie) no se devuelven
+  // en planta — se registran en Crear OT, pero no aparecen aquí.
+  const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -120,14 +124,14 @@ export function RegistrarDevolucion() {
             </Button>
           </form>
 
-          {pedidos.isSuccess && pedidos.data.length === 0 && (
+          {pedidos.isSuccess && pedidosVisibles?.length === 0 && (
             <p className="mt-4 text-sm text-muted-foreground">No hay materiales entregados para esa OT.</p>
           )}
 
-          {pedidos.data && pedidos.data.length > 0 && (
+          {pedidosVisibles && pedidosVisibles.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">Materiales entregados en esta OT — elige a cuál corresponde la devolución:</p>
-              {pedidos.data.map((pedido) => (
+              {pedidosVisibles.map((pedido) => (
                 <button
                   key={pedido.ot_material_id}
                   type="button"

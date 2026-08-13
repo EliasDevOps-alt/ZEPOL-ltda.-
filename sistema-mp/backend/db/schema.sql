@@ -41,7 +41,13 @@ CREATE TABLE materiales (
     codigo_mp   VARCHAR(50)  NOT NULL UNIQUE,       -- LDPE-1, BOPP20630...
     descripcion VARCHAR(255),
     unidad      VARCHAR(10)  NOT NULL,              -- kg, mts, unid... fija por material, nunca se pregunta al usuario
-    activo      BOOLEAN      NOT NULL DEFAULT TRUE
+    activo      BOOLEAN      NOT NULL DEFAULT TRUE,
+    -- Cargos de tinta (Laminación, FLaminación, Superficie) que aparecen como
+    -- "material" en el Excel OC-MP pero no son materia prima física: se
+    -- registran en Crear OT para no perder el dato, pero no se entregan ni
+    -- se devuelven en planta, así que Registrar Entrega/Devolución los
+    -- excluyen de la lista de pedidos.
+    es_tinta    BOOLEAN      NOT NULL DEFAULT FALSE
 );
 
 -- Ajustes editables desde la app (no desde .env), como la ruta del Excel
@@ -121,7 +127,11 @@ CREATE TABLE ot_materiales (
     proceso_id          INTEGER   NOT NULL,   -- denormalizado a propósito, ver FKs abajo
     material_id         INTEGER   NOT NULL REFERENCES materiales(id),
     cantidad_requerida  NUMERIC(10,2),
-    estado_sid_id       INTEGER   NOT NULL REFERENCES estados_sid(id),
+    estado_sid_id       INTEGER   NOT NULL REFERENCES estados_sid(id),  -- estado del SID de la ENTREGA
+    -- El SID de la devolución es independiente del de la entrega (son dos
+    -- trámites distintos ante el mismo pedido) — por eso va aparte, no
+    -- reutiliza estados_sid.
+    sid_devolucion_completado BOOLEAN NOT NULL DEFAULT FALSE,
     creado_en           TIMESTAMP NOT NULL DEFAULT now(),
 
     -- el proceso_id debe coincidir con el del paso de OT elegido
@@ -209,8 +219,11 @@ SELECT
     p.nombre                    AS proceso,
     mq.nombre                   AS maquina,
     mat.codigo_mp,
+    mat.descripcion,
     mat.unidad,
+    mat.es_tinta,
     es.nombre                   AS estado_sid,
+    om.sid_devolucion_completado,
     om.cantidad_requerida,
     COALESCE(ent_tot.total, 0)  AS total_entregado,
     COALESCE(dev_tot.total, 0)  AS total_devuelto,

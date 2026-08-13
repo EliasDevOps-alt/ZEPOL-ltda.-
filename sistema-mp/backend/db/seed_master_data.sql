@@ -1,7 +1,7 @@
 -- Datos maestros conocidos, extraídos del Excel actual (Sin título.xlsm)
 
 INSERT INTO estados_sid (nombre) VALUES
-    ('PENDIENTE'), ('REGISTRADO'), ('CORREGIR'), ('CORREGIDO'), ('ANULADO');
+    ('PENDIENTE'), ('REGISTRADO'), ('CORREGIR'), ('CORREGIDO'), ('ANULADO'), ('COMPLETADO');
 
 INSERT INTO usuarios (inicial, nombre) VALUES
     ('ER', 'Erasmo'), ('EB', 'Eber'), ('BO', 'Boris'), ('CE', 'César');

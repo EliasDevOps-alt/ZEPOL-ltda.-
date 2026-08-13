@@ -20,6 +20,7 @@ def _serializar(material: Material) -> schemas.MaterialAdminOut:
         descripcion=material.descripcion,
         unidad=material.unidad,
         activo=material.activo,
+        es_tinta=material.es_tinta,
     )
 
 

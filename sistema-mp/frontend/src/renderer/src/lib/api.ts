@@ -6,6 +6,7 @@ import type {
   Entrega,
   EntregaCreate,
   EstadoSid,
+  EstadoSidUpdate,
   Maquina,
   MaquinaAdmin,
   MaquinaCreate,
@@ -23,6 +24,7 @@ import type {
   Proceso,
   PromoverPendienteIn,
   PromoverPendienteOut,
+  SidDevolucionUpdate,
   Usuario
 } from './types'
 
@@ -183,4 +185,32 @@ export function obtenerConfigExcel(baseUrl: string, token: string) {
 
 export function actualizarConfigExcel(baseUrl: string, token: string, ruta: string) {
   return request<ConfiguracionExcel>(baseUrl, '/configuracion/excel-oc-mp', { method: 'PUT', token, body: { ruta } })
+}
+
+export function marcarSidCompletado(baseUrl: string, token: string, otMaterialId: number) {
+  return request<EstadoSidUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid/completado`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function marcarSidPendiente(baseUrl: string, token: string, otMaterialId: number) {
+  return request<EstadoSidUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid/pendiente`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function marcarSidDevolucionCompletado(baseUrl: string, token: string, otMaterialId: number) {
+  return request<SidDevolucionUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid-devolucion/completado`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function marcarSidDevolucionPendiente(baseUrl: string, token: string, otMaterialId: number) {
+  return request<SidDevolucionUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid-devolucion/pendiente`, {
+    method: 'POST',
+    token
+  })
 }

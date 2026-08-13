@@ -13,6 +13,7 @@ from .views import (
     maquinas_view,
     materiales_view,
     ordenes_view,
+    sid_view,
 )
 
 app = FastAPI(title="ZEPOL - Control de Materia Prima")
@@ -37,6 +38,7 @@ app.include_router(maquinas_view.router)
 app.include_router(ordenes_view.router)
 app.include_router(ordenes_view.router_pendientes)
 app.include_router(configuracion_view.router)
+app.include_router(sid_view.router)
 
 
 @app.get("/health")

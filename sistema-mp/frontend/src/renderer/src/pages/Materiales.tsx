@@ -18,6 +18,7 @@ interface FormState {
   descripcion: string
   unidad: string
   activo: boolean
+  es_tinta: boolean
 }
 
 const FORM_VACIO: FormState = {
@@ -25,7 +26,8 @@ const FORM_VACIO: FormState = {
   codigo_mp: '',
   descripcion: '',
   unidad: 'kg',
-  activo: true
+  activo: true,
+  es_tinta: false
 }
 
 export function Materiales() {
@@ -55,14 +57,16 @@ export function Materiales() {
         return api.crearMaterial(apiBaseUrl, token, {
           codigo_mp: data.codigo_mp,
           descripcion: data.descripcion || null,
-          unidad: data.unidad
+          unidad: data.unidad,
+          es_tinta: data.es_tinta
         })
       }
       return api.actualizarMaterial(apiBaseUrl, token, data.id, {
         codigo_mp: data.codigo_mp,
         descripcion: data.descripcion || null,
         unidad: data.unidad,
-        activo: data.activo
+        activo: data.activo,
+        es_tinta: data.es_tinta
       })
     },
     onSuccess: () => {
@@ -95,7 +99,8 @@ export function Materiales() {
       codigo_mp: material.codigo_mp,
       descripcion: material.descripcion ?? '',
       unidad: material.unidad,
-      activo: material.activo
+      activo: material.activo,
+      es_tinta: material.es_tinta
     })
   }
 
@@ -162,6 +167,16 @@ export function Materiales() {
                 />
               </div>
 
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.es_tinta}
+                  onChange={(e) => setForm({ ...form, es_tinta: e.target.checked })}
+                />
+                Es tinta (cargo de tinta, no es materia prima física — no aparece en Registrar Entrega ni
+                Devolución)
+              </label>
+
               {form.id !== null && (
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -222,7 +237,14 @@ export function Materiales() {
               {materiales.data?.map((m, i) => (
                 <tr key={m.id} className="border-b border-border last:border-0">
                   <td className="p-3 text-muted-foreground">{i + 1}</td>
-                  <td className="p-3 font-medium">{m.codigo_mp}</td>
+                  <td className="p-3 font-medium">
+                    {m.codigo_mp}
+                    {m.es_tinta && (
+                      <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        Tinta
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3 text-muted-foreground">{m.descripcion}</td>
                   <td className="p-3">{m.unidad}</td>
                   <td className="p-3">

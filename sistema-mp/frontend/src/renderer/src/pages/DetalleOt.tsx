@@ -328,7 +328,9 @@ export function DetalleOt() {
                   </li>
                 ))}
               </ul>
-              <p className="mt-1 font-medium text-foreground">Total cantidad: {datosExcel.total ?? '—'}</p>
+              <p className="mt-1 font-medium text-foreground">
+                Total cantidad: {datosExcel.total != null ? datosExcel.total.toFixed(2) : '—'}
+              </p>
             </div>
           )}
           <Button type="button" className="mt-4" disabled={importar.isPending} onClick={() => importar.mutate()}>
@@ -630,6 +632,9 @@ export function DetalleOt() {
                   </div>
                 )
               })}
+              <p className="text-sm font-medium">
+                Total cantidad: {materialesForm.reduce((acc, f) => acc + (Number(f.cantidad) || 0), 0)}
+              </p>
               <Button
                 type="button"
                 variant="outline"

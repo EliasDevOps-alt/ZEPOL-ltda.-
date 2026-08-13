@@ -3,6 +3,7 @@ import type { ComponentType } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { AnimatePresence, motion } from 'framer-motion'
 import {
+  BadgeCheck,
   ChevronDown,
   ClipboardList,
   Cog,
@@ -35,6 +36,7 @@ const NAV_ITEMS: NavItem[] = [
   },
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
+  { to: '/sid', label: 'Registro SID', icon: BadgeCheck },
   { to: '/materiales', label: 'Materiales', icon: Boxes },
   { to: '/maquinas', label: 'Máquinas', icon: Cog },
   { to: '/configuracion/excel', label: 'Excel OC-MP', icon: FileSpreadsheet }

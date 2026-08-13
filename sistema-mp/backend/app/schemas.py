@@ -43,12 +43,23 @@ class MaterialOut(BaseModel):
     codigo_mp: str
     descripcion: Optional[str]
     unidad: str
+    es_tinta: bool
 
 
 class EstadoSidOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
     nombre: str
+
+
+class EstadoSidUpdateOut(BaseModel):
+    ot_material_id: int
+    estado_sid: str
+
+
+class SidDevolucionUpdateOut(BaseModel):
+    ot_material_id: int
+    sid_devolucion_completado: bool
 
 
 class MaquinaAdminOut(BaseModel):
@@ -76,12 +87,14 @@ class MaterialAdminOut(BaseModel):
     descripcion: Optional[str]
     unidad: str
     activo: bool
+    es_tinta: bool
 
 
 class MaterialCreate(BaseModel):
     codigo_mp: str
     descripcion: Optional[str] = None
     unidad: str
+    es_tinta: bool = False
 
 
 class MaterialUpdate(BaseModel):
@@ -89,6 +102,7 @@ class MaterialUpdate(BaseModel):
     descripcion: Optional[str] = None
     unidad: str
     activo: bool = True
+    es_tinta: bool = False
 
 
 class OrdenTrabajoOut(BaseModel):
@@ -144,6 +158,7 @@ class OtMaterialPendienteOut(BaseModel):
     codigo_mp: str
     material_id: Optional[int]
     cantidad_requerida: Optional[float]
+    es_tinta: bool
 
 
 class OtDetalleCreate(CamposComercialesOt):
@@ -286,7 +301,9 @@ class PedidoMaterialOut(BaseModel):
     maquina: str
     diseno: Optional[str]
     codigo_mp: str
+    descripcion: Optional[str]
     unidad: str
+    es_tinta: bool
     cantidad_requerida: Optional[float]
     total_entregado: float
     total_devuelto: float
@@ -296,3 +313,4 @@ class PedidoMaterialOut(BaseModel):
 
 class ConsumoOut(PedidoMaterialOut):
     estado_sid: str
+    sid_devolucion_completado: bool

@@ -24,7 +24,9 @@ def crear_material(db: Session, data: schemas.MaterialCreate) -> Material:
     if existente is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Ya existe un material con código {data.codigo_mp}")
 
-    material = Material(codigo_mp=data.codigo_mp, descripcion=data.descripcion, unidad=data.unidad)
+    material = Material(
+        codigo_mp=data.codigo_mp, descripcion=data.descripcion, unidad=data.unidad, es_tinta=data.es_tinta
+    )
     db.add(material)
     db.commit()
     db.refresh(material)
@@ -45,6 +47,7 @@ def actualizar_material(db: Session, material_id: int, data: schemas.MaterialUpd
     material.descripcion = data.descripcion
     material.unidad = data.unidad
     material.activo = data.activo
+    material.es_tinta = data.es_tinta
     db.commit()
     db.refresh(material)
     return material
