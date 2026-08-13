@@ -11,7 +11,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import { cn } from '@renderer/lib/utils'
+import { cn, esUnidadDiscreta } from '@renderer/lib/utils'
 import type { Consumo, Devolucion } from '@renderer/lib/types'
 
 function hoyISO(): string {
@@ -82,7 +82,7 @@ export function RegistrarDevolucion() {
       return
     }
     if (bobinas.some((b) => !b || Number(b) <= 0)) {
-      setError('Todas las bobinas necesitan un peso mayor a 0')
+      setError('La cantidad debe ser mayor a 0')
       return
     }
     setError(null)
@@ -134,6 +134,13 @@ export function RegistrarDevolucion() {
                   onClick={() => {
                     setPedidoSeleccionado(pedido)
                     setConfirmacion(null)
+                    if (esUnidadDiscreta(pedido.unidad)) {
+                      setCantidadBobinas('1')
+                      setBobinas([''])
+                    } else {
+                      setCantidadBobinas('')
+                      setBobinas([])
+                    }
                   }}
                   className={cn(
                     'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
@@ -176,45 +183,60 @@ export function RegistrarDevolucion() {
               </div>
 
               <div className="rounded-md border border-border p-4">
-                <div className="flex items-end gap-2">
-                  <div className="flex flex-1 flex-col gap-1.5">
-                    <Label>Cantidad de bobinas</Label>
+                {esUnidadDiscreta(pedidoSeleccionado.unidad) ? (
+                  <div className="flex flex-col gap-1.5">
+                    <Label>Cantidad ({pedidoSeleccionado.unidad})</Label>
                     <Input
                       type="number"
-                      min={1}
-                      value={cantidadBobinas}
-                      onChange={(e) => setCantidadBobinas(e.target.value)}
+                      step="0.01"
+                      min={0}
+                      value={bobinas[0] ?? ''}
+                      onChange={(e) => setBobinas([e.target.value])}
                     />
                   </div>
-                  <Button type="button" variant="outline" onClick={generarBobinas}>
-                    Generar
-                  </Button>
-                </div>
-
-                {bobinas.length > 0 && (
-                  <div className="mt-4 grid grid-cols-3 gap-3">
-                    {bobinas.map((valor, i) => (
-                      <div key={i} className="flex flex-col gap-1">
-                        <Label className="text-xs">N.º {i + 1}</Label>
+                ) : (
+                  <>
+                    <div className="flex items-end gap-2">
+                      <div className="flex flex-1 flex-col gap-1.5">
+                        <Label>Cantidad de bobinas</Label>
                         <Input
                           type="number"
-                          step="0.01"
-                          value={valor}
-                          onChange={(e) => {
-                            const copia = [...bobinas]
-                            copia[i] = e.target.value
-                            setBobinas(copia)
-                          }}
+                          min={1}
+                          value={cantidadBobinas}
+                          onChange={(e) => setCantidadBobinas(e.target.value)}
                         />
                       </div>
-                    ))}
-                  </div>
-                )}
+                      <Button type="button" variant="outline" onClick={generarBobinas}>
+                        Generar
+                      </Button>
+                    </div>
 
-                {bobinas.length > 0 && (
-                  <p className="mt-3 text-sm font-medium">
-                    Total devuelto: {totalDevuelto.toFixed(2)} {pedidoSeleccionado.unidad}
-                  </p>
+                    {bobinas.length > 0 && (
+                      <div className="mt-4 grid grid-cols-3 gap-3">
+                        {bobinas.map((valor, i) => (
+                          <div key={i} className="flex flex-col gap-1">
+                            <Label className="text-xs">N.º {i + 1}</Label>
+                            <Input
+                              type="number"
+                              step="0.01"
+                              value={valor}
+                              onChange={(e) => {
+                                const copia = [...bobinas]
+                                copia[i] = e.target.value
+                                setBobinas(copia)
+                              }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {bobinas.length > 0 && (
+                      <p className="mt-3 text-sm font-medium">
+                        Total devuelto: {totalDevuelto.toFixed(2)} {pedidoSeleccionado.unidad}
+                      </p>
+                    )}
+                  </>
                 )}
               </div>
 

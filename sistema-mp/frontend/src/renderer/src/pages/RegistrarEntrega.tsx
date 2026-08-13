@@ -12,7 +12,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import { cn } from '@renderer/lib/utils'
+import { cn, esUnidadDiscreta } from '@renderer/lib/utils'
 import type { Consumo, Entrega } from '@renderer/lib/types'
 
 function hoyISO(): string {
@@ -97,7 +97,9 @@ export function RegistrarEntrega() {
       if (copia[pedido.ot_material_id]) {
         delete copia[pedido.ot_material_id]
       } else {
-        copia[pedido.ot_material_id] = { cantidadBobinas: '', bobinas: [] }
+        copia[pedido.ot_material_id] = esUnidadDiscreta(pedido.unidad)
+          ? { cantidadBobinas: '1', bobinas: [''] }
+          : { cantidadBobinas: '', bobinas: [] }
       }
       return copia
     })
@@ -122,7 +124,7 @@ export function RegistrarEntrega() {
     }
     for (const [, datos] of pedidosSeleccionados) {
       if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
-        setError('Cada material seleccionado necesita al menos una bobina con peso mayor a 0')
+        setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
         return
       }
     }
@@ -233,7 +235,7 @@ export function RegistrarEntrega() {
       {hayPedidosSeleccionados && (
         <Card>
           <CardHeader>
-            <CardTitle>Bobinas entregadas</CardTitle>
+            <CardTitle>Cantidades entregadas</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -259,53 +261,77 @@ export function RegistrarEntrega() {
                           <X className="h-4 w-4" />
                         </button>
                       </div>
-                      <div className="flex items-end gap-2">
-                        <div className="flex flex-1 flex-col gap-1.5">
-                          <Label>Cantidad de bobinas</Label>
+                      {esUnidadDiscreta(pedido.unidad) ? (
+                        <div className="flex flex-col gap-1.5">
+                          <Label>Cantidad ({pedido.unidad})</Label>
                           <Input
                             type="number"
-                            min={1}
-                            value={datos.cantidadBobinas}
+                            step="0.01"
+                            min={0}
+                            value={datos.bobinas[0] ?? ''}
                             onChange={(e) =>
                               setSeleccion((prev) => ({
                                 ...prev,
-                                [pedido.ot_material_id]: { ...datos, cantidadBobinas: e.target.value }
+                                [pedido.ot_material_id]: { ...datos, bobinas: [e.target.value] }
                               }))
                             }
                           />
                         </div>
-                        <Button type="button" variant="outline" onClick={() => generarBobinas(pedido.ot_material_id)}>
-                          Generar
-                        </Button>
-                      </div>
-
-                      {datos.bobinas.length > 0 && (
-                        <div className="mt-4 grid grid-cols-3 gap-3">
-                          {datos.bobinas.map((valor, i) => (
-                            <div key={i} className="flex flex-col gap-1">
-                              <Label className="text-xs">N.º {i + 1}</Label>
+                      ) : (
+                        <>
+                          <div className="flex items-end gap-2">
+                            <div className="flex flex-1 flex-col gap-1.5">
+                              <Label>Cantidad de bobinas</Label>
                               <Input
                                 type="number"
-                                step="0.01"
-                                value={valor}
-                                onChange={(e) => {
-                                  const copia = [...datos.bobinas]
-                                  copia[i] = e.target.value
+                                min={1}
+                                value={datos.cantidadBobinas}
+                                onChange={(e) =>
                                   setSeleccion((prev) => ({
                                     ...prev,
-                                    [pedido.ot_material_id]: { ...datos, bobinas: copia }
+                                    [pedido.ot_material_id]: { ...datos, cantidadBobinas: e.target.value }
                                   }))
-                                }}
+                                }
                               />
                             </div>
-                          ))}
-                        </div>
-                      )}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={() => generarBobinas(pedido.ot_material_id)}
+                            >
+                              Generar
+                            </Button>
+                          </div>
 
-                      {datos.bobinas.length > 0 && (
-                        <p className="mt-3 text-sm font-medium">
-                          Total: {total.toFixed(2)} {pedido.unidad}
-                        </p>
+                          {datos.bobinas.length > 0 && (
+                            <div className="mt-4 grid grid-cols-3 gap-3">
+                              {datos.bobinas.map((valor, i) => (
+                                <div key={i} className="flex flex-col gap-1">
+                                  <Label className="text-xs">N.º {i + 1}</Label>
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    value={valor}
+                                    onChange={(e) => {
+                                      const copia = [...datos.bobinas]
+                                      copia[i] = e.target.value
+                                      setSeleccion((prev) => ({
+                                        ...prev,
+                                        [pedido.ot_material_id]: { ...datos, bobinas: copia }
+                                      }))
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {datos.bobinas.length > 0 && (
+                            <p className="mt-3 text-sm font-medium">
+                              Total: {total.toFixed(2)} {pedido.unidad}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   )
