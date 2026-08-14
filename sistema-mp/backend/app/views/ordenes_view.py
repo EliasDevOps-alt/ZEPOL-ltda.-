@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -63,8 +64,13 @@ def _serializar_detalle(ot: OrdenTrabajo) -> schemas.OtDetalleOut:
 
 
 @router.get("", response_model=List[schemas.OrdenTrabajoOut])
-def listar_ordenes(q: Optional[str] = None, db: Session = Depends(get_db)):
-    return ordenes_controller.listar_ordenes(db, q)
+def listar_ordenes(
+    q: Optional[str] = None,
+    desde: Optional[date] = None,
+    hasta: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    return ordenes_controller.listar_ordenes(db, q, desde, hasta)
 
 
 @router.post("/detalle", response_model=schemas.OtDetalleOut, status_code=status.HTTP_201_CREATED)

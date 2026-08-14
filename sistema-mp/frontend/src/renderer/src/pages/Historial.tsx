@@ -28,7 +28,7 @@ export function Historial() {
 
   const ordenes = useQuery({
     queryKey: ['ordenes-trabajo', q],
-    queryFn: () => api.listarOrdenes(apiBaseUrl, token, q || undefined)
+    queryFn: () => api.listarOrdenes(apiBaseUrl, token, { q: q || undefined })
   })
 
   const consumo = useQuery({

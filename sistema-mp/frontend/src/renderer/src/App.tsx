@@ -12,6 +12,7 @@ import { ConfiguracionExcel } from './pages/ConfiguracionExcel'
 import { RegistroSid } from './pages/RegistroSid'
 import { Historial } from './pages/Historial'
 import { DetalleOt } from './pages/DetalleOt'
+import { ListadoOt } from './pages/ListadoOt'
 
 function RutaPrivada({ children }: { children: ReactNode }) {
   const { sesion } = useAuth()
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="sid" element={<RegistroSid />} />
         <Route path="entrega/historial" element={<Historial />} />
         <Route path="crear-ot" element={<DetalleOt />} />
+        <Route path="crear-ot/listado" element={<ListadoOt />} />
       </Route>
     </Routes>
   )

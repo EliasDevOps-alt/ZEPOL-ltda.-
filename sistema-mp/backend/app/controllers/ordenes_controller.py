@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
@@ -20,7 +21,13 @@ def _aplicar_campos_comerciales(ot: OrdenTrabajo, data: schemas.CamposComerciale
             setattr(ot, campo, valor)
 
 
-def listar_ordenes(db: Session, q: Optional[str], limite: int = 100) -> List[OrdenTrabajo]:
+def listar_ordenes(
+    db: Session,
+    q: Optional[str],
+    desde: Optional[date] = None,
+    hasta: Optional[date] = None,
+    limite: int = 200,
+) -> List[OrdenTrabajo]:
     stmt = select(OrdenTrabajo)
     if q:
         like = f"%{q.lower()}%"
@@ -29,6 +36,12 @@ def listar_ordenes(db: Session, q: Optional[str], limite: int = 100) -> List[Ord
             | OrdenTrabajo.cliente.ilike(like)
             | OrdenTrabajo.diseno.ilike(like)
         )
+    if desde:
+        stmt = stmt.where(OrdenTrabajo.fecha_creacion >= desde)
+    if hasta:
+        # fecha_creacion es TIMESTAMP — "hasta" debe incluir todo ese día,
+        # no cortar a medianoche del día pedido.
+        stmt = stmt.where(OrdenTrabajo.fecha_creacion < hasta + timedelta(days=1))
     stmt = stmt.order_by(OrdenTrabajo.fecha_creacion.desc()).limit(limite)
     return db.scalars(stmt).all()
 

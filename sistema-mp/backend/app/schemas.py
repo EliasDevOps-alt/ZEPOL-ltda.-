@@ -112,6 +112,7 @@ class OrdenTrabajoOut(BaseModel):
     cliente: Optional[str]
     diseno: Optional[str]
     fecha_creacion: datetime
+    sincronizado_excel: bool
 
 
 class CamposComercialesOt(BaseModel):

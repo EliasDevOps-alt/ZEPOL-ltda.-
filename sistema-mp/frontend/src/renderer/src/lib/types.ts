@@ -34,6 +34,7 @@ export interface OrdenTrabajo {
   cliente: string | null
   diseno: string | null
   fecha_creacion: string
+  sincronizado_excel: boolean
 }
 
 // Columnas comerciales espejo 1:1 de la hoja "oc mp" del Excel OC-MP,

@@ -98,9 +98,17 @@ export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt
   return request<Devolucion[]>(baseUrl, `/devoluciones${qs}`, { token })
 }
 
-export function listarOrdenes(baseUrl: string, token: string, q?: string) {
-  const qs = q ? `?q=${encodeURIComponent(q)}` : ''
-  return request<OrdenTrabajo[]>(baseUrl, `/ordenes-trabajo${qs}`, { token })
+export function listarOrdenes(
+  baseUrl: string,
+  token: string,
+  opts: { q?: string; desde?: string; hasta?: string } = {}
+) {
+  const params = new URLSearchParams()
+  if (opts.q) params.set('q', opts.q)
+  if (opts.desde) params.set('desde', opts.desde)
+  if (opts.hasta) params.set('hasta', opts.hasta)
+  const qs = params.toString()
+  return request<OrdenTrabajo[]>(baseUrl, `/ordenes-trabajo${qs ? `?${qs}` : ''}`, { token })
 }
 
 export function guardarDetalleOt(baseUrl: string, token: string, data: OtDetalleCreate) {

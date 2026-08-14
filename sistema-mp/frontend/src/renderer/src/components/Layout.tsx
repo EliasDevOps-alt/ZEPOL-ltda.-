@@ -13,6 +13,7 @@ import {
   PackageX,
   Boxes,
   History,
+  List,
   LogOut,
   Menu
 } from 'lucide-react'
@@ -27,7 +28,12 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/crear-ot', label: 'Crear OT', icon: FileEdit },
+  {
+    to: '/crear-ot',
+    label: 'Crear OT',
+    icon: FileEdit,
+    children: [{ to: '/crear-ot/listado', label: 'Todas las OT', icon: List }]
+  },
   {
     to: '/entrega',
     label: 'Registrar Entrega',

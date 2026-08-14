@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, History, Plus, Trash2, Upload } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -158,6 +158,9 @@ export function DetalleOt() {
   const [pendientesExistentes, setPendientesExistentes] = useState<OtMaterialPendiente[]>([])
   const [syncExcel, setSyncExcel] = useState<{ ok: boolean; error: string | null } | null>(null)
 
+  const [searchParams] = useSearchParams()
+  const autoCargadoRef = useRef(false)
+
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
   const materialOptions = useMemo(
@@ -204,6 +207,25 @@ export function DetalleOt() {
       setError(err instanceof ApiError ? err.message : 'No se pudo cargar la OT')
     }
   })
+
+  // Deep-link desde el listado de OT (/crear-ot?ot=2121): precarga el número
+  // y dispara la búsqueda sola, sin que el usuario tenga que escribirlo de
+  // nuevo ni tocar "Cargar OT existente".
+  useEffect(() => {
+    const otParam = searchParams.get('ot')
+    if (otParam && !autoCargadoRef.current) {
+      setNumeroOt(otParam)
+    }
+  }, [searchParams])
+
+  useEffect(() => {
+    const otParam = searchParams.get('ot')
+    if (otParam && numeroOt === otParam && !autoCargadoRef.current) {
+      autoCargadoRef.current = true
+      cargar.mutate()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [numeroOt, searchParams])
 
   const importar = useMutation({
     mutationFn: () => api.importarOtDesdeExcel(apiBaseUrl, token, numeroOt),
