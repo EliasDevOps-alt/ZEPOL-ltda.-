@@ -197,6 +197,8 @@ class OtDetalleOut(CamposComercialesOt):
     numero_ot: str
     cliente: Optional[str]
     diseno: Optional[str]
+    sincronizado_excel: bool
+    excel_sync_error: Optional[str] = None
     procesos: List[ProcesoDetalleOut]
     pendientes: List[OtMaterialPendienteOut] = []
 
@@ -218,10 +220,15 @@ class OtExcelOut(CamposComercialesOt):
 
 class ConfiguracionExcelOut(BaseModel):
     ruta: Optional[str] = None
+    tiene_password: bool = False
 
 
 class ConfiguracionExcelIn(BaseModel):
     ruta: str
+
+
+class ConfiguracionExcelPasswordIn(BaseModel):
+    password: str
 
 
 class OtBusquedaOut(BaseModel):

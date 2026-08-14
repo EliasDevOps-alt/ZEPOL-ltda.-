@@ -2,11 +2,12 @@ import type { FormEvent } from 'react'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { CheckCircle2, Search } from 'lucide-react'
+import { CheckCircle2, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
+import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -26,12 +27,10 @@ export function RegistrarDevolucion() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
-  const [pedidoSeleccionado, setPedidoSeleccionado] = useState<Consumo | null>(null)
+  const [seleccion, setSeleccion] = useState<Record<number, BobinasPedido>>({})
   const [fecha, setFecha] = useState(hoyISO())
-  const [cantidadBobinas, setCantidadBobinas] = useState('')
-  const [bobinas, setBobinas] = useState<string[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [confirmacion, setConfirmacion] = useState<Devolucion | null>(null)
+  const [confirmaciones, setConfirmaciones] = useState<Devolucion[]>([])
 
   const pedidos = useQuery({
     queryKey: ['consumo', otBuscada],
@@ -44,67 +43,107 @@ export function RegistrarDevolucion() {
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
 
   const mutation = useMutation({
-    mutationFn: () =>
-      api.registrarDevolucion(apiBaseUrl, token, {
-        ot_material_id: pedidoSeleccionado!.ot_material_id,
-        fecha,
-        bobinas: bobinas.map(Number)
-      }),
-    onSuccess: (devolucion) => {
-      setConfirmacion(devolucion)
-      setError(null)
-      queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
-      setCantidadBobinas('')
-      setBobinas([])
-      setPedidoSeleccionado(null)
+    mutationFn: async () => {
+      const exitos: Devolucion[] = []
+      const fallidos: { codigoMp: string; mensaje: string }[] = []
+      for (const [otMaterialId, datos] of Object.entries(seleccion)) {
+        try {
+          const devolucion = await api.registrarDevolucion(apiBaseUrl, token, {
+            ot_material_id: Number(otMaterialId),
+            fecha,
+            bobinas: datos.bobinas.map(Number)
+          })
+          exitos.push(devolucion)
+        } catch (err) {
+          const pedido = pedidos.data?.find((p) => p.ot_material_id === Number(otMaterialId))
+          fallidos.push({
+            codigoMp: pedido?.codigo_mp ?? `#${otMaterialId}`,
+            mensaje: err instanceof ApiError ? err.message : 'error de conexión'
+          })
+        }
+      }
+      return { exitos, fallidos }
     },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'Error al registrar la devolución')
+    onSuccess: ({ exitos, fallidos }) => {
+      setConfirmaciones(exitos)
+      setError(
+        fallidos.length > 0
+          ? `No se pudieron registrar: ${fallidos.map((f) => `${f.codigoMp} (${f.mensaje})`).join(', ')}`
+          : null
+      )
+      setSeleccion((prev) => {
+        const restante = { ...prev }
+        for (const d of exitos) delete restante[d.ot_material_id]
+        return restante
+      })
+      queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+    },
+    onError: () => setError('Error al registrar las devoluciones')
   })
 
   function buscar(e: FormEvent) {
     e.preventDefault()
-    setConfirmacion(null)
-    setPedidoSeleccionado(null)
+    setConfirmaciones([])
+    setSeleccion({})
     setOtBuscada(numeroOt)
   }
 
-  function generarBobinas() {
-    const n = Number(cantidadBobinas)
-    if (!n || n < 1) return
-    setBobinas(Array.from({ length: n }, (_, i) => bobinas[i] ?? ''))
+  function toggleSeleccion(pedido: Consumo) {
+    setConfirmaciones([])
+    setSeleccion((prev) => {
+      const copia = { ...prev }
+      if (copia[pedido.ot_material_id]) {
+        delete copia[pedido.ot_material_id]
+      } else {
+        copia[pedido.ot_material_id] = esUnidadDiscreta(pedido.unidad)
+          ? { cantidadBobinas: '1', bobinas: [''] }
+          : { cantidadBobinas: '', bobinas: [] }
+      }
+      return copia
+    })
   }
-
-  const totalDevuelto = bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
-  const disponibleParaDevolver = pedidoSeleccionado
-    ? pedidoSeleccionado.total_entregado - pedidoSeleccionado.total_devuelto
-    : 0
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
-    if (!pedidoSeleccionado || bobinas.length === 0) {
-      setError('Selecciona el material y al menos una bobina')
+    const pedidosSeleccionados = Object.entries(seleccion)
+    if (pedidosSeleccionados.length === 0) {
+      setError('Selecciona al menos un material')
       return
     }
-    if (bobinas.some((b) => !b || Number(b) <= 0)) {
-      setError('La cantidad debe ser mayor a 0')
-      return
+    for (const [, datos] of pedidosSeleccionados) {
+      if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+        setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
+        return
+      }
     }
     setError(null)
     mutation.mutate()
   }
 
+  const hayPedidosSeleccionados = Object.keys(seleccion).length > 0
+
   return (
     <div className="max-w-2xl">
       <h1 className="mb-6 text-2xl font-semibold">Registrar Devolución de Materia Prima</h1>
 
-      {confirmacion && (
+      {confirmaciones.length > 0 && (
         <motion.div
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
-          className="mb-6 flex items-center gap-3 rounded-md border border-success/30 bg-success/10 p-4"
+          className="mb-6 flex flex-col gap-2 rounded-md border border-success/30 bg-success/10 p-4"
         >
-          <CheckCircle2 className="h-5 w-5 text-success" />
-          <p className="text-sm">Devolución registrada — {confirmacion.total_devuelto} devueltos.</p>
+          {confirmaciones.map((confirmacion) => {
+            const pedido = pedidos.data?.find((p) => p.ot_material_id === confirmacion.ot_material_id)
+            return (
+              <div key={confirmacion.id} className="flex items-start gap-3 text-sm">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
+                <p>
+                  {confirmacion.total_devuelto} {pedido?.unidad ?? ''} de{' '}
+                  {pedido?.codigo_mp ?? `#${confirmacion.ot_material_id}`} devueltos.
+                </p>
+              </div>
+            )
+          })}
         </motion.div>
       )}
 
@@ -130,25 +169,17 @@ export function RegistrarDevolucion() {
 
           {pedidosVisibles && pedidosVisibles.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
-              <p className="text-xs text-muted-foreground">Materiales entregados en esta OT — elige a cuál corresponde la devolución:</p>
+              <p className="text-xs text-muted-foreground">
+                Materiales entregados en esta OT — marca todos a los que corresponda la devolución:
+              </p>
               {pedidosVisibles.map((pedido) => (
                 <button
                   key={pedido.ot_material_id}
                   type="button"
-                  onClick={() => {
-                    setPedidoSeleccionado(pedido)
-                    setConfirmacion(null)
-                    if (esUnidadDiscreta(pedido.unidad)) {
-                      setCantidadBobinas('1')
-                      setBobinas([''])
-                    } else {
-                      setCantidadBobinas('')
-                      setBobinas([])
-                    }
-                  }}
+                  onClick={() => toggleSeleccion(pedido)}
                   className={cn(
                     'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
-                    pedidoSeleccionado?.ot_material_id === pedido.ot_material_id
+                    seleccion[pedido.ot_material_id]
                       ? 'border-primary bg-primary/10'
                       : 'border-border hover:bg-muted'
                   )}
@@ -168,86 +199,53 @@ export function RegistrarDevolucion() {
         </CardContent>
       </Card>
 
-      {pedidoSeleccionado && (
+      {hayPedidosSeleccionados && (
         <Card>
           <CardHeader>
-            <CardTitle>
-              Cantidades devueltas de {pedidoSeleccionado.codigo_mp}
-            </CardTitle>
+            <CardTitle>Cantidades devueltas</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <p className="text-sm text-muted-foreground">
-                Disponible para devolver: {disponibleParaDevolver.toFixed(2)} {pedidoSeleccionado.unidad}
-              </p>
-
               <div className="flex flex-col gap-1.5">
                 <Label>Fecha</Label>
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
 
-              <div className="rounded-md border border-border p-4">
-                {esUnidadDiscreta(pedidoSeleccionado.unidad) ? (
-                  <div className="flex flex-col gap-1.5">
-                    <Label>Cantidad ({pedidoSeleccionado.unidad})</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      min={0}
-                      value={bobinas[0] ?? ''}
-                      onChange={(e) => setBobinas([e.target.value])}
-                    />
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-end gap-2">
-                      <div className="flex flex-1 flex-col gap-1.5">
-                        <Label>Cantidad de bobinas</Label>
-                        <Input
-                          type="number"
-                          min={1}
-                          value={cantidadBobinas}
-                          onChange={(e) => setCantidadBobinas(e.target.value)}
-                        />
+              {pedidosVisibles
+                ?.filter((p) => seleccion[p.ot_material_id])
+                .map((pedido) => {
+                  const datos = seleccion[pedido.ot_material_id]
+                  const disponible = pedido.total_entregado - pedido.total_devuelto
+                  return (
+                    <div key={pedido.ot_material_id} className="rounded-md border border-border p-4">
+                      <div className="mb-3 flex items-center justify-between">
+                        <p className="text-sm font-medium">{pedido.codigo_mp}</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleSeleccion(pedido)}
+                          className="text-muted-foreground hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
                       </div>
-                      <Button type="button" variant="outline" onClick={generarBobinas}>
-                        Generar
-                      </Button>
-                    </div>
-
-                    {bobinas.length > 0 && (
-                      <div className="mt-4 grid grid-cols-3 gap-3">
-                        {bobinas.map((valor, i) => (
-                          <div key={i} className="flex flex-col gap-1">
-                            <Label className="text-xs">N.º {i + 1}</Label>
-                            <Input
-                              type="number"
-                              step="0.01"
-                              value={valor}
-                              onChange={(e) => {
-                                const copia = [...bobinas]
-                                copia[i] = e.target.value
-                                setBobinas(copia)
-                              }}
-                            />
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {bobinas.length > 0 && (
-                      <p className="mt-3 text-sm font-medium">
-                        Total devuelto: {totalDevuelto.toFixed(2)} {pedidoSeleccionado.unidad}
+                      <p className="mb-3 text-xs text-muted-foreground">
+                        Disponible para devolver: {disponible.toFixed(2)} {pedido.unidad}
                       </p>
-                    )}
-                  </>
-                )}
-              </div>
+                      <CampoCantidad
+                        unidad={pedido.unidad}
+                        datos={datos}
+                        onChange={(d) => setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: d }))}
+                      />
+                    </div>
+                  )
+                })}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 
               <Button type="submit" disabled={mutation.isPending}>
-                {mutation.isPending ? 'Guardando...' : 'Guardar devolución'}
+                {mutation.isPending
+                  ? 'Guardando...'
+                  : `Guardar ${Object.keys(seleccion).length > 1 ? `${Object.keys(seleccion).length} devoluciones` : 'devolución'}`}
               </Button>
             </form>
           </CardContent>

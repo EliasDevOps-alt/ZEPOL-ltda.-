@@ -128,6 +128,14 @@ class OrdenTrabajo(Base):
     precio_clise_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
     precio_total_pedido_usd: Mapped[Optional[float]] = mapped_column(Numeric(12, 2))
 
+    # Escritura hacia el Excel OC-MP — ver app/services/excel_oc_mp.py,
+    # escribir_oc_mp. Default TRUE a propósito: cubre OTs previas a este
+    # feature y las importadas desde Excel, que nunca disparan una
+    # escritura. Solo se pone FALSE cuando una OT creada nativamente no se
+    # pudo escribir en el Excel (archivo bloqueado, más de 6 materiales...).
+    sincronizado_excel: Mapped[bool] = mapped_column(Boolean, default=True)
+    excel_sync_error: Mapped[Optional[str]] = mapped_column(Text)
+
     procesos: Mapped[List["OtProceso"]] = relationship(back_populates="ot")
     pendientes: Mapped[List["OtMaterialPendiente"]] = relationship(back_populates="ot")
 

@@ -33,6 +33,8 @@ def _serializar_detalle(ot: OrdenTrabajo) -> schemas.OtDetalleOut:
         numero_ot=ot.numero_ot,
         cliente=ot.cliente,
         diseno=ot.diseno,
+        sincronizado_excel=ot.sincronizado_excel,
+        excel_sync_error=ot.excel_sync_error,
         **{campo: getattr(ot, campo) for campo in CAMPOS_COMERCIALES},
         pendientes=[_serializar_pendiente(p) for p in ot.pendientes],
         procesos=[
@@ -102,6 +104,12 @@ def importar_desde_excel(numero_ot: str, db: Session = Depends(get_db)):
 def listar_pendientes(numero_ot: str, db: Session = Depends(get_db)):
     pendientes = ordenes_controller.listar_pendientes(db, numero_ot)
     return [_serializar_pendiente(p) for p in pendientes]
+
+
+@router.post("/{numero_ot}/reintentar-excel", response_model=schemas.OtDetalleOut)
+def reintentar_excel(numero_ot: str, db: Session = Depends(get_db)):
+    ot = ordenes_controller.reintentar_sincronizacion_excel(db, numero_ot)
+    return _serializar_detalle(ot)
 
 
 @router_pendientes.post("/{pendiente_id}/promover", response_model=schemas.PromoverPendienteOut)

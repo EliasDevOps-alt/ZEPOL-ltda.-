@@ -3,12 +3,13 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CheckCircle2, ChevronDown, FileSpreadsheet, History, Plus, Trash2, Upload } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, History, Plus, Trash2, Upload } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Combobox } from '@renderer/components/ui/combobox'
+import { Switch } from '@renderer/components/ui/switch'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import { cn } from '@renderer/lib/utils'
@@ -131,6 +132,12 @@ function comercialesParaApi(c: ComercialesForm): CamposComercialesOt {
   }
 }
 
+function sumarPrecioTotal(ptUsd: string, precioClise: string): string {
+  if (!ptUsd && !precioClise) return ''
+  const total = (Number(ptUsd) || 0) + (Number(precioClise) || 0)
+  return total.toFixed(2)
+}
+
 export function DetalleOt() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -149,6 +156,7 @@ export function DetalleOt() {
   const [datosExcel, setDatosExcel] = useState<OtExcel | null>(null)
   const [procesosExistentes, setProcesosExistentes] = useState<ProcesoDetalleOut[]>([])
   const [pendientesExistentes, setPendientesExistentes] = useState<OtMaterialPendiente[]>([])
+  const [syncExcel, setSyncExcel] = useState<{ ok: boolean; error: string | null } | null>(null)
 
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
@@ -170,6 +178,7 @@ export function DetalleOt() {
     setProcesosExistentes(detalle.procesos)
     setPendientesExistentes(detalle.pendientes)
     setMaterialesForm([filaMaterialVacia()])
+    setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
   }
 
   const cargar = useMutation({
@@ -227,10 +236,16 @@ export function DetalleOt() {
       setProcesosExistentes(detalle.procesos)
       setPendientesExistentes(detalle.pendientes)
       setMaterialesForm([filaMaterialVacia()])
+      setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
       queryClient.invalidateQueries({ queryKey: ['ordenes-trabajo'] })
       queryClient.invalidateQueries({ queryKey: ['consumo', numeroOt] })
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Error al guardar la OT')
+  })
+
+  const reintentarExcel = useMutation({
+    mutationFn: () => api.reintentarSincronizacionExcel(apiBaseUrl, token, numeroOt),
+    onSuccess: (detalle) => setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
   })
 
   function actualizarFilaMaterial(i: number, cambios: Partial<FilaMaterial>) {
@@ -283,6 +298,29 @@ export function DetalleOt() {
             {confirmacion.procesos.length === 1 ? 'proceso' : 'procesos'}.
           </p>
         </motion.div>
+      )}
+
+      {syncExcel && !syncExcel.ok && (
+        <div className="mb-6 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-4 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+          <div className="flex-1">
+            <p className="font-medium text-warning">No se pudo escribir esta OT en el Excel OC-MP</p>
+            <p className="text-muted-foreground">{syncExcel.error ?? 'Motivo desconocido.'}</p>
+            <p className="text-muted-foreground">
+              Los datos ya están guardados en el sistema — reintenta cuando el archivo esté disponible.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              disabled={reintentarExcel.isPending || !numeroOt}
+              onClick={() => reintentarExcel.mutate()}
+            >
+              {reintentarExcel.isPending ? 'Reintentando...' : 'Reintentar sincronización'}
+            </Button>
+          </div>
+        </div>
       )}
 
       {datosExcel && (
@@ -564,33 +602,57 @@ export function DetalleOt() {
                       type="number"
                       step="0.01"
                       value={comerciales.pt_usd}
-                      onChange={(e) => setComerciales({ ...comerciales, pt_usd: e.target.value })}
+                      onChange={(e) => {
+                        const pt_usd = e.target.value
+                        setComerciales({
+                          ...comerciales,
+                          pt_usd,
+                          precio_total_pedido_usd: sumarPrecioTotal(pt_usd, comerciales.precio_clise_usd)
+                        })
+                      }}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs">Factura clisés (si/no)</Label>
-                    <Input
-                      value={comerciales.factura_clises}
-                      onChange={(e) => setComerciales({ ...comerciales, factura_clises: e.target.value })}
-                    />
+                    <Label className="text-xs">Factura clisés</Label>
+                    <div className="flex h-10 items-center gap-2">
+                      <Switch
+                        checked={comerciales.factura_clises === 'si'}
+                        onCheckedChange={(checked) => {
+                          const factura_clises = checked ? 'si' : 'no'
+                          const precio_clise_usd = checked ? comerciales.precio_clise_usd : ''
+                          setComerciales({
+                            ...comerciales,
+                            factura_clises,
+                            precio_clise_usd,
+                            precio_total_pedido_usd: sumarPrecioTotal(comerciales.pt_usd, precio_clise_usd)
+                          })
+                        }}
+                      />
+                      <span className="text-sm text-muted-foreground">
+                        {comerciales.factura_clises === 'si' ? 'Sí' : 'No'}
+                      </span>
+                    </div>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <Label className="text-xs">Precio clisé US$</Label>
                     <Input
                       type="number"
                       step="0.01"
+                      disabled={comerciales.factura_clises !== 'si'}
                       value={comerciales.precio_clise_usd}
-                      onChange={(e) => setComerciales({ ...comerciales, precio_clise_usd: e.target.value })}
+                      onChange={(e) => {
+                        const precio_clise_usd = e.target.value
+                        setComerciales({
+                          ...comerciales,
+                          precio_clise_usd,
+                          precio_total_pedido_usd: sumarPrecioTotal(comerciales.pt_usd, precio_clise_usd)
+                        })
+                      }}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
-                    <Label className="text-xs">Precio total pedido US$</Label>
-                    <Input
-                      type="number"
-                      step="0.01"
-                      value={comerciales.precio_total_pedido_usd}
-                      onChange={(e) => setComerciales({ ...comerciales, precio_total_pedido_usd: e.target.value })}
-                    />
+                    <Label className="text-xs">Precio total pedido US$ (PT + clisé)</Label>
+                    <Input type="number" step="0.01" disabled value={comerciales.precio_total_pedido_usd} />
                   </div>
                 </div>
               )}

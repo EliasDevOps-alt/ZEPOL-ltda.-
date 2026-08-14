@@ -20,7 +20,7 @@ def listar_materiales(db: Session, q: Optional[str]) -> List[Material]:
 
 
 def crear_material(db: Session, data: schemas.MaterialCreate) -> Material:
-    existente = db.scalar(select(Material).where(Material.codigo_mp == data.codigo_mp))
+    existente = db.scalar(select(Material).where(Material.codigo_mp.ilike(data.codigo_mp)))
     if existente is not None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Ya existe un material con código {data.codigo_mp}")
 
@@ -39,8 +39,8 @@ def actualizar_material(db: Session, material_id: int, data: schemas.MaterialUpd
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
     if data.codigo_mp != material.codigo_mp:
-        existente = db.scalar(select(Material).where(Material.codigo_mp == data.codigo_mp))
-        if existente is not None:
+        existente = db.scalar(select(Material).where(Material.codigo_mp.ilike(data.codigo_mp)))
+        if existente is not None and existente.id != material.id:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Ya existe un material con código {data.codigo_mp}")
         material.codigo_mp = data.codigo_mp
 

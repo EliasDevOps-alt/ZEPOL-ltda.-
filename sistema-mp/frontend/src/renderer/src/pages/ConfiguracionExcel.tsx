@@ -1,7 +1,10 @@
+import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FileSpreadsheet, FolderOpen, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, FileSpreadsheet, FolderOpen, KeyRound, TriangleAlert } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
@@ -16,6 +19,9 @@ export function ConfiguracionExcel() {
 
   const [error, setError] = useState<string | null>(null)
   const [exito, setExito] = useState(false)
+  const [passwordNueva, setPasswordNueva] = useState('')
+  const [errorPassword, setErrorPassword] = useState<string | null>(null)
+  const [exitoPassword, setExitoPassword] = useState(false)
 
   const configuracion = useQuery({
     queryKey: ['configuracion-excel'],
@@ -35,12 +41,37 @@ export function ConfiguracionExcel() {
     }
   })
 
+  const guardarPassword = useMutation({
+    mutationFn: (password: string) => api.actualizarPasswordExcel(apiBaseUrl, token, password),
+    onSuccess: () => {
+      setErrorPassword(null)
+      setExitoPassword(true)
+      setPasswordNueva('')
+      queryClient.invalidateQueries({ queryKey: ['configuracion-excel'] })
+    },
+    onError: (err) => {
+      setExitoPassword(false)
+      setErrorPassword(err instanceof ApiError ? err.message : 'No se pudo guardar la contraseña')
+    }
+  })
+
   async function localizarArchivo() {
     setError(null)
     setExito(false)
     const ruta = await window.api.elegirArchivoExcel()
     if (!ruta) return
     guardar.mutate(ruta)
+  }
+
+  function handleSubmitPassword(e: FormEvent) {
+    e.preventDefault()
+    setExitoPassword(false)
+    if (!passwordNueva) {
+      setErrorPassword('Escribe la contraseña')
+      return
+    }
+    setErrorPassword(null)
+    guardarPassword.mutate(passwordNueva)
   }
 
   return (
@@ -87,6 +118,52 @@ export function ConfiguracionExcel() {
             <FolderOpen className="h-4 w-4" />
             {guardar.isPending ? 'Verificando...' : 'Localizar archivo Excel'}
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <KeyRound className="h-4 w-4" />
+            Contraseña del Excel
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <p className="text-sm text-muted-foreground">
+            {configuracion.data?.tiene_password
+              ? 'Hay una contraseña guardada — se usa esta en vez de la del archivo .env del servidor.'
+              : 'Todavía no se guardó ninguna acá — el sistema usa la del archivo .env del servidor.'}
+          </p>
+
+          <form onSubmit={handleSubmitPassword} className="flex flex-col gap-2">
+            <Label className="text-xs">
+              {configuracion.data?.tiene_password ? 'Cambiar contraseña' : 'Guardar contraseña'}
+            </Label>
+            <div className="flex items-end gap-2">
+              <Input
+                type="password"
+                value={passwordNueva}
+                onChange={(e) => setPasswordNueva(e.target.value)}
+                placeholder="Nueva contraseña"
+                className="max-w-xs"
+              />
+              <Button type="submit" variant="outline" disabled={guardarPassword.isPending}>
+                {guardarPassword.isPending ? 'Guardando...' : 'Guardar'}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Por seguridad, nunca se muestra acá la contraseña ya guardada — solo podés escribir una nueva para
+              reemplazarla.
+            </p>
+          </form>
+
+          {errorPassword && <p className="text-sm text-destructive">{errorPassword}</p>}
+          {exitoPassword && (
+            <p className="flex items-center gap-1.5 text-sm text-success">
+              <CheckCircle2 className="h-4 w-4" />
+              Contraseña guardada — se validó que abre el archivo configurado.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

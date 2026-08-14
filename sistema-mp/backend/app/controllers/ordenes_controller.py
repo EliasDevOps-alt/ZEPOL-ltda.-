@@ -58,15 +58,38 @@ def _agregar_o_actualizar_pendiente(
         pendiente.cantidad_requerida = cantidad_requerida
 
 
+def _sincronizar_excel(db: Session, ot: OrdenTrabajo) -> None:
+    """Intenta escribir (o reescribir) la OT en el Excel OC-MP y actualiza
+    sincronizado_excel/excel_sync_error según el resultado. Nunca relanza: un
+    fallo al sincronizar con Excel no debe tumbar el guardado de la OT, que
+    ya está segura en la base de datos de todas formas. Se usa tanto para el
+    intento automático al crear la OT como para el reintento manual."""
+    campos = {campo: getattr(ot, campo) for campo in CAMPOS_COMERCIALES}
+    materiales = [{"codigo_mp": p.codigo_mp, "cantidad_requerida": p.cantidad_requerida} for p in ot.pendientes]
+    try:
+        excel_oc_mp.escribir_oc_mp(db, ot.numero_ot, ot.cliente, campos, materiales)
+    except Exception as exc:
+        ot.sincronizado_excel = False
+        ot.excel_sync_error = str(exc)
+    else:
+        ot.sincronizado_excel = True
+        ot.excel_sync_error = None
+    db.commit()
+    db.refresh(ot)
+
+
 def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
     """Crea o amplía la OT: fija cliente/diseño/datos comerciales (únicos
     para toda la OT) y agrega los materiales pedidos con su cantidad, como
     'pendientes' — el proceso y la máquina se asignan después, en Registrar
     Entrega, al momento de entregar cada material. Si el material ya estaba
     pendiente, actualiza la cantidad en vez de duplicar — así esta misma
-    acción sirve para crear la OT o para agregarle más materiales después."""
+    acción sirve para crear la OT o para agregarle más materiales después.
+    Si es una OT nueva (no viene de Excel), además intenta escribirla en el
+    Excel OC-MP — ver _sincronizar_excel."""
 
     ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
+    es_nueva = ot is None
     if ot is None:
         ot = OrdenTrabajo(numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno)
         db.add(ot)
@@ -86,6 +109,18 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
 
     db.commit()
     db.refresh(ot)
+
+    if es_nueva:
+        _sincronizar_excel(db, ot)
+
+    return ot
+
+
+def reintentar_sincronizacion_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+    _sincronizar_excel(db, ot)
     return ot
 
 

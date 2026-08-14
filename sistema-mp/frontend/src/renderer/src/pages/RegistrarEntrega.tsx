@@ -10,6 +10,8 @@ import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Combobox } from '@renderer/components/ui/combobox'
+import { CrearMaterialDialog } from '@renderer/components/CrearMaterialDialog'
+import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -19,91 +21,6 @@ import type { Consumo, Entrega, Material, OtMaterialPendiente, Proceso } from '@
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-interface BobinasPedido {
-  cantidadBobinas: string
-  bobinas: string[]
-}
-
-function CampoCantidad({
-  unidad,
-  datos,
-  onChange
-}: {
-  unidad: string
-  datos: BobinasPedido
-  onChange: (datos: BobinasPedido) => void
-}) {
-  const total = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
-
-  if (esUnidadDiscreta(unidad)) {
-    return (
-      <div className="flex flex-col gap-1.5">
-        <Label>Cantidad {unidad ? `(${unidad})` : ''}</Label>
-        <Input
-          type="number"
-          step="0.01"
-          min={0}
-          value={datos.bobinas[0] ?? ''}
-          onChange={(e) => onChange({ ...datos, bobinas: [e.target.value] })}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <>
-      <div className="flex items-end gap-2">
-        <div className="flex flex-1 flex-col gap-1.5">
-          <Label>Cantidad de bobinas</Label>
-          <Input
-            type="number"
-            min={1}
-            value={datos.cantidadBobinas}
-            onChange={(e) => onChange({ ...datos, cantidadBobinas: e.target.value })}
-          />
-        </div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            const n = Number(datos.cantidadBobinas)
-            if (!n || n < 1) return
-            onChange({ ...datos, bobinas: Array.from({ length: n }, (_, i) => datos.bobinas[i] ?? '') })
-          }}
-        >
-          Generar
-        </Button>
-      </div>
-
-      {datos.bobinas.length > 0 && (
-        <div className="mt-4 grid grid-cols-3 gap-3">
-          {datos.bobinas.map((valor, i) => (
-            <div key={i} className="flex flex-col gap-1">
-              <Label className="text-xs">N.º {i + 1}</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={valor}
-                onChange={(e) => {
-                  const copia = [...datos.bobinas]
-                  copia[i] = e.target.value
-                  onChange({ ...datos, bobinas: copia })
-                }}
-              />
-            </div>
-          ))}
-        </div>
-      )}
-
-      {datos.bobinas.length > 0 && (
-        <p className="mt-3 text-sm font-medium">
-          Total: {total.toFixed(2)} {unidad}
-        </p>
-      )}
-    </>
-  )
 }
 
 interface PendienteForm extends BobinasPedido {
@@ -139,6 +56,7 @@ function PendienteCard({
     bobinas: []
   })
   const [error, setError] = useState<string | null>(null)
+  const [crearMaterialAbierto, setCrearMaterialAbierto] = useState(false)
 
   const maquinas = useQuery({
     queryKey: ['maquinas', form.procesoId],
@@ -202,6 +120,19 @@ function PendienteCard({
             options={materialOptions}
             placeholder="Buscar código MP..."
             emptyText="Sin materiales activos que coincidan"
+          />
+          <button
+            type="button"
+            onClick={() => setCrearMaterialAbierto(true)}
+            className="self-start text-xs text-primary hover:underline"
+          >
+            No está en el catálogo — crear "{pendiente.codigo_mp}" como material nuevo
+          </button>
+          <CrearMaterialDialog
+            open={crearMaterialAbierto}
+            codigoInicial={pendiente.codigo_mp}
+            onOpenChange={setCrearMaterialAbierto}
+            onCreado={(material) => setForm({ ...form, materialId: String(material.id) })}
           />
         </div>
       )}

@@ -97,7 +97,18 @@ CREATE TABLE ordenes_trabajo (
     pt_usd                      NUMERIC(12,2),
     factura_clises              VARCHAR(10),
     precio_clise_usd            NUMERIC(12,2),
-    precio_total_pedido_usd     NUMERIC(12,2)
+    precio_total_pedido_usd     NUMERIC(12,2),
+
+    -- Escritura hacia el Excel OC-MP (ver app/services/excel_oc_mp.py,
+    -- escribir_oc_mp): TRUE por default a propósito — cubre tanto las OTs
+    -- creadas antes de este feature como las importadas desde Excel
+    -- (guardar_desde_excel), que ya están ahí por definición y nunca
+    -- disparan una escritura. Solo se pone FALSE cuando guardar_detalle crea
+    -- una OT nueva y el intento de escritura falla (archivo bloqueado, más
+    -- de 6 materiales, etc.) — ahí excel_sync_error guarda el motivo para
+    -- mostrarlo y permitir reintentar a mano.
+    sincronizado_excel           BOOLEAN     NOT NULL DEFAULT TRUE,
+    excel_sync_error             TEXT
 );
 
 -- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD.

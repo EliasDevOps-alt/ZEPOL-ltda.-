@@ -98,6 +98,8 @@ export interface OtDetalleOut extends CamposComercialesOt {
   numero_ot: string
   cliente: string | null
   diseno: string | null
+  sincronizado_excel: boolean
+  excel_sync_error: string | null
   procesos: ProcesoDetalleOut[]
   pendientes: OtMaterialPendiente[]
 }
@@ -141,6 +143,7 @@ export interface OtExcel extends CamposComercialesOt {
 
 export interface ConfiguracionExcel {
   ruta: string | null
+  tiene_password: boolean
 }
 
 export interface OtBusqueda {

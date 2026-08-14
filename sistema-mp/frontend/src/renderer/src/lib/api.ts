@@ -122,6 +122,13 @@ export function importarOtDesdeExcel(baseUrl: string, token: string, numeroOt: s
   })
 }
 
+export function reintentarSincronizacionExcel(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/reintentar-excel`, {
+    method: 'POST',
+    token
+  })
+}
+
 export function listarPendientes(baseUrl: string, token: string, numeroOt: string) {
   return request<OtMaterialPendiente[]>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/pendientes`, {
     token
@@ -185,6 +192,14 @@ export function obtenerConfigExcel(baseUrl: string, token: string) {
 
 export function actualizarConfigExcel(baseUrl: string, token: string, ruta: string) {
   return request<ConfiguracionExcel>(baseUrl, '/configuracion/excel-oc-mp', { method: 'PUT', token, body: { ruta } })
+}
+
+export function actualizarPasswordExcel(baseUrl: string, token: string, password: string) {
+  return request<ConfiguracionExcel>(baseUrl, '/configuracion/excel-oc-mp/password', {
+    method: 'PUT',
+    token,
+    body: { password }
+  })
 }
 
 export function marcarSidCompletado(baseUrl: string, token: string, otMaterialId: number) {
