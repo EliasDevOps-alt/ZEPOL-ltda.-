@@ -35,7 +35,12 @@ def _serializar(entrega: Entrega) -> schemas.EntregaOut:
     )
 
 
-@router.post("", response_model=schemas.EntregaOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=schemas.EntregaOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
+)
 def registrar_entrega(
     data: schemas.EntregaCreate,
     db: Session = Depends(get_db),

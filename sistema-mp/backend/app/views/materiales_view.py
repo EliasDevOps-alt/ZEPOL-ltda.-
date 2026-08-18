@@ -10,7 +10,7 @@ from ..controllers import materiales_controller
 from ..database import get_db
 from ..models import Material
 
-router = APIRouter(prefix="/materiales", tags=["materiales"], dependencies=[Depends(security.get_current_usuario)])
+router = APIRouter(prefix="/materiales", tags=["materiales"], dependencies=[Depends(security.requiere_modulo("materiales"))])
 
 
 def _serializar(material: Material) -> schemas.MaterialAdminOut:

@@ -15,16 +15,20 @@ import {
   History,
   List,
   LogOut,
-  Menu
+  Menu,
+  Users
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
 import { useAuth } from '@renderer/lib/AuthContext'
+import type { Modulo } from '@renderer/lib/types'
 
 interface NavItem {
   to: string
   label: string
   icon: ComponentType<{ className?: string }>
   children?: NavItem[]
+  modulo?: Modulo
+  soloAdmin?: boolean
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -32,20 +36,23 @@ const NAV_ITEMS: NavItem[] = [
     to: '/crear-ot',
     label: 'Crear OT',
     icon: FileEdit,
+    modulo: 'crear_ot',
     children: [{ to: '/crear-ot/listado', label: 'Todas las OT', icon: List }]
   },
   {
     to: '/entrega',
     label: 'Registrar Entrega',
     icon: PackageCheck,
+    modulo: 'registrar_entrega',
     children: [{ to: '/entrega/historial', label: 'Historial de OT', icon: History }]
   },
-  { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX },
+  { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX, modulo: 'registrar_devolucion' },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
-  { to: '/sid', label: 'Registro SID', icon: BadgeCheck },
-  { to: '/materiales', label: 'Materiales', icon: Boxes },
-  { to: '/maquinas', label: 'Máquinas', icon: Cog },
-  { to: '/configuracion/excel', label: 'Excel OC-MP', icon: FileSpreadsheet }
+  { to: '/sid', label: 'Registro SID', icon: BadgeCheck, modulo: 'registro_sid' },
+  { to: '/materiales', label: 'Materiales', icon: Boxes, modulo: 'materiales' },
+  { to: '/maquinas', label: 'Máquinas', icon: Cog, modulo: 'maquinas' },
+  { to: '/configuracion/excel', label: 'Excel OC-MP', icon: FileSpreadsheet, modulo: 'excel_oc_mp' },
+  { to: '/usuarios', label: 'Usuarios', icon: Users, soloAdmin: true }
 ]
 
 function navLinkClasses(isActive: boolean, indent = false): string {
@@ -92,9 +99,16 @@ function NavGroup({ item, pathname }: { item: NavItem; pathname: string }) {
 }
 
 export function Layout() {
-  const { sesion, cerrarSesion } = useAuth()
+  const { sesion, cerrarSesion, tieneAcceso } = useAuth()
   const location = useLocation()
   const [abierto, setAbierto] = useState(true)
+
+  const esAdmin = sesion?.usuario.rol === 'admin'
+  const itemsVisibles = NAV_ITEMS.filter((item) => {
+    if (item.soloAdmin) return esAdmin
+    if (item.modulo) return tieneAcceso(item.modulo)
+    return true
+  })
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -120,7 +134,7 @@ export function Layout() {
           </div>
 
           <nav className="flex flex-1 flex-col gap-1">
-            {NAV_ITEMS.map((item) =>
+            {itemsVisibles.map((item) =>
               item.children ? (
                 <NavGroup key={item.to} item={item} pathname={location.pathname} />
               ) : (

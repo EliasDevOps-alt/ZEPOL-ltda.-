@@ -1,7 +1,50 @@
+export type Rol = 'admin' | 'personal'
+
+// Debe coincidir con security.MODULOS_RESTRINGIBLES en el backend.
+export type Modulo =
+  | 'crear_ot'
+  | 'registrar_entrega'
+  | 'registrar_devolucion'
+  | 'registro_sid'
+  | 'materiales'
+  | 'maquinas'
+  | 'excel_oc_mp'
+
 export interface Usuario {
   id: number
   inicial: string
   nombre: string
+  rol: Rol
+  modulos_restringidos: Modulo[]
+}
+
+export interface UsuarioLogin {
+  inicial: string
+  nombre: string
+}
+
+export interface UsuarioAdmin {
+  id: number
+  inicial: string
+  nombre: string
+  rol: Rol
+  activo: boolean
+  modulos_restringidos: Modulo[]
+}
+
+export interface UsuarioCreate {
+  inicial: string
+  nombre: string
+  rol: Rol
+  password: string
+  modulos_restringidos: Modulo[]
+}
+
+export interface UsuarioUpdate {
+  nombre: string
+  rol: Rol
+  activo: boolean
+  modulos_restringidos: Modulo[]
 }
 
 export interface Proceso {

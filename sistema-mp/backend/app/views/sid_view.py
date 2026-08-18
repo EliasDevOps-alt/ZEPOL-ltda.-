@@ -8,7 +8,7 @@ from ..controllers import sid_controller
 from ..database import get_db
 from ..models import EstadoSid
 
-router = APIRouter(prefix="/ot-materiales", tags=["sid"], dependencies=[Depends(security.get_current_usuario)])
+router = APIRouter(prefix="/ot-materiales", tags=["sid"], dependencies=[Depends(security.requiere_modulo("registro_sid"))])
 
 
 def _resultado(db: Session, ot_material_id: int, estado_sid_id: int) -> schemas.EstadoSidUpdateOut:

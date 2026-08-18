@@ -8,7 +8,7 @@ from ..controllers import configuracion_controller
 from ..database import get_db
 
 router = APIRouter(
-    prefix="/configuracion", tags=["configuracion"], dependencies=[Depends(security.get_current_usuario)]
+    prefix="/configuracion", tags=["configuracion"], dependencies=[Depends(security.requiere_modulo("excel_oc_mp"))]
 )
 
 

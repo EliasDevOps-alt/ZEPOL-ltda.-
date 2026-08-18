@@ -10,7 +10,7 @@ from ..controllers import maquinas_controller
 from ..database import get_db
 from ..models import Maquina
 
-router = APIRouter(prefix="/maquinas", tags=["maquinas"], dependencies=[Depends(security.get_current_usuario)])
+router = APIRouter(prefix="/maquinas", tags=["maquinas"], dependencies=[Depends(security.requiere_modulo("maquinas"))])
 
 
 def _serializar(maquina: Maquina) -> schemas.MaquinaAdminOut:

@@ -25,7 +25,11 @@ import type {
   PromoverPendienteIn,
   PromoverPendienteOut,
   SidDevolucionUpdate,
-  Usuario
+  Usuario,
+  UsuarioAdmin,
+  UsuarioCreate,
+  UsuarioLogin,
+  UsuarioUpdate
 } from './types'
 
 export class ApiError extends Error {}
@@ -57,6 +61,32 @@ export function login(baseUrl: string, inicial: string, password: string) {
   return request<{ access_token: string; usuario: Usuario }>(baseUrl, '/auth/login', {
     method: 'POST',
     body: { inicial, password }
+  })
+}
+
+// Público a propósito — se pide antes de iniciar sesión, para el selector
+// de usuario en Login.
+export function listarUsuariosLogin(baseUrl: string) {
+  return request<UsuarioLogin[]>(baseUrl, '/auth/usuarios')
+}
+
+export function listarUsuarios(baseUrl: string, token: string) {
+  return request<UsuarioAdmin[]>(baseUrl, '/usuarios', { token })
+}
+
+export function crearUsuario(baseUrl: string, token: string, data: UsuarioCreate) {
+  return request<UsuarioAdmin>(baseUrl, '/usuarios', { method: 'POST', token, body: data })
+}
+
+export function actualizarUsuario(baseUrl: string, token: string, id: number, data: UsuarioUpdate) {
+  return request<UsuarioAdmin>(baseUrl, `/usuarios/${id}`, { method: 'PUT', token, body: data })
+}
+
+export function resetearPasswordUsuario(baseUrl: string, token: string, id: number, password: string) {
+  return request<UsuarioAdmin>(baseUrl, `/usuarios/${id}/password`, {
+    method: 'PUT',
+    token,
+    body: { password }
   })
 }
 

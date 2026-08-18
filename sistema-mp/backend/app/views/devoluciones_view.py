@@ -26,7 +26,12 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
     )
 
 
-@router.post("", response_model=schemas.DevolucionOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=schemas.DevolucionOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
 def registrar_devolucion(
     data: schemas.DevolucionCreate,
     db: Session = Depends(get_db),

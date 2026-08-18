@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import List
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -18,3 +20,10 @@ def iniciar_sesion(db: Session, inicial: str, password: str) -> tuple[str, Usuar
 
     token = security.create_access_token(usuario.id)
     return token, usuario
+
+
+def listar_usuarios_activos(db: Session) -> List[Usuario]:
+    """Solo inicial+nombre de usuarios activos, para poblar el selector de
+    Login — se pide sin estar autenticado todavía, por eso no expone nada
+    más (ni rol, ni si tienen o no contraseña)."""
+    return db.scalars(select(Usuario).where(Usuario.activo.is_(True)).order_by(Usuario.nombre)).all()

@@ -31,7 +31,28 @@ class Usuario(Base):
     nombre: Mapped[str] = mapped_column(String(100))
     password_hash: Mapped[Optional[str]] = mapped_column(String(255))
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 'admin' ve y usa todo, sin excepción. 'personal' arranca con acceso a
+    # todos los módulos también — se restringe puntualmente vía
+    # modulos_restringidos, nunca al revés.
+    rol: Mapped[str] = mapped_column(String(10), default="personal")
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    modulos_restringidos: Mapped[List["UsuarioModuloRestringido"]] = relationship(
+        back_populates="usuario", cascade="all, delete-orphan"
+    )
+
+
+class UsuarioModuloRestringido(Base):
+    """Una fila = ese módulo está bloqueado para ese usuario 'personal'. Sin
+    filas = acceso a todo. No tiene efecto sobre usuarios 'admin' (ver
+    security.requiere_modulo, que ignora esta tabla para ese rol)."""
+
+    __tablename__ = "usuario_modulos_restringidos"
+
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"), primary_key=True)
+    modulo: Mapped[str] = mapped_column(String(30), primary_key=True)
+
+    usuario: Mapped["Usuario"] = relationship(back_populates="modulos_restringidos")
 
 
 class Proceso(Base):

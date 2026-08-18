@@ -15,7 +15,9 @@ from ..models import OrdenTrabajo, OtMaterialPendiente
 
 router = APIRouter(prefix="/ordenes-trabajo", tags=["ordenes-trabajo"], dependencies=[Depends(security.get_current_usuario)])
 router_pendientes = APIRouter(
-    prefix="/ot-materiales-pendientes", tags=["ordenes-trabajo"], dependencies=[Depends(security.get_current_usuario)]
+    prefix="/ot-materiales-pendientes",
+    tags=["ordenes-trabajo"],
+    dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
 )
 
 
@@ -73,7 +75,12 @@ def listar_ordenes(
     return ordenes_controller.listar_ordenes(db, q, desde, hasta)
 
 
-@router.post("/detalle", response_model=schemas.OtDetalleOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/detalle",
+    response_model=schemas.OtDetalleOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
 def guardar_detalle(data: schemas.OtDetalleCreate, db: Session = Depends(get_db)):
     ot = ordenes_controller.guardar_detalle(db, data)
     return _serializar_detalle(ot)
@@ -97,7 +104,12 @@ def buscar_con_fallback(numero_ot: str, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{numero_ot}/importar-excel", response_model=schemas.OtImportadaOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{numero_ot}/importar-excel",
+    response_model=schemas.OtImportadaOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
 def importar_desde_excel(numero_ot: str, db: Session = Depends(get_db)):
     ot = ordenes_controller.guardar_desde_excel(db, numero_ot)
     pendientes = ordenes_controller.listar_pendientes(db, numero_ot)
@@ -112,7 +124,11 @@ def listar_pendientes(numero_ot: str, db: Session = Depends(get_db)):
     return [_serializar_pendiente(p) for p in pendientes]
 
 
-@router.post("/{numero_ot}/reintentar-excel", response_model=schemas.OtDetalleOut)
+@router.post(
+    "/{numero_ot}/reintentar-excel",
+    response_model=schemas.OtDetalleOut,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
 def reintentar_excel(numero_ot: str, db: Session = Depends(get_db)):
     ot = ordenes_controller.reintentar_sincronizacion_excel(db, numero_ot)
     return _serializar_detalle(ot)

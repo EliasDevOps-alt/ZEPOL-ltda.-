@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { Settings2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -9,18 +10,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rend
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
+import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-
-const USUARIOS = [
-  { inicial: 'ER', nombre: 'Erasmo' },
-  { inicial: 'EB', nombre: 'Eber' },
-  { inicial: 'BO', nombre: 'Boris' },
-  { inicial: 'CE', nombre: 'César' }
-]
 
 export function Login() {
   const { iniciarSesion } = useAuth()
   const { apiBaseUrl, setApiBaseUrl, loaded } = useConfig()
+  const usuarios = useQuery({
+    queryKey: ['usuarios-login', apiBaseUrl],
+    queryFn: () => api.listarUsuariosLogin(apiBaseUrl),
+    enabled: loaded
+  })
   const [inicial, setInicial] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -74,13 +74,21 @@ export function Login() {
                     <SelectValue placeholder="Selecciona tu nombre" />
                   </SelectTrigger>
                   <SelectContent>
-                    {USUARIOS.map((u) => (
+                    {usuarios.data?.map((u) => (
                       <SelectItem key={u.inicial} value={u.inicial}>
                         {u.nombre}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {usuarios.isError && (
+                  <p className="flex items-center justify-between text-xs text-destructive">
+                    No se pudo cargar la lista de usuarios.
+                    <button type="button" onClick={() => usuarios.refetch()} className="underline">
+                      Reintentar
+                    </button>
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">

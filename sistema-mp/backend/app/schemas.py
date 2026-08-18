@@ -7,10 +7,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class UsuarioOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
     id: int
     inicial: str
     nombre: str
+    rol: str
+    modulos_restringidos: List[str] = []
 
 
 class LoginRequest(BaseModel):
@@ -22,6 +23,43 @@ class TokenOut(BaseModel):
     access_token: str
     token_type: str = "bearer"
     usuario: UsuarioOut
+
+
+class UsuarioLoginOut(BaseModel):
+    """Versión pública (sin rol ni permisos) para poblar el selector de
+    Login — se pide sin estar autenticado todavía."""
+
+    model_config = ConfigDict(from_attributes=True)
+    inicial: str
+    nombre: str
+
+
+class UsuarioAdminOut(BaseModel):
+    id: int
+    inicial: str
+    nombre: str
+    rol: str
+    activo: bool
+    modulos_restringidos: List[str] = []
+
+
+class UsuarioCreate(BaseModel):
+    inicial: str
+    nombre: str
+    rol: str = "personal"
+    password: str
+    modulos_restringidos: List[str] = []
+
+
+class UsuarioUpdate(BaseModel):
+    nombre: str
+    rol: str
+    activo: bool
+    modulos_restringidos: List[str] = []
+
+
+class UsuarioPasswordIn(BaseModel):
+    password: str
 
 
 class ProcesoOut(BaseModel):

@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, type ReactNode } from 'react'
 import * as api from './api'
-import type { Usuario } from './types'
+import type { Modulo, Usuario } from './types'
 import { useConfig } from './ConfigContext'
 
 const STORAGE_KEY = 'zepol.sesion'
@@ -14,6 +14,7 @@ interface AuthContextValue {
   sesion: Sesion | null
   iniciarSesion: (inicial: string, password: string) => Promise<void>
   cerrarSesion: () => void
+  tieneAcceso: (modulo: Modulo) => boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -22,7 +23,16 @@ function cargarSesion(): Sesion | null {
   const raw = localStorage.getItem(STORAGE_KEY)
   if (!raw) return null
   try {
-    return JSON.parse(raw) as Sesion
+    const sesion = JSON.parse(raw) as Sesion
+    // Sesiones guardadas antes de que existiera rol/modulos_restringidos no
+    // tienen esos campos — sin esto, tieneAcceso() revienta en el primer
+    // render y la pantalla queda en blanco. Se descarta y pide login de
+    // nuevo en vez de dejar corriendo una sesión con forma vieja.
+    if (typeof sesion.usuario?.rol !== 'string' || !Array.isArray(sesion.usuario?.modulos_restringidos)) {
+      localStorage.removeItem(STORAGE_KEY)
+      return null
+    }
+    return sesion
   } catch {
     return null
   }
@@ -44,8 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSesion(null)
   }
 
+  function tieneAcceso(modulo: Modulo): boolean {
+    if (!sesion) return false
+    return sesion.usuario.rol === 'admin' || !(sesion.usuario.modulos_restringidos ?? []).includes(modulo)
+  }
+
   return (
-    <AuthContext.Provider value={{ sesion, iniciarSesion, cerrarSesion }}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={{ sesion, iniciarSesion, cerrarSesion, tieneAcceso }}>
+      {children}
+    </AuthContext.Provider>
   )
 }
 

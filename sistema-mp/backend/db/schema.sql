@@ -11,7 +11,21 @@ CREATE TABLE usuarios (
     nombre        VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255),                   -- se define al implementar login (Fase 1)
     activo        BOOLEAN      NOT NULL DEFAULT TRUE,
+    -- 'admin' ve y usa todo, sin excepción. 'personal' arranca con acceso a
+    -- todos los módulos también — se le restringe puntualmente marcando
+    -- filas en usuario_modulos_restringidos, nunca al revés (no hace falta
+    -- habilitar módulo por módulo a un usuario nuevo).
+    rol           VARCHAR(10)  NOT NULL DEFAULT 'personal' CHECK (rol IN ('admin', 'personal')),
     creado_en     TIMESTAMP    NOT NULL DEFAULT now()
+);
+
+-- Módulos bloqueados para un usuario 'personal' puntual (ver Usuario.rol
+-- arriba). Una fila acá = ese módulo NO está disponible para ese usuario.
+-- Sin filas = acceso a todo. No tiene efecto sobre usuarios 'admin'.
+CREATE TABLE usuario_modulos_restringidos (
+    usuario_id  INTEGER     NOT NULL REFERENCES usuarios(id),
+    modulo      VARCHAR(30) NOT NULL,
+    PRIMARY KEY (usuario_id, modulo)
 );
 
 CREATE TABLE procesos (
