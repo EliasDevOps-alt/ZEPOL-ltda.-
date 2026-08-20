@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import schemas, security
 from ..controllers import entregas_controller
-from ..controllers.pedidos_controller import total_entregado_pedido
+from ..controllers.pedidos_controller import materiales_entregados_pedido, total_entregado_pedido
 from ..database import get_db
-from ..models import Entrega, Usuario
+from ..models import Entrega, OtMaterial, Usuario
 
 router = APIRouter(prefix="/entregas", tags=["entregas"], dependencies=[Depends(security.get_current_usuario)])
 
@@ -32,6 +32,10 @@ def _serializar(entrega: Entrega) -> schemas.EntregaOut:
         total_entregado=sum(float(b.cantidad) for b in entrega.bobinas),
         cantidad_requerida=float(ot_material.cantidad_requerida) if ot_material.cantidad_requerida else None,
         total_entregado_pedido=total_entregado_pedido(ot_material),
+        material_entregado_id=entrega.material_id,
+        codigo_mp_entregado=entrega.material.codigo_mp,
+        descripcion_entregado=entrega.material.descripcion,
+        observacion=entrega.observacion,
     )
 
 
@@ -54,3 +58,15 @@ def registrar_entrega(
 def listar_entregas(numero_ot: Optional[str] = None, db: Session = Depends(get_db)):
     entregas = entregas_controller.listar_entregas_por_ot(db, numero_ot)
     return [_serializar(e) for e in entregas]
+
+
+@router.get("/materiales-entregados/{ot_material_id}", response_model=List[schemas.BalanceMaterialOut])
+def materiales_entregados(ot_material_id: int, db: Session = Depends(get_db)):
+    """Materiales realmente entregados contra un pedido, con su saldo
+    disponible para devolver — normalmente uno solo, pero puede haber más de
+    uno si alguna entrega fue una sustitución. Lo usa Registrar Devolución
+    para saber contra cuál material validar/registrar."""
+    ot_material = db.get(OtMaterial, ot_material_id)
+    if ot_material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
+    return materiales_entregados_pedido(ot_material)

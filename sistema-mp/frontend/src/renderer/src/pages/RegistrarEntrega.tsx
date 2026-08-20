@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { CheckCircle2, PackagePlus, Search, X } from 'lucide-react'
+import { ArrowRightLeft, CheckCircle2, PackagePlus, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -27,6 +27,18 @@ interface PendienteForm extends BobinasPedido {
   materialId: string
   procesoId: string
   maquinaId: string
+  // Material que realmente se entrega, si difiere de materialId (alternativa
+  // o cambio de estructura) — independiente de resolver a qué material del
+  // catálogo corresponde el código que vino del Excel.
+  materialEntregadoId: string
+  observacion: string
+}
+
+interface SeleccionEntrega extends BobinasPedido {
+  // Material que realmente se entrega — arranca igual al del pedido; el
+  // operador solo lo cambia si hubo una alternativa o cambio de estructura.
+  materialId: string
+  observacion: string
 }
 
 function PendienteCard({
@@ -52,11 +64,14 @@ function PendienteCard({
     materialId: pendiente.material_id != null ? String(pendiente.material_id) : '',
     procesoId: '',
     maquinaId: '',
+    materialEntregadoId: '',
+    observacion: '',
     cantidadBobinas: '',
     bobinas: []
   })
   const [error, setError] = useState<string | null>(null)
   const [crearMaterialAbierto, setCrearMaterialAbierto] = useState(false)
+  const [cambioMaterialAbierto, setCambioMaterialAbierto] = useState(false)
 
   const maquinas = useQuery({
     queryKey: ['maquinas', form.procesoId],
@@ -76,7 +91,9 @@ function PendienteCard({
       return api.registrarEntrega(apiBaseUrl, token, {
         ot_material_id,
         fecha,
-        bobinas: form.bobinas.map(Number)
+        bobinas: form.bobinas.map(Number),
+        material_id: cambioMaterialAbierto && form.materialEntregadoId ? Number(form.materialEntregadoId) : undefined,
+        observacion: form.observacion.trim() || undefined
       })
     },
     onSuccess: () => {
@@ -180,6 +197,34 @@ function PendienteCard({
         onChange={(d) => setForm({ ...form, ...d })}
       />
 
+      <div className="mt-3 border-t border-warning/20 pt-3">
+        {!cambioMaterialAbierto ? (
+          <button
+            type="button"
+            onClick={() => setCambioMaterialAbierto(true)}
+            className="text-xs text-primary hover:underline"
+          >
+            ¿Se entregó un material distinto? (alternativa o cambio de estructura)
+          </button>
+        ) : (
+          <div className="flex flex-col gap-2">
+            <Label className="text-xs">Material realmente entregado</Label>
+            <Combobox
+              value={form.materialEntregadoId || form.materialId}
+              onChange={(v) => setForm({ ...form, materialEntregadoId: v })}
+              options={materialOptions}
+              placeholder="Buscar código MP..."
+              emptyText="Sin materiales activos que coincidan"
+            />
+            <Input
+              placeholder="Nota (opcional) — ej. sin stock del pedido"
+              value={form.observacion}
+              onChange={(e) => setForm({ ...form, observacion: e.target.value })}
+            />
+          </div>
+        )}
+      </div>
+
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
       <Button type="submit" className="mt-3" disabled={mutation.isPending}>
@@ -197,10 +242,13 @@ export function RegistrarEntrega() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
-  const [seleccion, setSeleccion] = useState<Record<number, BobinasPedido>>({})
+  const [seleccion, setSeleccion] = useState<Record<number, SeleccionEntrega>>({})
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
   const [confirmaciones, setConfirmaciones] = useState<Entrega[]>([])
+  // Pedidos donde el operador abrió el panel de "entregar otro material" —
+  // colapsado por defecto, no estorba en el caso normal (sin sustitución).
+  const [cambioMaterialAbierto, setCambioMaterialAbierto] = useState<Record<number, boolean>>({})
 
   const pedidos = useQuery({
     queryKey: ['consumo', otBuscada],
@@ -213,6 +261,23 @@ export function RegistrarEntrega() {
     queryFn: () => api.listarPendientes(apiBaseUrl, token, otBuscada!),
     enabled: !!otBuscada
   })
+
+  // Solo para mostrar "¿por cuál material se entregó?" en la lista de
+  // pedidos — la mayoría de las OT no tienen sustituciones, pero es una
+  // sola consulta para toda la OT, no una por pedido.
+  const entregas = useQuery({
+    queryKey: ['entregas', otBuscada],
+    queryFn: () => api.listarEntregas(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada
+  })
+
+  const entregasPorPedido = useMemo(() => {
+    const mapa = new Map<number, typeof entregas.data>()
+    for (const e of entregas.data ?? []) {
+      mapa.set(e.ot_material_id, [...(mapa.get(e.ot_material_id) ?? []), e])
+    }
+    return mapa
+  }, [entregas.data])
 
   // Los cargos de tinta (Laminación, FLaminación, Superficie) no se entregan
   // en planta — se registran en Crear OT, pero no aparecen aquí.
@@ -246,7 +311,9 @@ export function RegistrarEntrega() {
           const entrega = await api.registrarEntrega(apiBaseUrl, token, {
             ot_material_id: Number(otMaterialId),
             fecha,
-            bobinas: datos.bobinas.map(Number)
+            bobinas: datos.bobinas.map(Number),
+            material_id: Number(datos.materialId),
+            observacion: datos.observacion.trim() || undefined
           })
           exitos.push(entrega)
         } catch (err) {
@@ -291,9 +358,13 @@ export function RegistrarEntrega() {
       if (copia[pedido.ot_material_id]) {
         delete copia[pedido.ot_material_id]
       } else {
-        copia[pedido.ot_material_id] = esUnidadDiscreta(pedido.unidad)
-          ? { cantidadBobinas: '1', bobinas: [''] }
-          : { cantidadBobinas: '', bobinas: [] }
+        copia[pedido.ot_material_id] = {
+          ...(esUnidadDiscreta(pedido.unidad)
+            ? { cantidadBobinas: '1', bobinas: [''] }
+            : { cantidadBobinas: '', bobinas: [] }),
+          materialId: String(pedido.material_id),
+          observacion: ''
+        }
       }
       return copia
     })
@@ -333,8 +404,15 @@ export function RegistrarEntrega() {
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
               <div>
                 <p>
-                  {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}.
+                  {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}
+                  {confirmacion.codigo_mp_entregado !== confirmacion.codigo_mp
+                    ? ` — se entregó como ${confirmacion.codigo_mp_entregado}`
+                    : ''}
+                  .
                 </p>
+                {confirmacion.observacion && (
+                  <p className="text-muted-foreground">Nota: {confirmacion.observacion}</p>
+                )}
                 {confirmacion.cantidad_requerida ? (
                   <p className="text-muted-foreground">
                     Van {confirmacion.total_entregado_pedido} de {confirmacion.cantidad_requerida}{' '}
@@ -391,29 +469,44 @@ export function RegistrarEntrega() {
               <p className="text-xs text-muted-foreground">
                 Materiales pedidos en esta OT — marca todos a los que corresponda la entrega:
               </p>
-              {pedidosVisibles.map((pedido) => (
-                <button
-                  key={pedido.ot_material_id}
-                  type="button"
-                  onClick={() => toggleSeleccion(pedido)}
-                  className={cn(
-                    'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
-                    seleccion[pedido.ot_material_id]
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border hover:bg-muted'
-                  )}
-                >
-                  <span className="font-medium">
-                    {pedido.proceso} — {pedido.maquina} — {pedido.codigo_mp}
-                  </span>
-                  <span className="text-muted-foreground">
-                    {pedido.diseno ? `Diseño: ${pedido.diseno} · ` : ''}Entregado: {pedido.total_entregado}{' '}
-                    {pedido.unidad}
-                    {pedido.cantidad_requerida ? ` de ${pedido.cantidad_requerida} requeridos` : ''} ·{' '}
-                    {pedido.estado_entrega}
-                  </span>
-                </button>
-              ))}
+              {pedidosVisibles.map((pedido) => {
+                const materialesSustituidos = [
+                  ...new Set(
+                    (entregasPorPedido.get(pedido.ot_material_id) ?? [])
+                      .map((e) => e.codigo_mp_entregado)
+                      .filter((codigo) => codigo !== pedido.codigo_mp)
+                  )
+                ]
+                return (
+                  <button
+                    key={pedido.ot_material_id}
+                    type="button"
+                    onClick={() => toggleSeleccion(pedido)}
+                    className={cn(
+                      'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
+                      seleccion[pedido.ot_material_id]
+                        ? 'border-primary bg-primary/10'
+                        : 'border-border hover:bg-muted'
+                    )}
+                  >
+                    <span className="flex flex-wrap items-center gap-2 font-medium">
+                      {pedido.proceso} — {pedido.maquina} — {pedido.codigo_mp}
+                      {materialesSustituidos.length > 0 && (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                          <ArrowRightLeft className="h-3 w-3" />
+                          {materialesSustituidos.join(', ')}
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {pedido.diseno ? `Diseño: ${pedido.diseno} · ` : ''}Entregado: {pedido.total_entregado}{' '}
+                      {pedido.unidad}
+                      {pedido.cantidad_requerida ? ` de ${pedido.cantidad_requerida} requeridos` : ''} ·{' '}
+                      {pedido.estado_entrega}
+                    </span>
+                  </button>
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -480,9 +573,49 @@ export function RegistrarEntrega() {
                         unidad={pedido.unidad}
                         datos={datos}
                         onChange={(d) =>
-                          setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: d }))
+                          setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: { ...prev[pedido.ot_material_id], ...d } }))
                         }
                       />
+
+                      <div className="mt-3 border-t border-border pt-3">
+                        {!cambioMaterialAbierto[pedido.ot_material_id] ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCambioMaterialAbierto((prev) => ({ ...prev, [pedido.ot_material_id]: true }))
+                            }
+                            className="text-xs text-primary hover:underline"
+                          >
+                            ¿Se entregó un material distinto? (alternativa o cambio de estructura)
+                          </button>
+                        ) : (
+                          <div className="flex flex-col gap-2">
+                            <Label className="text-xs">Material realmente entregado</Label>
+                            <Combobox
+                              value={datos.materialId}
+                              onChange={(v) =>
+                                setSeleccion((prev) => ({
+                                  ...prev,
+                                  [pedido.ot_material_id]: { ...prev[pedido.ot_material_id], materialId: v }
+                                }))
+                              }
+                              options={materialOptions}
+                              placeholder="Buscar código MP..."
+                              emptyText="Sin materiales activos que coincidan"
+                            />
+                            <Input
+                              placeholder="Nota (opcional) — ej. sin stock del pedido"
+                              value={datos.observacion}
+                              onChange={(e) =>
+                                setSeleccion((prev) => ({
+                                  ...prev,
+                                  [pedido.ot_material_id]: { ...prev[pedido.ot_material_id], observacion: e.target.value }
+                                }))
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )
                 })}

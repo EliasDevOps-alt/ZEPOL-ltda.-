@@ -7,8 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import Devolucion, DevolucionBobina, OrdenTrabajo, OtMaterial, OtProceso, Usuario
-from .pedidos_controller import total_devuelto_pedido, total_entregado_pedido
+from ..models import Devolucion, DevolucionBobina, Material, OrdenTrabajo, OtMaterial, OtProceso, Usuario
 
 
 def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.DevolucionCreate) -> Devolucion:
@@ -16,17 +15,18 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
     if ot_material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido de material no encontrado")
 
-    total_entregado = total_entregado_pedido(ot_material)
-    total_devuelto_previo = total_devuelto_pedido(ot_material)
-    total_nuevo = sum(data.bobinas)
-    if total_devuelto_previo + total_nuevo > total_entregado:
-        disponible = total_entregado - total_devuelto_previo
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            f"No se puede devolver más de lo entregado. Disponible para devolver: {disponible} {ot_material.material.unidad}",
-        )
+    material = db.get(Material, data.material_id)
+    if material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
-    devolucion = Devolucion(ot_material_id=ot_material.id, usuario_id=usuario.id, fecha=data.fecha)
+    # No se bloquea si la cantidad supera lo entregado registrado en el
+    # sistema: el registro de entregas puede estar incompleto o el conteo
+    # físico real puede diferir, y el operador sabe qué volvió realmente a
+    # bodega mejor que la cuenta del sistema. El frontend avisa cuando esto
+    # pasa (ver PedidoDevolucionCard), pero no impide guardar.
+    devolucion = Devolucion(
+        ot_material_id=ot_material.id, material_id=material.id, usuario_id=usuario.id, fecha=data.fecha
+    )
     devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(devolucion)
     db.commit()

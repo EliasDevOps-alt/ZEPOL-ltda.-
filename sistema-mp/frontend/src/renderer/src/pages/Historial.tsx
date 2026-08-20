@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { PackageCheck, PackageX, Search } from 'lucide-react'
+import { ArrowRightLeft, PackageCheck, PackageX, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -130,11 +130,26 @@ export function Historial() {
                 {pedidos.map((pedido) => {
                   const susEntregas = entregasPorPedido.get(pedido.ot_material_id) ?? []
                   const susDevoluciones = devolucionesPorPedido.get(pedido.ot_material_id) ?? []
+                  const materialesSustituidos = [
+                    ...new Set(
+                      susEntregas
+                        .map((e) => e.codigo_mp_entregado)
+                        .filter((codigo) => codigo !== pedido.codigo_mp)
+                    )
+                  ]
                   return (
                     <Card key={pedido.ot_material_id}>
                       <CardHeader className="flex-row items-start justify-between">
                         <div>
-                          <CardTitle className="text-base">{pedido.codigo_mp}</CardTitle>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <CardTitle className="text-base">{pedido.codigo_mp}</CardTitle>
+                            {materialesSustituidos.length > 0 && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                                <ArrowRightLeft className="h-3 w-3" />
+                                {materialesSustituidos.join(', ')}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-muted-foreground">
                             {pedido.proceso} · {pedido.maquina}
                           </p>
@@ -171,6 +186,13 @@ export function Historial() {
                           </div>
                         </div>
 
+                        {pedido.cantidad_requerida != null && pedido.cantidad_requerida - pedido.total_entregado > 0 && (
+                          <p className="mb-4 text-xs text-muted-foreground">
+                            Aún falta entregar: {(pedido.cantidad_requerida - pedido.total_entregado).toFixed(2)}{' '}
+                            {pedido.unidad}
+                          </p>
+                        )}
+
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                           <div>
                             <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -182,13 +204,19 @@ export function Historial() {
                                 <div key={e.id} className="rounded-md border border-border p-2 text-xs">
                                   <div className="flex justify-between">
                                     <span>
-                                      {e.fecha} · {e.codigo_mp}
+                                      {e.fecha} · {e.codigo_mp_entregado}
+                                      {e.codigo_mp_entregado !== e.codigo_mp ? (
+                                        <span className="text-warning"> (pedido: {e.codigo_mp})</span>
+                                      ) : (
+                                        ''
+                                      )}
                                     </span>
                                     <span className="font-medium">
                                       {e.total_entregado} {e.unidad}
                                     </span>
                                   </div>
                                   <p className="text-muted-foreground">{e.usuario}</p>
+                                  {e.observacion && <p className="text-muted-foreground">Nota: {e.observacion}</p>}
                                   <p className="mt-1 text-muted-foreground">
                                     {e.bobinas.length} {e.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
                                     {e.bobinas.map((b) => `${b} ${e.unidad}`).join(', ')}
@@ -211,7 +239,12 @@ export function Historial() {
                                 <div key={d.id} className="rounded-md border border-border p-2 text-xs">
                                   <div className="flex justify-between">
                                     <span>
-                                      {d.fecha} · {pedido.codigo_mp}
+                                      {d.fecha} · {d.codigo_mp}
+                                      {d.codigo_mp !== pedido.codigo_mp ? (
+                                        <span className="text-warning"> (pedido: {pedido.codigo_mp})</span>
+                                      ) : (
+                                        ''
+                                      )}
                                     </span>
                                     <span className="font-medium">
                                       {d.total_devuelto} {pedido.unidad}

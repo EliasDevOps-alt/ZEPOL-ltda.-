@@ -9,7 +9,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import type { Consumo } from '@renderer/lib/types'
+import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
 type Pestana = 'entregados' | 'devueltos'
 type Filtro = 'pendientes' | 'completados' | 'todos'
@@ -44,6 +44,29 @@ export function RegistroSid() {
     queryKey: ['consumo-sid'],
     queryFn: () => api.consultarConsumo(apiBaseUrl, token)
   })
+
+  // Detalle de bobinas por pedido — una sola consulta para todo el listado
+  // (no una por fila), igual que en Historial de OT.
+  const entregas = useQuery({
+    queryKey: ['entregas-todas'],
+    queryFn: () => api.listarEntregas(apiBaseUrl, token)
+  })
+  const devoluciones = useQuery({
+    queryKey: ['devoluciones-todas'],
+    queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token)
+  })
+
+  const entregasPorPedido = useMemo(() => {
+    const mapa = new Map<number, Entrega[]>()
+    for (const e of entregas.data ?? []) mapa.set(e.ot_material_id, [...(mapa.get(e.ot_material_id) ?? []), e])
+    return mapa
+  }, [entregas.data])
+
+  const devolucionesPorPedido = useMemo(() => {
+    const mapa = new Map<number, Devolucion[]>()
+    for (const d of devoluciones.data ?? []) mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
+    return mapa
+  }, [devoluciones.data])
 
   const invalidar = () => {
     setError(null)
@@ -200,6 +223,8 @@ export function RegistroSid() {
             pestana={pestana}
             onCambiarEstado={onCambiarEstado}
             cambiando={cambiando}
+            entregasPorPedido={entregasPorPedido}
+            devolucionesPorPedido={devolucionesPorPedido}
           />
         ))}
       </div>
@@ -213,7 +238,9 @@ function GrupoOt({
   completo,
   pestana,
   onCambiarEstado,
-  cambiando
+  cambiando,
+  entregasPorPedido,
+  devolucionesPorPedido
 }: {
   numeroOt: string
   pedidos: Consumo[]
@@ -221,6 +248,8 @@ function GrupoOt({
   pestana: Pestana
   onCambiarEstado: (id: number, completado: boolean) => void
   cambiando: boolean
+  entregasPorPedido: Map<number, Entrega[]>
+  devolucionesPorPedido: Map<number, Devolucion[]>
 }) {
   return (
     <Card>
@@ -245,6 +274,8 @@ function GrupoOt({
               pestana={pestana}
               onCambiarEstado={(completado) => onCambiarEstado(p.ot_material_id, completado)}
               cambiando={cambiando}
+              susEntregas={entregasPorPedido.get(p.ot_material_id) ?? []}
+              susDevoluciones={devolucionesPorPedido.get(p.ot_material_id) ?? []}
             />
           ))}
         </div>
@@ -257,14 +288,41 @@ function FilaMaterial({
   pedido,
   pestana,
   onCambiarEstado,
-  cambiando
+  cambiando,
+  susEntregas,
+  susDevoluciones
 }: {
   pedido: Consumo
   pestana: Pestana
   onCambiarEstado: (completado: boolean) => void
   cambiando: boolean
+  susEntregas: Entrega[]
+  susDevoluciones: Devolucion[]
 }) {
   const completado = estaCompletado(pedido, pestana)
+
+  // Agrupa las entregas/devoluciones de este pedido por el material que
+  // realmente salió/volvió — normalmente un solo grupo, más de uno si hubo
+  // una sustitución parcial (parte del material original, parte del
+  // alternativo). Cada entrega/devolución es de un solo material, así que
+  // agrupar por código ya separa las bobinas correctamente por material.
+  const gruposEntregados = useMemo(() => {
+    const mapa = new Map<string, number[]>()
+    for (const e of susEntregas) {
+      mapa.set(e.codigo_mp_entregado, [...(mapa.get(e.codigo_mp_entregado) ?? []), ...e.bobinas])
+    }
+    return mapa
+  }, [susEntregas])
+
+  const gruposDevueltos = useMemo(() => {
+    const mapa = new Map<string, number[]>()
+    for (const d of susDevoluciones) {
+      mapa.set(d.codigo_mp, [...(mapa.get(d.codigo_mp) ?? []), ...d.bobinas])
+    }
+    return mapa
+  }, [susDevoluciones])
+
+  const gruposReales = pestana === 'entregados' ? gruposEntregados : gruposDevueltos
 
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0">
@@ -284,9 +342,32 @@ function FilaMaterial({
           <CeldaCopiable texto={pedido.cliente ?? ''} />
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Material</p>
+          <p className="text-xs text-muted-foreground">Material {pedido.material_sustituido ? '(pedido)' : ''}</p>
           <CeldaCopiable texto={pedido.codigo_mp} />
         </div>
+        {pedido.material_sustituido && (
+          <div className="sm:col-span-2 rounded-md border border-warning/30 bg-warning/5 p-2">
+            <p className="mb-1 text-xs text-muted-foreground">
+              {pestana === 'entregados' ? 'Realmente entregado' : 'Realmente devuelto'} (hubo sustitución)
+            </p>
+            <div className="flex flex-col gap-2">
+              {[...gruposReales.entries()].map(([codigo, bobinas]) => (
+                <div key={codigo}>
+                  <div className="flex items-center justify-between gap-2">
+                    <CeldaCopiable texto={codigo} />
+                    <span className="text-xs text-muted-foreground">
+                      {bobinas.reduce((a, b) => a + b, 0).toFixed(2)} {pedido.unidad}
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {bobinas.length} {bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+                    {bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         <div className="sm:col-span-2">
           <p className="text-xs text-muted-foreground">Descripción</p>
           <CeldaCopiable texto={pedido.descripcion ?? ''} />

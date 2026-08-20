@@ -250,12 +250,18 @@ class Entrega(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ot_material_id: Mapped[int] = mapped_column(ForeignKey("ot_materiales.id"))
+    # Material REALMENTE entregado. Normalmente igual a ot_material.material_id,
+    # pero puede diferir cuando almacén da una alternativa (otro micronaje/ancho)
+    # o un cambio de estructura por falta de stock del material pedido.
+    material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
+    observacion: Mapped[Optional[str]] = mapped_column(Text)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_material: Mapped["OtMaterial"] = relationship(back_populates="entregas")
+    material: Mapped["Material"] = relationship()
     usuario: Mapped["Usuario"] = relationship()
     bobinas: Mapped[List["EntregaBobina"]] = relationship(back_populates="entrega", cascade="all, delete-orphan")
 
@@ -279,18 +285,24 @@ class EntregaBobina(Base):
 class Devolucion(Base):
     """Cuelga del PEDIDO (OtMaterial), no de una entrega puntual: una vez que
     el material está en planta ya no se distingue de qué entrega parcial
-    vino, así que se valida contra el total entregado de ese material."""
+    vino, así que se valida contra el total entregado de ese material. Un
+    pedido puede tener entregas de más de un material si hubo una
+    sustitución (ver Entrega.material_id) — material_id acá indica de cuál
+    de esos materiales se está devolviendo, y el saldo disponible se calcula
+    por material, no por pedido en conjunto."""
 
     __tablename__ = "devoluciones"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ot_material_id: Mapped[int] = mapped_column(ForeignKey("ot_materiales.id"))
+    material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_material: Mapped["OtMaterial"] = relationship(back_populates="devoluciones")
+    material: Mapped["Material"] = relationship()
     usuario: Mapped["Usuario"] = relationship()
     bobinas: Mapped[List["DevolucionBobina"]] = relationship(
         back_populates="devolucion", cascade="all, delete-orphan"

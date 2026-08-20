@@ -243,6 +243,10 @@ export interface EntregaCreate {
   ot_material_id: number
   fecha: string
   bobinas: number[]
+  // Material realmente entregado, si difiere del pedido (alternativa o
+  // cambio de estructura). Sin especificar = se entrega el del pedido.
+  material_id?: number | null
+  observacion?: string | null
 }
 
 export interface Entrega {
@@ -260,10 +264,27 @@ export interface Entrega {
   total_entregado: number
   cantidad_requerida: number | null
   total_entregado_pedido: number
+  material_entregado_id: number
+  codigo_mp_entregado: string
+  descripcion_entregado: string | null
+  observacion: string | null
+}
+
+// Saldo de un material puntual dentro de un pedido (puede haber más de uno
+// si hubo sustituciones en las entregas).
+export interface BalanceMaterial {
+  material_id: number
+  codigo_mp: string
+  descripcion: string | null
+  unidad: string
+  total_entregado: number
+  total_devuelto: number
+  disponible: number
 }
 
 export interface DevolucionCreate {
   ot_material_id: number
+  material_id: number
   fecha: string
   bobinas: number[]
 }
@@ -271,6 +292,8 @@ export interface DevolucionCreate {
 export interface Devolucion {
   id: number
   ot_material_id: number
+  material_id: number
+  codigo_mp: string
   usuario: string
   fecha: string
   bobinas: number[]
@@ -286,6 +309,7 @@ export interface Consumo {
   proceso: string
   maquina: string
   diseno: string | null
+  material_id: number
   codigo_mp: string
   descripcion: string | null
   unidad: string
@@ -297,6 +321,9 @@ export interface Consumo {
   total_devuelto: number
   consumo_neto: number
   estado_entrega: 'PENDIENTE' | 'PARCIAL' | 'COMPLETO' | 'SIN REQUERIMIENTO'
+  // TRUE si alguna entrega/devolución de este pedido fue de un material
+  // distinto al pedido (alternativa o cambio de estructura).
+  material_sustituido: boolean
 }
 
 export interface EstadoSidUpdate {

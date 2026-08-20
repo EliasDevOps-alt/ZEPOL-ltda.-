@@ -18,6 +18,8 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
     return schemas.DevolucionOut(
         id=devolucion.id,
         ot_material_id=devolucion.ot_material_id,
+        material_id=devolucion.material_id,
+        codigo_mp=devolucion.material.codigo_mp,
         usuario=devolucion.usuario.inicial,
         fecha=devolucion.fecha,
         bobinas=[float(b.cantidad) for b in sorted(devolucion.bobinas, key=lambda b: b.numero)],

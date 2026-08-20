@@ -193,9 +193,14 @@ CREATE TABLE ot_materiales_pendientes (
 CREATE TABLE entregas (
     id             SERIAL PRIMARY KEY,
     ot_material_id INTEGER   NOT NULL REFERENCES ot_materiales(id),
+    -- Material REALMENTE entregado. Normalmente coincide con ot_materiales.material_id,
+    -- pero puede diferir cuando almacén entrega una alternativa (otro micronaje/ancho)
+    -- o un cambio de estructura por falta de stock del material pedido.
+    material_id    INTEGER   NOT NULL REFERENCES materiales(id),
     usuario_id     INTEGER   NOT NULL REFERENCES usuarios(id),
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
+    observacion    TEXT,     -- nota opcional del operador, ej. motivo de una sustitución
     creado_en      TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -214,9 +219,14 @@ CREATE TABLE entrega_bobinas (
 -- una vez que el material está en planta ya no se distingue de qué entrega
 -- parcial vino, así que "cuánto se devuelve de PA15520 en esta OT" se valida
 -- contra el total entregado de ese material, no de un envío específico.
+-- Sí hace falta saber DE CUÁL material se devuelve (material_id) porque un
+-- mismo pedido puede haber recibido entregas de más de un material si hubo
+-- una sustitución (ver entregas.material_id) — el saldo disponible para
+-- devolver se calcula por material, no por pedido en conjunto.
 CREATE TABLE devoluciones (
     id             SERIAL PRIMARY KEY,
     ot_material_id INTEGER   NOT NULL REFERENCES ot_materiales(id),
+    material_id    INTEGER   NOT NULL REFERENCES materiales(id),
     usuario_id     INTEGER   NOT NULL REFERENCES usuarios(id),
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
@@ -243,6 +253,7 @@ SELECT
     ot.diseno,
     p.nombre                    AS proceso,
     mq.nombre                   AS maquina,
+    om.material_id,
     mat.codigo_mp,
     mat.descripcion,
     mat.unidad,
@@ -252,7 +263,16 @@ SELECT
     om.cantidad_requerida,
     COALESCE(ent_tot.total, 0)  AS total_entregado,
     COALESCE(dev_tot.total, 0)  AS total_devuelto,
-    COALESCE(ent_tot.total, 0) - COALESCE(dev_tot.total, 0) AS consumo_neto
+    COALESCE(ent_tot.total, 0) - COALESCE(dev_tot.total, 0) AS consumo_neto,
+    -- TRUE si alguna entrega/devolución de este pedido fue de un material
+    -- distinto al pedido (alternativa o cambio de estructura) — le indica al
+    -- frontend (Historial, Registro SID) que consulte el detalle real en vez
+    -- de asumir que todo lo movido fue del material del pedido.
+    EXISTS (
+        SELECT 1 FROM entregas e WHERE e.ot_material_id = om.id AND e.material_id <> om.material_id
+    ) OR EXISTS (
+        SELECT 1 FROM devoluciones d WHERE d.ot_material_id = om.id AND d.material_id <> om.material_id
+    ) AS material_sustituido
 FROM ot_materiales om
 JOIN ot_procesos otp    ON otp.id = om.ot_proceso_id
 JOIN ordenes_trabajo ot ON ot.id = otp.ot_id

@@ -1,4 +1,5 @@
 import type {
+  BalanceMaterial,
   ConfiguracionExcel,
   Consumo,
   Devolucion,
@@ -113,6 +114,13 @@ export function registrarEntrega(baseUrl: string, token: string, data: EntregaCr
 export function listarEntregas(baseUrl: string, token: string, numeroOt?: string) {
   const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
   return request<Entrega[]>(baseUrl, `/entregas${qs}`, { token })
+}
+
+// Materiales realmente entregados contra un pedido (normalmente uno solo,
+// más de uno si hubo sustituciones) — lo usa Registrar Devolución para
+// saber contra cuál material validar/registrar.
+export function listarMaterialesEntregados(baseUrl: string, token: string, otMaterialId: number) {
+  return request<BalanceMaterial[]>(baseUrl, `/entregas/materiales-entregados/${otMaterialId}`, { token })
 }
 
 export function registrarDevolucion(baseUrl: string, token: string, data: DevolucionCreate) {

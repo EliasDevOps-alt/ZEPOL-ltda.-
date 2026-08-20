@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import Entrega, EntregaBobina, OrdenTrabajo, OtMaterial, OtProceso, Usuario
+from ..models import Entrega, EntregaBobina, Material, OrdenTrabajo, OtMaterial, OtProceso, Usuario
 
 
 def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate) -> Entrega:
@@ -15,7 +15,20 @@ def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate
     if ot_material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido de material no encontrado")
 
-    entrega = Entrega(ot_material_id=ot_material.id, usuario_id=usuario.id, fecha=data.fecha)
+    # Sin material_id explícito, se entrega el material del pedido tal cual
+    # (el caso normal, sin sustitución).
+    material_id = data.material_id if data.material_id is not None else ot_material.material_id
+    material = db.get(Material, material_id)
+    if material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
+
+    entrega = Entrega(
+        ot_material_id=ot_material.id,
+        material_id=material.id,
+        usuario_id=usuario.id,
+        fecha=data.fecha,
+        observacion=data.observacion,
+    )
     entrega.bobinas = [EntregaBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(entrega)
     db.commit()

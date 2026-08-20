@@ -302,6 +302,10 @@ class EntregaCreate(BaseModel):
     ot_material_id: int
     fecha: date
     bobinas: List[float] = Field(min_length=1)
+    # Material realmente entregado, si difiere del pedido (alternativa o
+    # cambio de estructura). None = se entrega el material del pedido tal cual.
+    material_id: Optional[int] = None
+    observacion: Optional[str] = None
 
 
 class EntregaOut(BaseModel):
@@ -319,10 +323,32 @@ class EntregaOut(BaseModel):
     total_entregado: float
     cantidad_requerida: Optional[float]
     total_entregado_pedido: float
+    # Material que realmente salió de almacén — puede diferir de codigo_mp
+    # (el del pedido) si hubo una sustitución.
+    material_entregado_id: int
+    codigo_mp_entregado: str
+    descripcion_entregado: Optional[str]
+    observacion: Optional[str] = None
+
+
+class BalanceMaterialOut(BaseModel):
+    """Saldo de un material puntual dentro de un pedido — un pedido puede
+    tener más de uno si hubo sustituciones en sus entregas."""
+
+    material_id: int
+    codigo_mp: str
+    descripcion: Optional[str]
+    unidad: str
+    total_entregado: float
+    total_devuelto: float
+    disponible: float
 
 
 class DevolucionCreate(BaseModel):
     ot_material_id: int
+    # Cuál material se está devolviendo — obligatorio porque el pedido puede
+    # haber recibido entregas de más de un material (ver EntregaCreate.material_id).
+    material_id: int
     fecha: date
     bobinas: List[float] = Field(min_length=1)
 
@@ -330,6 +356,8 @@ class DevolucionCreate(BaseModel):
 class DevolucionOut(BaseModel):
     id: int
     ot_material_id: int
+    material_id: int
+    codigo_mp: str
     usuario: str
     fecha: date
     bobinas: List[float]
@@ -346,6 +374,7 @@ class PedidoMaterialOut(BaseModel):
     proceso: str
     maquina: str
     diseno: Optional[str]
+    material_id: int
     codigo_mp: str
     descripcion: Optional[str]
     unidad: str
@@ -355,6 +384,10 @@ class PedidoMaterialOut(BaseModel):
     total_devuelto: float
     consumo_neto: float
     estado_entrega: str
+    # TRUE si alguna entrega/devolución de este pedido fue de un material
+    # distinto al pedido — el frontend usa esto para saber cuándo vale la
+    # pena pedir el detalle real (GET /entregas/materiales-entregados/{id}).
+    material_sustituido: bool
 
 
 class ConsumoOut(PedidoMaterialOut):
