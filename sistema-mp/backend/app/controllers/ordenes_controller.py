@@ -281,6 +281,10 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
     for materia_prima in pendiente.materias_primas:
         materia_prima.insumo_de_id = ot_material.id
         materia_prima.insumo_de_pendiente_id = None
+    # Lo mismo con lo que ya entró a almacén antes de que existiera el pedido.
+    for ingreso in pendiente.ingresos:
+        ingreso.ot_material_id = ot_material.id
+        ingreso.ot_material_pendiente_id = None
     db.flush()
 
     db.delete(pendiente)

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas, security
 from ..controllers import devoluciones_controller
-from ..controllers.pedidos_controller import total_devuelto_pedido
+from ..controllers.pedidos_controller import total_devuelto_pedido, total_ingresado_pendiente
 from ..database import get_db
 from ..models import Devolucion, Usuario
 
@@ -18,13 +18,18 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
     return schemas.DevolucionOut(
         id=devolucion.id,
         ot_material_id=devolucion.ot_material_id,
+        pendiente_id=devolucion.ot_material_pendiente_id,
         material_id=devolucion.material_id,
         codigo_mp=devolucion.material.codigo_mp,
         usuario=devolucion.usuario.inicial,
         fecha=devolucion.fecha,
         bobinas=[float(b.cantidad) for b in sorted(devolucion.bobinas, key=lambda b: b.numero)],
         total_devuelto=sum(float(b.cantidad) for b in devolucion.bobinas),
-        total_devuelto_pedido=total_devuelto_pedido(devolucion.ot_material),
+        total_devuelto_pedido=(
+            total_devuelto_pedido(devolucion.ot_material)
+            if devolucion.ot_material is not None
+            else total_ingresado_pendiente(devolucion.ot_material_pendiente)
+        ),
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
     )
 

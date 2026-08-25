@@ -63,9 +63,15 @@ export function RegistroSid() {
     return mapa
   }, [entregas.data])
 
+  // Un ingreso a almacén puede no tener pedido todavía (el material se fabricó
+  // pero aún no salió hacia ningún proceso); esos no tienen SID que tramitar
+  // hasta que se les asigne uno.
   const devolucionesPorPedido = useMemo(() => {
     const mapa = new Map<number, Devolucion[]>()
-    for (const d of devoluciones.data ?? []) mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
+    for (const d of devoluciones.data ?? []) {
+      if (d.ot_material_id == null) continue
+      mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
+    }
     return mapa
   }, [devoluciones.data])
 

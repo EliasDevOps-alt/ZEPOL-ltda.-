@@ -252,7 +252,13 @@ CREATE TABLE entrega_bobinas (
 -- distinto (ver es_ingreso_produccion).
 CREATE TABLE devoluciones (
     id             SERIAL PRIMARY KEY,
-    ot_material_id INTEGER   NOT NULL REFERENCES ot_materiales(id),
+    -- Uno de los dos, nunca ambos (ver CHECK abajo). El pendiente aparece
+    -- cuando entra a almacén un material que todavía no tiene pedido: para
+    -- tenerlo haría falta proceso y máquina, y almacén no tiene máquinas — eso
+    -- se decide recién cuando el material SALE hacia producción. Al promover
+    -- el pendiente estas filas se repuntan al pedido (ver promover_pendiente).
+    ot_material_id INTEGER   REFERENCES ot_materiales(id),
+    ot_material_pendiente_id INTEGER REFERENCES ot_materiales_pendientes(id),
     material_id    INTEGER   NOT NULL REFERENCES materiales(id),
     usuario_id     INTEGER   NOT NULL REFERENCES usuarios(id),
     -- TRUE  = material FABRICADO en esta OT entrando a almacén (el LDPE-4 que
@@ -263,7 +269,9 @@ CREATE TABLE devoluciones (
     es_ingreso_produccion BOOLEAN NOT NULL DEFAULT FALSE,
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
-    creado_en      TIMESTAMP NOT NULL DEFAULT now()
+    creado_en      TIMESTAMP NOT NULL DEFAULT now(),
+
+    CHECK ((ot_material_id IS NOT NULL) <> (ot_material_pendiente_id IS NOT NULL))
 );
 
 CREATE TABLE devolucion_bobinas (

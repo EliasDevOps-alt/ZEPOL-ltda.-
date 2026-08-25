@@ -277,6 +277,9 @@ class OtMaterialPendiente(Base):
     materias_primas: Mapped[List["OtMaterial"]] = relationship(
         foreign_keys="OtMaterial.insumo_de_pendiente_id", back_populates="insumo_de_pendiente"
     )
+    # Material fabricado que ya entró a almacén sin que este pendiente tenga
+    # pedido todavía. Al promoverlo, estas devoluciones se repuntan al pedido.
+    ingresos: Mapped[List["Devolucion"]] = relationship(back_populates="ot_material_pendiente")
 
 
 class Entrega(Base):
@@ -331,7 +334,15 @@ class Devolucion(Base):
     __tablename__ = "devoluciones"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    ot_material_id: Mapped[int] = mapped_column(ForeignKey("ot_materiales.id"))
+    # Uno de los dos, nunca ambos. El pendiente aparece cuando entra a almacén
+    # un material que todavía no tiene pedido: para tenerlo haría falta un
+    # proceso y una máquina, y almacén no tiene máquinas — eso se decide recién
+    # cuando el material SALE hacia producción (ver promover_pendiente, que
+    # repunta estas filas al pedido cuando eso pasa).
+    ot_material_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ot_materiales.id"))
+    ot_material_pendiente_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("ot_materiales_pendientes.id")
+    )
     material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     # TRUE cuando lo que entra a almacén es material FABRICADO en esta OT
@@ -345,7 +356,10 @@ class Devolucion(Base):
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
-    ot_material: Mapped["OtMaterial"] = relationship(back_populates="devoluciones")
+    ot_material: Mapped[Optional["OtMaterial"]] = relationship(back_populates="devoluciones")
+    ot_material_pendiente: Mapped[Optional["OtMaterialPendiente"]] = relationship(
+        back_populates="ingresos"
+    )
     material: Mapped["Material"] = relationship()
     usuario: Mapped["Usuario"] = relationship()
     bobinas: Mapped[List["DevolucionBobina"]] = relationship(

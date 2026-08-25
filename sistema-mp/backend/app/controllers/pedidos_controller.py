@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from ..models import OtMaterial
+from ..models import OtMaterial, OtMaterialPendiente
+
+
+def total_ingresado_pendiente(pendiente: OtMaterialPendiente) -> float:
+    """Material fabricado que ya entró a almacén para un material que todavía
+    no tiene pedido — ver Devolucion.ot_material_pendiente_id."""
+    return sum(float(b.cantidad) for ingreso in pendiente.ingresos for b in ingreso.bobinas)
 
 
 def total_entregado_pedido(ot_material: OtMaterial) -> float:

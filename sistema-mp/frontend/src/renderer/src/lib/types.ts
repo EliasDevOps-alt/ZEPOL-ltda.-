@@ -161,6 +161,8 @@ export interface OtMaterialPendiente {
   // Materia prima ya entregada para fabricar este material, mientras el
   // pendiente sigue sin proceso asignado.
   materias_primas: string[]
+  // Cuánto de este material ya entró a almacén fabricado, sin pedido todavía.
+  total_ingresado: number
 }
 
 export interface OtImportada {
@@ -322,7 +324,11 @@ export interface MoverPedidoOut {
 }
 
 export interface DevolucionCreate {
-  ot_material_id: number
+  // Uno de los dos, no ambos. pendiente_id es para el material fabricado que
+  // entra a almacén antes de tener pedido: registrar eso no necesita proceso ni
+  // máquina, porque almacén no tiene máquinas. Solo vale con es_ingreso_produccion.
+  ot_material_id?: number
+  pendiente_id?: number
   material_id: number
   fecha: string
   bobinas: number[]
@@ -332,7 +338,9 @@ export interface DevolucionCreate {
 
 export interface Devolucion {
   id: number
-  ot_material_id: number
+  // null mientras el material que entró a almacén no tenga pedido todavía.
+  ot_material_id: number | null
+  pendiente_id: number | null
   material_id: number
   codigo_mp: string
   usuario: string

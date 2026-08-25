@@ -59,9 +59,13 @@ export function Historial() {
     return mapa
   }, [entregas.data])
 
+  // Un ingreso a almacén puede no tener pedido todavía (el material se fabricó
+  // pero aún no salió hacia ningún proceso). Esos no se agrupan acá: aparecen
+  // en la tarjeta del pedido recién cuando se le asigna uno.
   const devolucionesPorPedido = useMemo(() => {
     const mapa = new Map<number, typeof devoluciones.data>()
     for (const d of devoluciones.data ?? []) {
+      if (d.ot_material_id == null) continue
       mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
     }
     return mapa

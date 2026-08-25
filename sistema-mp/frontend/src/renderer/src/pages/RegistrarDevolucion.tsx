@@ -15,7 +15,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import type { Consumo, Devolucion, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
+import type { Consumo, Devolucion, Material, OtMaterialPendiente } from '@renderer/lib/types'
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
@@ -63,28 +63,26 @@ function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
 }
 
 /** Material que producción entrega y entra a almacén, cuando todavía figura
- * como pendiente (sin proceso asignado). Pasa siempre que a un material hubo
- * que fabricarlo: su materia prima salió de almacén antes de que se supiera a
- * qué proceso iría el resultado, así que el pedido nunca llegó a crearse.
+ * como pendiente (sin pedido). Pasa siempre que a un material hubo que
+ * fabricarlo: su materia prima salió de almacén antes de que se supiera a qué
+ * proceso iría el resultado.
  *
- * Para poder registrar lo que entra hace falta el pedido, y para el pedido
- * hace falta el proceso — a esta altura el material ya existe y está por
- * usarse, así que preguntarlo acá no es adivinar. Si igual se elige mal, se
- * corrige después con "mover a otro proceso" en Registrar Entrega. */
+ * Acá NO se pregunta proceso ni máquina, a propósito: este movimiento es
+ * producción -> almacén, y almacén no tiene máquinas. El proceso se elige
+ * cuando el material sale hacia producción, en Registrar Entrega. Lo único que
+ * hace falta registrar es cuánto entró. */
 function PendienteIngresoCard({
   pendiente,
-  procesos,
   materiales,
   materialOptions,
   fecha,
   onRegistrado
 }: {
   pendiente: OtMaterialPendiente
-  procesos: Proceso[]
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
   fecha: string
-  onRegistrado: () => void
+  onRegistrado: (devolucion: Devolucion) => void
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -93,36 +91,23 @@ function PendienteIngresoCard({
   const [materialId, setMaterialId] = useState(
     pendiente.material_id != null ? String(pendiente.material_id) : ''
   )
-  const [procesoId, setProcesoId] = useState('')
-  const [maquinaId, setMaquinaId] = useState('')
   const material = materiales.find((m) => String(m.id) === materialId)
   const [cantidad, setCantidad] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
   const [error, setError] = useState<string | null>(null)
 
-  const maquinas = useQuery({
-    queryKey: ['maquinas', procesoId],
-    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
-    enabled: !!procesoId
-  })
-
   const mutation = useMutation({
-    mutationFn: async () => {
-      const { ot_material_id } = await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
-        proceso_id: Number(procesoId),
-        maquina_id: Number(maquinaId),
-        material_id: Number(materialId)
-      })
-      return api.registrarDevolucion(apiBaseUrl, token, {
-        ot_material_id,
+    mutationFn: () =>
+      api.registrarDevolucion(apiBaseUrl, token, {
+        pendiente_id: pendiente.id,
         material_id: Number(materialId),
         fecha,
         bobinas: cantidad.bobinas.map(Number),
         es_ingreso_produccion: true
-      })
-    },
-    onSuccess: () => {
+      }),
+    onSuccess: (devolucion) => {
       setError(null)
-      onRegistrado()
+      setCantidad({ cantidadBobinas: '', bobinas: [] })
+      onRegistrado(devolucion)
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
   })
@@ -131,10 +116,6 @@ function PendienteIngresoCard({
     e.preventDefault()
     if (!materialId) {
       setError('Indica a qué material del catálogo corresponde')
-      return
-    }
-    if (!procesoId || !maquinaId) {
-      setError('Elige a qué proceso y máquina va este material')
       return
     }
     if (cantidad.bobinas.length === 0 || cantidad.bobinas.some((b) => !b || Number(b) <= 0)) {
@@ -151,6 +132,7 @@ function PendienteIngresoCard({
       <p className="mb-3 text-xs text-muted-foreground">
         <span className="font-medium text-warning">Producción lo está entregando.</span> Entra a almacén, no es un
         sobrante — no descuenta del consumo. Materia prima usada: {pendiente.materias_primas.join(', ')}.
+        {pendiente.total_ingresado > 0 && ` Ya entraron ${pendiente.total_ingresado} ${material?.unidad ?? ''}.`}
       </p>
 
       {pendiente.material_id == null && (
@@ -166,45 +148,6 @@ function PendienteIngresoCard({
         </div>
       )}
 
-      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso donde se va a usar</Label>
-          <Select
-            value={procesoId}
-            onValueChange={(v) => {
-              setProcesoId(v)
-              setMaquinaId('')
-            }}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
-            </SelectTrigger>
-            <SelectContent>
-              {procesos.map((p) => (
-                <SelectItem key={p.id} value={String(p.id)}>
-                  {p.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina</Label>
-          <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
-            </SelectTrigger>
-            <SelectContent>
-              {maquinas.data?.map((m) => (
-                <SelectItem key={m.id} value={String(m.id)}>
-                  {m.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
       <CampoCantidad
         unidad={material?.unidad ?? ''}
         usaBobinas={material?.usa_bobinas ?? true}
@@ -213,7 +156,7 @@ function PendienteIngresoCard({
       />
 
       <p className="mt-1.5 text-xs text-muted-foreground">
-        Si después resulta que va a otro proceso, se puede mover desde Registrar Entrega.
+        Después, cuando salga hacia producción, en Registrar Entrega elegís el proceso y la máquina.
       </p>
 
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
@@ -447,7 +390,6 @@ export function RegistrarDevolucion() {
     [pendientes.data]
   )
 
-  const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
   const materialOptions = useMemo(
@@ -459,7 +401,8 @@ export function RegistrarDevolucion() {
     [materiales.data]
   )
 
-  function alRegistrarIngreso() {
+  function alRegistrarIngreso(devolucion: Devolucion) {
+    setConfirmaciones([devolucion])
     queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
     queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
   }
@@ -651,8 +594,8 @@ export function RegistrarDevolucion() {
           </CardHeader>
           <CardContent className="flex flex-col gap-4">
             <p className="text-xs text-muted-foreground">
-              A estos materiales se les cargó materia prima y todavía no tienen proceso asignado. Al registrar lo
-              que entra a almacén se les asigna.
+              A estos materiales se les cargó materia prima y producción todavía no los entregó. Registrá solo
+              cuánto entra a almacén — el proceso y la máquina se eligen después, al sacarlo hacia producción.
             </p>
             <div className="flex flex-col gap-1.5">
               <Label>Fecha</Label>
@@ -662,7 +605,6 @@ export function RegistrarDevolucion() {
               <PendienteIngresoCard
                 key={pendiente.id}
                 pendiente={pendiente}
-                procesos={procesos.data ?? []}
                 materiales={materiales.data ?? []}
                 materialOptions={materialOptions}
                 fecha={fecha}

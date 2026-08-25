@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas, security
 from ..controllers import ordenes_controller
+from ..controllers.pedidos_controller import total_ingresado_pendiente
 from ..controllers.ordenes_controller import CAMPOS_COMERCIALES
 from ..controllers.pedidos_controller import total_devuelto_pedido, total_entregado_pedido
 from ..database import get_db
@@ -37,6 +38,7 @@ def _serializar_pendiente(p: OtMaterialPendiente) -> schemas.OtMaterialPendiente
         cantidad_requerida=p.cantidad_requerida,
         es_tinta=p.material.es_tinta if p.material is not None else False,
         materias_primas=[mp.material.codigo_mp for mp in p.materias_primas],
+        total_ingresado=total_ingresado_pendiente(p),
     )
 
 

@@ -206,6 +206,8 @@ class OtMaterialPendienteOut(BaseModel):
     # pendiente sigue sin proceso asignado. Códigos, para poder mostrarlos sin
     # otra consulta.
     materias_primas: List[str] = []
+    # Cuánto de este material ya entró a almacén fabricado, sin pedido todavía.
+    total_ingresado: float = 0
 
 
 class OtDetalleCreate(CamposComercialesOt):
@@ -394,7 +396,13 @@ class BalanceMaterialOut(BaseModel):
 
 
 class DevolucionCreate(BaseModel):
-    ot_material_id: int
+    # Uno de los dos, no ambos. pendiente_id es para el material fabricado que
+    # entra a almacén antes de tener pedido: registrar eso no necesita proceso
+    # ni máquina —almacén no tiene máquinas— así que no hay por qué exigirlos.
+    # Solo vale con es_ingreso_produccion: de un pendiente no salió nada que
+    # pueda volver como sobrante.
+    ot_material_id: Optional[int] = None
+    pendiente_id: Optional[int] = None
     # Cuál material se está devolviendo — obligatorio porque el pedido puede
     # haber recibido entregas de más de un material (ver EntregaCreate.material_id).
     material_id: int
@@ -407,7 +415,9 @@ class DevolucionCreate(BaseModel):
 
 class DevolucionOut(BaseModel):
     id: int
-    ot_material_id: int
+    # None mientras el material que entró a almacén no tenga pedido todavía.
+    ot_material_id: Optional[int]
+    pendiente_id: Optional[int]
     material_id: int
     codigo_mp: str
     usuario: str
