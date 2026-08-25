@@ -7,35 +7,66 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import Entrega, EntregaBobina, Material, OrdenTrabajo, OtMaterial, OtProceso, Usuario
+from ..models import (
+    Entrega,
+    EntregaBobina,
+    Material,
+    OrdenTrabajo,
+    OtMaterial,
+    OtMaterialPendiente,
+    OtProceso,
+    Usuario,
+)
 from . import ordenes_controller
 
 
-def _resolver_pedido(
-    db: Session, ot_material: OtMaterial, data: schemas.EntregaCreate
-) -> Tuple[OtMaterial, bool]:
-    """Contra qué pedido queda realmente la entrega. Ver EntregaCreate para
-    los dos modos; devuelve además si ese pedido se acaba de crear."""
-    if not data.como_materia_prima:
-        return ot_material, False
-
+def _validar_materia_prima(data: schemas.EntregaCreate) -> None:
     if data.material_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Indica qué materia prima se está entregando")
     if data.proceso_id is None or data.maquina_id is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "Indica el proceso y la máquina donde se consume esa materia prima"
         )
+
+
+def _resolver_pedido(db: Session, data: schemas.EntregaCreate) -> Tuple[OtMaterial, bool]:
+    """Contra qué pedido queda realmente la entrega. Ver EntregaCreate para los
+    dos modos; devuelve además si ese pedido se acaba de crear."""
+    if (data.ot_material_id is None) == (data.pendiente_id is None):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Indica el pedido o el material pendiente, no los dos"
+        )
+
+    # Materia prima para un material que todavía no tiene proceso asignado.
+    if data.pendiente_id is not None:
+        if not data.como_materia_prima:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                "Un material pendiente no se puede entregar hasta que se le asigne proceso y máquina",
+            )
+        pendiente = db.get(OtMaterialPendiente, data.pendiente_id)
+        if pendiente is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Material pendiente no encontrado")
+        _validar_materia_prima(data)
+        return ordenes_controller.crear_pedido_materia_prima_de_pendiente(
+            db, pendiente, data.material_id, data.proceso_id, data.maquina_id, sum(data.bobinas)
+        )
+
+    ot_material = db.get(OtMaterial, data.ot_material_id)
+    if ot_material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido de material no encontrado")
+
+    if not data.como_materia_prima:
+        return ot_material, False
+
+    _validar_materia_prima(data)
     return ordenes_controller.crear_pedido_materia_prima(
         db, ot_material, data.material_id, data.proceso_id, data.maquina_id, sum(data.bobinas)
     )
 
 
 def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate) -> Tuple[Entrega, bool]:
-    ot_material = db.get(OtMaterial, data.ot_material_id)
-    if ot_material is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido de material no encontrado")
-
-    pedido, pedido_creado = _resolver_pedido(db, ot_material, data)
+    pedido, pedido_creado = _resolver_pedido(db, data)
 
     # Sin material_id explícito, se entrega el material del pedido tal cual
     # (el caso normal, sin sustitución).

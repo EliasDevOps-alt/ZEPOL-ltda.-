@@ -12,6 +12,8 @@ import type {
   MaquinaAdmin,
   MaquinaCreate,
   MaquinaUpdate,
+  MoverPedidoIn,
+  MoverPedidoOut,
   Material,
   MaterialAdmin,
   MaterialCreate,
@@ -121,6 +123,17 @@ export function listarEntregas(baseUrl: string, token: string, numeroOt?: string
 // saber contra cuál material validar/registrar.
 export function listarMaterialesEntregados(baseUrl: string, token: string, otMaterialId: number) {
   return request<BalanceMaterial[]>(baseUrl, `/entregas/materiales-entregados/${otMaterialId}`, { token })
+}
+
+// Corrige el proceso/máquina de un pedido ya creado, con todo lo que ya tenga
+// registrado. El proceso se elige antes de saberlo con certeza, así que tiene
+// que poder cambiarse sin rehacer la OT.
+export function moverPedido(baseUrl: string, token: string, otMaterialId: number, data: MoverPedidoIn) {
+  return request<MoverPedidoOut>(baseUrl, `/ot-materiales/${otMaterialId}/proceso`, {
+    method: 'PATCH',
+    token,
+    body: data
+  })
 }
 
 export function registrarDevolucion(baseUrl: string, token: string, data: DevolucionCreate) {

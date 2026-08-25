@@ -158,6 +158,9 @@ export interface OtMaterialPendiente {
   material_id: number | null
   cantidad_requerida: number | null
   es_tinta: boolean
+  // Materia prima ya entregada para fabricar este material, mientras el
+  // pendiente sigue sin proceso asignado.
+  materias_primas: string[]
 }
 
 export interface OtImportada {
@@ -256,7 +259,10 @@ export interface MaterialUpdate {
 //     la máquina donde se consume —que no tienen por qué ser los del pedido que
 //     completa— y la entrega va contra ese. Vale para cualquier proceso.
 export interface EntregaCreate {
-  ot_material_id: number
+  // Uno de los dos, no ambos. pendiente_id solo vale con como_materia_prima:
+  // es materia prima para un material que todavía no tiene proceso asignado.
+  ot_material_id?: number
+  pendiente_id?: number
   fecha: string
   bobinas: number[]
   // Obligatorio con como_materia_prima (el material que sale de almacén).
@@ -302,6 +308,17 @@ export interface BalanceMaterial {
   total_entregado: number
   total_devuelto: number
   disponible: number
+}
+
+export interface MoverPedidoIn {
+  proceso_id: number
+  maquina_id: number
+}
+
+export interface MoverPedidoOut {
+  ot_material_id: number
+  proceso: string
+  maquina: string
 }
 
 export interface DevolucionCreate {

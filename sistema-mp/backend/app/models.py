@@ -227,6 +227,14 @@ class OtMaterial(Base):
     # No es exclusivo de Extrusión — cualquier pedido de cualquier proceso
     # puede necesitar materiales extra que la OT no listó.
     insumo_de_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ot_materiales.id"))
+    # Igual que insumo_de_id, pero cuando el material que se completa todavía
+    # es un pendiente (sin proceso ni máquina asignados). Pasa a menudo: la
+    # materia prima sale de almacén hoy para fabricarlo, y recién se sabe a qué
+    # proceso irá el resultado cuando producción lo devuelva. Al promover el
+    # pendiente estas filas se repuntan a insumo_de_id — ver promover_pendiente.
+    insumo_de_pendiente_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("ot_materiales_pendientes.id")
+    )
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_proceso: Mapped["OtProceso"] = relationship(
@@ -241,6 +249,9 @@ class OtMaterial(Base):
     )
     insumos: Mapped[List["OtMaterial"]] = relationship(
         foreign_keys=[insumo_de_id], back_populates="insumo_de"
+    )
+    insumo_de_pendiente: Mapped[Optional["OtMaterialPendiente"]] = relationship(
+        foreign_keys=[insumo_de_pendiente_id], back_populates="materias_primas"
     )
 
 
@@ -261,6 +272,11 @@ class OtMaterialPendiente(Base):
 
     ot: Mapped["OrdenTrabajo"] = relationship(back_populates="pendientes")
     material: Mapped[Optional["Material"]] = relationship()
+    # Materia prima ya entregada para fabricar este material, antes de que el
+    # pendiente tenga proceso asignado.
+    materias_primas: Mapped[List["OtMaterial"]] = relationship(
+        foreign_keys="OtMaterial.insumo_de_pendiente_id", back_populates="insumo_de_pendiente"
+    )
 
 
 class Entrega(Base):

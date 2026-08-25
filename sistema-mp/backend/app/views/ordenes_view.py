@@ -19,6 +19,14 @@ router_pendientes = APIRouter(
     tags=["ordenes-trabajo"],
     dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
 )
+# Corregir el proceso/máquina de un pedido ya creado. Va con el módulo de
+# entregas porque es ahí donde se asigna el proceso y donde se descubre el
+# error, no en Crear OT.
+router_pedidos = APIRouter(
+    prefix="/ot-materiales",
+    tags=["ordenes-trabajo"],
+    dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
+)
 
 
 def _serializar_pendiente(p: OtMaterialPendiente) -> schemas.OtMaterialPendienteOut:
@@ -28,6 +36,7 @@ def _serializar_pendiente(p: OtMaterialPendiente) -> schemas.OtMaterialPendiente
         material_id=p.material_id,
         cantidad_requerida=p.cantidad_requerida,
         es_tinta=p.material.es_tinta if p.material is not None else False,
+        materias_primas=[mp.material.codigo_mp for mp in p.materias_primas],
     )
 
 
@@ -138,3 +147,15 @@ def reintentar_excel(numero_ot: str, db: Session = Depends(get_db)):
 def promover_pendiente(pendiente_id: int, data: schemas.PromoverPendienteIn, db: Session = Depends(get_db)):
     ot_material = ordenes_controller.promover_pendiente(db, pendiente_id, data)
     return schemas.PromoverPendienteOut(ot_material_id=ot_material.id)
+
+
+@router_pedidos.patch("/{ot_material_id}/proceso", response_model=schemas.MoverPedidoOut)
+def mover_pedido(ot_material_id: int, data: schemas.MoverPedidoIn, db: Session = Depends(get_db)):
+    """Mueve un pedido a otro proceso/máquina de la misma OT, con todo lo que
+    ya tenga registrado. Ver ordenes_controller.mover_pedido."""
+    ot_material = ordenes_controller.mover_pedido(db, ot_material_id, data.proceso_id, data.maquina_id)
+    return schemas.MoverPedidoOut(
+        ot_material_id=ot_material.id,
+        proceso=ot_material.ot_proceso.proceso.nombre,
+        maquina=ot_material.ot_proceso.maquina.nombre,
+    )

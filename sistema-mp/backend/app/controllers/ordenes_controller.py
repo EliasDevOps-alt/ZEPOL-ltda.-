@@ -276,10 +276,43 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
     ot_proceso = _crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, data.proceso_id, data.maquina_id)
     ot_material, _ = _crear_o_reutilizar_ot_material(db, ot_proceso, material_id, pendiente.cantidad_requerida)
 
+    # La materia prima que se entregó mientras esto era un pendiente ya apunta
+    # al material correcto; ahora que existe el pedido, se le cuelga a él.
+    for materia_prima in pendiente.materias_primas:
+        materia_prima.insumo_de_id = ot_material.id
+        materia_prima.insumo_de_pendiente_id = None
+    db.flush()
+
     db.delete(pendiente)
     db.commit()
     db.refresh(ot_material)
     return ot_material
+
+
+def crear_pedido_materia_prima_de_pendiente(
+    db: Session,
+    pendiente: OtMaterialPendiente,
+    material_id: int,
+    proceso_id: int,
+    maquina_id: int,
+    cantidad_entregada: float,
+) -> Tuple[OtMaterial, bool]:
+    """Igual que crear_pedido_materia_prima, pero para un material que todavía
+    es un pendiente. La materia prima sale de almacén ahora —hay que fabricar
+    con ella— aunque no se sepa todavía a qué proceso irá el resultado; forzar
+    esa decisión acá sería inventar un dato. Al promover el pendiente, estas
+    filas se repuntan al pedido real (ver promover_pendiente)."""
+    if db.get(Material, material_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+
+    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, proceso_id, maquina_id)
+    ot_material, creado = _crear_o_reutilizar_ot_material(
+        db, ot_proceso, material_id, cantidad_entregada
+    )
+    if creado:
+        ot_material.insumo_de_pendiente_id = pendiente.id
+        db.flush()
+    return ot_material, creado
 
 
 def crear_pedido_materia_prima(
@@ -316,3 +349,52 @@ def crear_pedido_materia_prima(
     return _crear_o_reutilizar_ot_material(
         db, ot_proceso, material_id, cantidad_entregada, insumo_de_id=pedido.id
     )
+
+
+def mover_pedido(db: Session, ot_material_id: int, proceso_id: int, maquina_id: int) -> OtMaterial:
+    """Cambia el proceso y la máquina de un pedido ya creado. Hace falta porque
+    el proceso se elige antes de saberlo con certeza —al promover el material o
+    al cargarle materia prima— y equivocarse ahí no puede obligar a rehacer la
+    OT ni a tocar la base a mano.
+
+    Las entregas y devoluciones ya registradas se quedan donde están: cuelgan
+    del pedido, no del proceso, así que se mueven con él sin perder nada. La
+    materia prima tampoco se toca — tiene su propio proceso, que no depende de
+    este (se consume donde se fabrica, no donde se usa el resultado)."""
+    ot_material = db.get(OtMaterial, ot_material_id)
+    if ot_material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
+
+    ot_proceso_anterior = ot_material.ot_proceso
+    if ot_proceso_anterior.proceso_id == proceso_id and ot_proceso_anterior.maquina_id == maquina_id:
+        return ot_material
+
+    ot_proceso = _crear_o_reutilizar_ot_proceso(db, ot_proceso_anterior.ot_id, proceso_id, maquina_id)
+
+    # Un mismo material no puede tener dos pedidos en el mismo paso de OT
+    # (UNIQUE (ot_proceso_id, material_id)) — sin este aviso el error saldría
+    # como un 500 de la base.
+    ya_existe = db.scalar(
+        select(OtMaterial).where(
+            OtMaterial.ot_proceso_id == ot_proceso.id,
+            OtMaterial.material_id == ot_material.material_id,
+            OtMaterial.id != ot_material.id,
+        )
+    )
+    if ya_existe is not None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Esta OT ya tiene un pedido de {ot_material.material.codigo_mp} en ese proceso y máquina",
+        )
+
+    ot_material.ot_proceso_id = ot_proceso.id
+    ot_material.proceso_id = ot_proceso.proceso_id
+    db.flush()
+
+    # Si el paso de OT anterior se quedó sin pedidos ya no representa nada.
+    if not db.scalar(select(OtMaterial).where(OtMaterial.ot_proceso_id == ot_proceso_anterior.id)):
+        db.delete(ot_proceso_anterior)
+
+    db.commit()
+    db.refresh(ot_material)
+    return ot_material

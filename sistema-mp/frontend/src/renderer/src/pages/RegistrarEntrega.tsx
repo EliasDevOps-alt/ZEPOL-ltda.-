@@ -286,7 +286,9 @@ function MateriasPrimas({
 async function enviarSeleccion(
   apiBaseUrl: string,
   token: string,
-  otMaterialId: number,
+  // El material al que se le carga esto: un pedido ya creado, o un pendiente
+  // que todavía no tiene proceso (ahí solo se puede mandar materia prima).
+  destino: { ot_material_id: number } | { pendiente_id: number },
   fecha: string,
   sel: SeleccionPedido,
   codigoPedido: string,
@@ -304,7 +306,7 @@ async function enviarSeleccion(
     try {
       exitos.push(
         await api.registrarEntrega(apiBaseUrl, token, {
-          ot_material_id: otMaterialId,
+          ...destino,
           fecha,
           bobinas: sel.entrega.bobinas.map(Number),
           material_id: sel.entrega.materialId ? Number(sel.entrega.materialId) : undefined,
@@ -322,7 +324,7 @@ async function enviarSeleccion(
     try {
       exitos.push(
         await api.registrarEntrega(apiBaseUrl, token, {
-          ot_material_id: otMaterialId,
+          ...destino,
           fecha,
           bobinas: mp.bobinas.map(Number),
           material_id: Number(mp.materialId),
@@ -372,6 +374,15 @@ function validarSeleccion(sel: SeleccionPedido): string | null {
   return null
 }
 
+/** Un pendiente se puede trabajar de dos formas, y solo una exige decidir a
+ * qué proceso va: si se entrega el material tal cual, hay que asignarlo; si lo
+ * único que sale de almacén hoy es su materia prima —porque el material hay
+ * que fabricarlo— el proceso del resultado suele decidirse recién cuando
+ * producción lo devuelve, y forzarlo acá sería inventar el dato. */
+function requiereAsignacion(sel: SeleccionPedido): boolean {
+  return tieneCantidad(sel.entrega)
+}
+
 interface PendienteForm {
   materialId: string
   procesoId: string
@@ -413,17 +424,29 @@ function PendienteCard({
     enabled: !!form.procesoId
   })
 
+  // Con proceso y máquina elegidos el pendiente se convierte en pedido; sin
+  // ellos se queda pendiente y solo recibe materia prima.
+  const asignar = Boolean(form.procesoId && form.maquinaId)
+
   const mutation = useMutation({
     mutationFn: async () => {
-      const { ot_material_id } = await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
-        proceso_id: Number(form.procesoId),
-        maquina_id: Number(form.maquinaId),
-        material_id: form.materialId ? Number(form.materialId) : null
-      })
+      // Sin proceso elegido el pendiente sigue siendo pendiente y la materia
+      // prima se le cuelga igual — ver requiereAsignacion.
+      const destino = asignar
+        ? {
+            ot_material_id: (
+              await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
+                proceso_id: Number(form.procesoId),
+                maquina_id: Number(form.maquinaId),
+                material_id: form.materialId ? Number(form.materialId) : null
+              })
+            ).ot_material_id
+          }
+        : { pendiente_id: pendiente.id }
       const { fallos } = await enviarSeleccion(
         apiBaseUrl,
         token,
-        ot_material_id,
+        destino,
         fecha,
         seleccion,
         pendiente.codigo_mp,
@@ -448,8 +471,14 @@ function PendienteCard({
       setError('Indica a qué material del catálogo corresponde')
       return
     }
-    if (!form.procesoId || !form.maquinaId) {
-      setError('Elige proceso y máquina')
+    if (requiereAsignacion(seleccion) && !asignar) {
+      setError(
+        `Para entregar ${pendiente.codigo_mp} hay que elegir su proceso y su máquina. Si todavía no se sabe, dejá su cantidad vacía y cargá solo la materia prima.`
+      )
+      return
+    }
+    if (Boolean(form.procesoId) !== Boolean(form.maquinaId)) {
+      setError('Elegiste proceso pero falta la máquina (o al revés)')
       return
     }
     const problema = validarSeleccion(seleccion)
@@ -467,6 +496,13 @@ function PendienteCard({
         {pendiente.codigo_mp}
         {pendiente.cantidad_requerida != null ? ` — ${pendiente.cantidad_requerida} (del Excel)` : ''}
       </p>
+
+      {pendiente.materias_primas.length > 0 && (
+        <p className="mb-3 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+          Ya se entregó materia prima para fabricarlo: {pendiente.materias_primas.join(', ')}. Cuando esté fabricado
+          y sepas a qué proceso va, completá proceso y máquina acá arriba.
+        </p>
+      )}
 
       {pendiente.material_id == null && (
         <div className="mb-3 flex flex-col gap-1.5">
@@ -497,7 +533,7 @@ function PendienteCard({
 
       <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso</Label>
+          <Label className="text-xs">Proceso donde se usa {pendiente.codigo_mp} (si ya se sabe)</Label>
           <Select value={form.procesoId} onValueChange={(v) => setForm({ ...form, procesoId: v, maquinaId: '' })}>
             <SelectTrigger>
               <SelectValue placeholder="Selecciona" />
@@ -512,7 +548,7 @@ function PendienteCard({
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina</Label>
+          <Label className="text-xs">Máquina de ese proceso</Label>
           <Select
             value={form.maquinaId}
             onValueChange={(v) => setForm({ ...form, maquinaId: v })}
@@ -531,6 +567,15 @@ function PendienteCard({
           </Select>
         </div>
       </div>
+
+      {/* El proceso del pedido hace falta siempre —es lo que lo convierte en
+          un pedido de la OT, y sin él la materia prima no tiene a qué
+          colgarse—, pero la entrega puede quedar vacía: si el material hay que
+          fabricarlo, recién se entrega cuando producción lo devuelva. */}
+      <p className="mb-2 text-xs text-muted-foreground">
+        Cantidad de {pendiente.codigo_mp} que sale de almacén ahora. Si hay que fabricarlo primero, dejala vacía y
+        cargá abajo la materia prima — el proceso de arriba se puede completar después, cuando se sepa.
+      </p>
 
       <EntregaDelPedido
         datos={seleccion.entrega}
@@ -552,9 +597,131 @@ function PendienteCard({
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
       <Button type="submit" className="mt-3" disabled={mutation.isPending}>
-        {mutation.isPending ? 'Guardando...' : 'Asignar y registrar entrega'}
+        {mutation.isPending
+          ? 'Guardando...'
+          : requiereAsignacion(seleccion)
+            ? 'Asignar y registrar entrega'
+            : asignar
+              ? 'Asignar y registrar materia prima'
+              : 'Registrar materia prima'}
       </Button>
     </form>
+  )
+}
+
+/** Cambiar el proceso/máquina de un pedido ya creado. El proceso se elige
+ * antes de saberlo con certeza —al asignar el material, incluso cuando lo que
+ * se está cargando es solo su materia prima— así que equivocarse no puede
+ * obligar a rehacer la OT. Lo ya entregado/devuelto se mueve con el pedido.
+ * Ver ordenes_controller.mover_pedido. */
+function MoverPedido({
+  pedido,
+  procesos,
+  onMovido
+}: {
+  pedido: Consumo
+  procesos: Proceso[]
+  onMovido: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [abierto, setAbierto] = useState(false)
+  const [procesoId, setProcesoId] = useState('')
+  const [maquinaId, setMaquinaId] = useState('')
+  const [error, setError] = useState<string | null>(null)
+
+  const maquinas = useQuery({
+    queryKey: ['maquinas', procesoId],
+    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
+    enabled: !!procesoId
+  })
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      api.moverPedido(apiBaseUrl, token, pedido.ot_material_id, {
+        proceso_id: Number(procesoId),
+        maquina_id: Number(maquinaId)
+      }),
+    onSuccess: () => {
+      setAbierto(false)
+      setProcesoId('')
+      setMaquinaId('')
+      setError(null)
+      onMovido()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo mover el pedido')
+  })
+
+  if (!abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        className="mt-3 text-xs text-primary hover:underline"
+      >
+        Este pedido va a otro proceso — mover
+      </button>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
+      <p className="mb-2 text-xs text-muted-foreground">
+        Mover {pedido.codigo_mp} de {pedido.proceso} · {pedido.maquina} a:
+      </p>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <Select
+          value={procesoId}
+          onValueChange={(v) => {
+            setProcesoId(v)
+            setMaquinaId('')
+          }}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Proceso" />
+          </SelectTrigger>
+          <SelectContent>
+            {procesos.map((p) => (
+              <SelectItem key={p.id} value={String(p.id)}>
+                {p.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
+          <SelectTrigger>
+            <SelectValue placeholder="Máquina" />
+          </SelectTrigger>
+          <SelectContent>
+            {maquinas.data?.map((m) => (
+              <SelectItem key={m.id} value={String(m.id)}>
+                {m.nombre}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        Lo que ya se entregó o devolvió se mueve con el pedido. Su materia prima no se toca: tiene su propio
+        proceso.
+      </p>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!procesoId || !maquinaId || mutation.isPending}
+          onClick={() => mutation.mutate()}
+        >
+          {mutation.isPending ? 'Moviendo...' : 'Mover'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAbierto(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
   )
 }
 
@@ -565,7 +732,8 @@ function PedidoEntregaCard({
   onQuitar,
   materiales,
   materialOptions,
-  procesos
+  procesos,
+  onMovido
 }: {
   pedido: Consumo
   seleccion: SeleccionPedido
@@ -574,11 +742,17 @@ function PedidoEntregaCard({
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
   procesos: Proceso[]
+  onMovido: () => void
 }) {
   return (
     <div className="rounded-md border border-border p-4">
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-medium">{pedido.codigo_mp}</p>
+        <p className="text-sm font-medium">
+          {pedido.codigo_mp}
+          <span className="ml-2 font-normal text-muted-foreground">
+            {pedido.proceso} · {pedido.maquina}
+          </span>
+        </p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
           <X className="h-4 w-4" />
         </button>
@@ -611,6 +785,8 @@ function PedidoEntregaCard({
         materialOptions={materialOptions}
         procesos={procesos}
       />
+
+      <MoverPedido pedido={pedido} procesos={procesos} onMovido={onMovido} />
     </div>
   )
 }
@@ -674,6 +850,10 @@ export function RegistrarEntrega() {
     [materiales.data]
   )
 
+  function alMoverPedido() {
+    queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+  }
+
   function alPromoverPendiente() {
     queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
     queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
@@ -692,7 +872,7 @@ export function RegistrarEntrega() {
         const { exitos, fallos, restante } = await enviarSeleccion(
           apiBaseUrl,
           token,
-          otMaterialId,
+          { ot_material_id: otMaterialId },
           fecha,
           sel,
           pedido?.codigo_mp ?? `#${otMaterialId}`,
@@ -952,6 +1132,7 @@ export function RegistrarEntrega() {
                     materiales={materiales.data ?? []}
                     materialOptions={materialOptions}
                     procesos={procesos.data ?? []}
+                    onMovido={alMoverPedido}
                   />
                 ))}
 

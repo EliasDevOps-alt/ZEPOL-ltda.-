@@ -202,6 +202,10 @@ class OtMaterialPendienteOut(BaseModel):
     material_id: Optional[int]
     cantidad_requerida: Optional[float]
     es_tinta: bool
+    # Materia prima ya entregada para fabricar este material, mientras el
+    # pendiente sigue sin proceso asignado. Códigos, para poder mostrarlos sin
+    # otra consulta.
+    materias_primas: List[str] = []
 
 
 class OtDetalleCreate(CamposComercialesOt):
@@ -302,6 +306,17 @@ class PromoverPendienteOut(BaseModel):
     ot_material_id: int
 
 
+class MoverPedidoIn(BaseModel):
+    proceso_id: int
+    maquina_id: int
+
+
+class MoverPedidoOut(BaseModel):
+    ot_material_id: int
+    proceso: str
+    maquina: str
+
+
 class EntregaCreate(BaseModel):
     """La entrega no siempre se registra contra el pedido que el operador
     tiene en pantalla — hay dos modos, excluyentes entre sí:
@@ -318,7 +333,11 @@ class EntregaCreate(BaseModel):
        ese pedido nuevo. Vale para cualquier proceso, no solo Extrusión.
     """
 
-    ot_material_id: int
+    # Uno de los dos, no ambos. pendiente_id solo vale con como_materia_prima:
+    # es materia prima para un material que todavía no tiene proceso asignado
+    # (ver OtMaterial.insumo_de_pendiente_id).
+    ot_material_id: Optional[int] = None
+    pendiente_id: Optional[int] = None
     fecha: date
     bobinas: List[float] = Field(min_length=1)
     # Material realmente entregado, si difiere del pedido (alternativa o

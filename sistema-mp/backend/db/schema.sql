@@ -171,6 +171,7 @@ CREATE TABLE ot_materiales (
     -- No es exclusivo de Extrusión: cualquier pedido de cualquier proceso
     -- puede necesitar materiales extra que la OT no listó.
     insumo_de_id        INTEGER REFERENCES ot_materiales(id),
+    insumo_de_pendiente_id INTEGER,  -- FK agregada más abajo, ver ALTER
     creado_en           TIMESTAMP NOT NULL DEFAULT now(),
 
     -- el proceso_id debe coincidir con el del paso de OT elegido
@@ -196,6 +197,15 @@ CREATE TABLE ot_materiales_pendientes (
     cantidad_requerida  NUMERIC(10,2),
     creado_en           TIMESTAMP NOT NULL DEFAULT now()
 );
+-- ot_materiales se declara antes que esta tabla, así que su FK hacia acá va
+-- aparte. Marca la materia prima entregada para fabricar un material que
+-- todavía no tiene proceso asignado: sale de almacén hoy, y recién se sabe a
+-- qué proceso irá el resultado cuando producción lo devuelva. Al promover el
+-- pendiente estas filas se repuntan a insumo_de_id (ver promover_pendiente).
+ALTER TABLE ot_materiales
+    ADD CONSTRAINT ot_materiales_insumo_de_pendiente_fk
+    FOREIGN KEY (insumo_de_pendiente_id) REFERENCES ot_materiales_pendientes(id);
+
 
 -- ============================================================
 -- Movimientos: entregas y devoluciones
@@ -286,8 +296,10 @@ SELECT
     om.sid_devolucion_completado,
     -- Pedido de materia prima: material que hizo falta para completar otro
     -- pedido de la OT, con el código de ese otro pedido al lado.
-    om.insumo_de_id IS NOT NULL AS es_materia_prima,
-    mat_ins.codigo_mp           AS insumo_de_codigo_mp,
+    (om.insumo_de_id IS NOT NULL OR om.insumo_de_pendiente_id IS NOT NULL) AS es_materia_prima,
+    -- El material que se completa puede seguir siendo un pendiente (sin
+    -- proceso asignado todavía), y ahí su código sale de la fila pendiente.
+    COALESCE(mat_ins.codigo_mp, pend_ins.codigo_mp) AS insumo_de_codigo_mp,
     -- Al revés: a este pedido se le agregó materia prima, o sea su material se
     -- fabrica en esta OT en vez de salir de almacén tal cual. Habilita el
     -- registro de ingreso a almacén en Registrar Devolución.
@@ -318,6 +330,7 @@ JOIN materiales mat     ON mat.id = om.material_id
 JOIN estados_sid es     ON es.id = om.estado_sid_id
 LEFT JOIN ot_materiales om_ins ON om_ins.id = om.insumo_de_id
 LEFT JOIN materiales mat_ins   ON mat_ins.id = om_ins.material_id
+LEFT JOIN ot_materiales_pendientes pend_ins ON pend_ins.id = om.insumo_de_pendiente_id
 LEFT JOIN (
     SELECT e.ot_material_id, SUM(eb.cantidad) AS total
     FROM entregas e
