@@ -64,6 +64,10 @@ export interface Material {
   descripcion: string | null
   unidad: string
   es_tinta: boolean
+  // Si se entrega/devuelve como varias bobinas con su propio peso cada una,
+  // o como un solo campo de cantidad total (ej. ZIPPER es "mts" pero no usa
+  // bobinas) — no se deriva de la unidad, es una propiedad aparte.
+  usa_bobinas: boolean
 }
 
 export interface EstadoSid {
@@ -222,6 +226,7 @@ export interface MaterialAdmin {
   unidad: string
   activo: boolean
   es_tinta: boolean
+  usa_bobinas: boolean
 }
 
 export interface MaterialCreate {
@@ -229,6 +234,7 @@ export interface MaterialCreate {
   descripcion?: string | null
   unidad: string
   es_tinta?: boolean
+  usa_bobinas?: boolean
 }
 
 export interface MaterialUpdate {
@@ -237,16 +243,29 @@ export interface MaterialUpdate {
   unidad: string
   activo: boolean
   es_tinta: boolean
+  usa_bobinas: boolean
 }
 
+// La entrega no siempre queda contra el pedido que el operador tiene en
+// pantalla. Dos modos, excluyentes entre sí:
+//  1. Normal: contra ot_material_id, con material_id si almacén dio una
+//     alternativa o un cambio de estructura (sustitución 1 a 1).
+//  2. como_materia_prima: hizo falta OTRO material para poder completar el del
+//     pedido (la OT pide LDPE-4 y se fabrica mezclando LDPE-1 y LDPE-2). No es
+//     sustitución: esa materia prima obtiene su PROPIO pedido, en el proceso y
+//     la máquina donde se consume —que no tienen por qué ser los del pedido que
+//     completa— y la entrega va contra ese. Vale para cualquier proceso.
 export interface EntregaCreate {
   ot_material_id: number
   fecha: string
   bobinas: number[]
-  // Material realmente entregado, si difiere del pedido (alternativa o
-  // cambio de estructura). Sin especificar = se entrega el del pedido.
+  // Obligatorio con como_materia_prima (el material que sale de almacén).
   material_id?: number | null
   observacion?: string | null
+  como_materia_prima?: boolean
+  // Dónde se consume esa materia prima. Obligatorios con como_materia_prima.
+  proceso_id?: number | null
+  maquina_id?: number | null
 }
 
 export interface Entrega {
@@ -268,15 +287,18 @@ export interface Entrega {
   codigo_mp_entregado: string
   descripcion_entregado: string | null
   observacion: string | null
+  // ot_material_id/proceso/codigo_mp de arriba son los del pedido donde
+  // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
+  // seleccionado. Esto avisa que ese pedido se acaba de crear.
+  pedido_creado: boolean
 }
 
-// Saldo de un material puntual dentro de un pedido (puede haber más de uno
-// si hubo sustituciones en las entregas).
 export interface BalanceMaterial {
   material_id: number
   codigo_mp: string
   descripcion: string | null
   unidad: string
+  usa_bobinas: boolean
   total_entregado: number
   total_devuelto: number
   disponible: number
@@ -287,6 +309,8 @@ export interface DevolucionCreate {
   material_id: number
   fecha: string
   bobinas: number[]
+  // TRUE = material FABRICADO en esta OT entrando a almacén, no un sobrante.
+  es_ingreso_produccion?: boolean
 }
 
 export interface Devolucion {
@@ -299,6 +323,7 @@ export interface Devolucion {
   bobinas: number[]
   total_devuelto: number
   total_devuelto_pedido: number
+  es_ingreso_produccion: boolean
 }
 
 // Un material pedido dentro de una OT+proceso, con su avance de entrega/devolución.
@@ -314,11 +339,24 @@ export interface Consumo {
   descripcion: string | null
   unidad: string
   es_tinta: boolean
+  usa_bobinas: boolean
+  // TRUE si este pedido es una materia prima que hizo falta para completar
+  // otro pedido de la OT.
+  es_materia_prima: boolean
+  // Código del material que se completa con esta materia prima (ej. LDPE-4).
+  insumo_de_codigo_mp: string | null
+  // TRUE si a este pedido se le agregó materia prima — su material se fabrica
+  // en esta OT en vez de salir de almacén tal cual.
+  tiene_materia_prima: boolean
   estado_sid: string
   sid_devolucion_completado: boolean
   cantidad_requerida: number | null
   total_entregado: number
+  // Sobrantes que volvieron de planta. No incluye el material fabricado que
+  // entró a almacén — eso es total_ingresado.
   total_devuelto: number
+  // Material fabricado en esta OT que entró a almacén. 0 en un pedido normal.
+  total_ingresado: number
   consumo_neto: number
   estado_entrega: 'PENDIENTE' | 'PARCIAL' | 'COMPLETO' | 'SIN REQUERIMIENTO'
   // TRUE si alguna entrega/devolución de este pedido fue de un material

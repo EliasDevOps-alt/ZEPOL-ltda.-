@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Plus, Search, Trash2, X } from 'lucide-react'
@@ -6,6 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
+import { SelectorUnidad } from '@renderer/components/SelectorUnidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -19,6 +20,7 @@ interface FormState {
   unidad: string
   activo: boolean
   es_tinta: boolean
+  usa_bobinas: boolean
 }
 
 const FORM_VACIO: FormState = {
@@ -27,7 +29,8 @@ const FORM_VACIO: FormState = {
   descripcion: '',
   unidad: 'kg',
   activo: true,
-  es_tinta: false
+  es_tinta: false,
+  usa_bobinas: true
 }
 
 export function Materiales() {
@@ -51,6 +54,11 @@ export function Materiales() {
     queryFn: () => api.listarMaterialesAdmin(apiBaseUrl, token, { q: buscado })
   })
 
+  const opcionesUnidad = useMemo(
+    () => [...new Set((materiales.data ?? []).map((m) => m.unidad))].sort((a, b) => a.localeCompare(b)),
+    [materiales.data]
+  )
+
   const guardar = useMutation({
     mutationFn: async (data: FormState) => {
       if (data.id === null) {
@@ -58,7 +66,8 @@ export function Materiales() {
           codigo_mp: data.codigo_mp,
           descripcion: data.descripcion || null,
           unidad: data.unidad,
-          es_tinta: data.es_tinta
+          es_tinta: data.es_tinta,
+          usa_bobinas: data.usa_bobinas
         })
       }
       return api.actualizarMaterial(apiBaseUrl, token, data.id, {
@@ -66,7 +75,8 @@ export function Materiales() {
         descripcion: data.descripcion || null,
         unidad: data.unidad,
         activo: data.activo,
-        es_tinta: data.es_tinta
+        es_tinta: data.es_tinta,
+        usa_bobinas: data.usa_bobinas
       })
     },
     onSuccess: () => {
@@ -100,7 +110,8 @@ export function Materiales() {
       descripcion: material.descripcion ?? '',
       unidad: material.unidad,
       activo: material.activo,
-      es_tinta: material.es_tinta
+      es_tinta: material.es_tinta,
+      usa_bobinas: material.usa_bobinas
     })
   }
 
@@ -151,10 +162,10 @@ export function Materiales() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <Label>Unidad</Label>
-                  <Input
+                  <SelectorUnidad
                     value={form.unidad}
-                    onChange={(e) => setForm({ ...form, unidad: e.target.value })}
-                    placeholder="kg"
+                    onChange={(unidad) => setForm({ ...form, unidad })}
+                    opciones={opcionesUnidad}
                   />
                 </div>
               </div>
@@ -166,6 +177,16 @@ export function Materiales() {
                   onChange={(e) => setForm({ ...form, descripcion: e.target.value })}
                 />
               </div>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={form.usa_bobinas}
+                  onChange={(e) => setForm({ ...form, usa_bobinas: e.target.checked })}
+                />
+                Se entrega/devuelve en bobinas (varios pesos por movimiento) — desmarcar para materiales como
+                ZIPPER (metros) o ítems por unidad, donde solo se anota una cantidad total
+              </label>
 
               <label className="flex items-center gap-2 text-sm">
                 <input
@@ -229,6 +250,7 @@ export function Materiales() {
                 <th className="p-3">Código</th>
                 <th className="p-3">Descripción</th>
                 <th className="p-3">Unidad</th>
+                <th className="p-3">Bobinas</th>
                 <th className="p-3">Estado</th>
                 <th className="p-3"></th>
               </tr>
@@ -247,6 +269,7 @@ export function Materiales() {
                   </td>
                   <td className="p-3 text-muted-foreground">{m.descripcion}</td>
                   <td className="p-3">{m.unidad}</td>
+                  <td className="p-3 text-muted-foreground">{m.usa_bobinas ? 'Sí' : 'No'}</td>
                   <td className="p-3">
                     {m.activo ? (
                       <span className="text-xs text-success">Activo</span>

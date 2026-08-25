@@ -61,7 +61,12 @@ CREATE TABLE materiales (
     -- registran en Crear OT para no perder el dato, pero no se entregan ni
     -- se devuelven en planta, así que Registrar Entrega/Devolución los
     -- excluyen de la lista de pedidos.
-    es_tinta    BOOLEAN      NOT NULL DEFAULT FALSE
+    es_tinta    BOOLEAN      NOT NULL DEFAULT FALSE,
+    -- Si la cantidad se carga bobina por bobina (el caso normal: kg de
+    -- film/rollo) o como un solo número. Es una propiedad del material, se
+    -- elige al crearlo — NO se deduce de la unidad: ZIPPER se mide en "mts"
+    -- pero no se entrega en bobinas. Ver CampoCantidad en el frontend.
+    usa_bobinas BOOLEAN      NOT NULL DEFAULT TRUE
 );
 
 -- Ajustes editables desde la app (no desde .env), como la ruta del Excel
@@ -157,6 +162,15 @@ CREATE TABLE ot_materiales (
     -- trámites distintos ante el mismo pedido) — por eso va aparte, no
     -- reutiliza estados_sid.
     sid_devolucion_completado BOOLEAN NOT NULL DEFAULT FALSE,
+    -- Si este pedido es una materia prima que hizo falta para completar OTRO
+    -- pedido de la misma OT — apunta a ese pedido (los de LDPE-1 y LDPE-2
+    -- apuntan al de LDPE-4, que se fabrica combinándolos). NULL = pedido
+    -- normal. Cada materia prima tiene su propio proceso y máquina, que no
+    -- tienen por qué coincidir con los del pedido que completa: se consume
+    -- donde se fabrica (Extrusión), no donde se usa el resultado (Laminación).
+    -- No es exclusivo de Extrusión: cualquier pedido de cualquier proceso
+    -- puede necesitar materiales extra que la OT no listó.
+    insumo_de_id        INTEGER REFERENCES ot_materiales(id),
     creado_en           TIMESTAMP NOT NULL DEFAULT now(),
 
     -- el proceso_id debe coincidir con el del paso de OT elegido
@@ -223,11 +237,20 @@ CREATE TABLE entrega_bobinas (
 -- mismo pedido puede haber recibido entregas de más de un material si hubo
 -- una sustitución (ver entregas.material_id) — el saldo disponible para
 -- devolver se calcula por material, no por pedido en conjunto.
+-- Una devolución es material volviendo de planta a almacén. Cubre dos casos
+-- que comparten dirección y por eso comparten tabla y pantalla, pero cuentan
+-- distinto (ver es_ingreso_produccion).
 CREATE TABLE devoluciones (
     id             SERIAL PRIMARY KEY,
     ot_material_id INTEGER   NOT NULL REFERENCES ot_materiales(id),
     material_id    INTEGER   NOT NULL REFERENCES materiales(id),
     usuario_id     INTEGER   NOT NULL REFERENCES usuarios(id),
+    -- TRUE  = material FABRICADO en esta OT entrando a almacén (el LDPE-4 que
+    --         salió de mezclar LDPE-1 y LDPE-2). Nunca se había entregado, así
+    --         que NO descuenta del consumo neto: va a vista_consumo.total_ingresado.
+    -- FALSE = sobrante sin usar que vuelve de planta. Ese sí descuenta:
+    --         va a vista_consumo.total_devuelto.
+    es_ingreso_produccion BOOLEAN NOT NULL DEFAULT FALSE,
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
     creado_en      TIMESTAMP NOT NULL DEFAULT now()
@@ -258,11 +281,23 @@ SELECT
     mat.descripcion,
     mat.unidad,
     mat.es_tinta,
+    mat.usa_bobinas,
     es.nombre                   AS estado_sid,
     om.sid_devolucion_completado,
+    -- Pedido de materia prima: material que hizo falta para completar otro
+    -- pedido de la OT, con el código de ese otro pedido al lado.
+    om.insumo_de_id IS NOT NULL AS es_materia_prima,
+    mat_ins.codigo_mp           AS insumo_de_codigo_mp,
+    -- Al revés: a este pedido se le agregó materia prima, o sea su material se
+    -- fabrica en esta OT en vez de salir de almacén tal cual. Habilita el
+    -- registro de ingreso a almacén en Registrar Devolución.
+    EXISTS (SELECT 1 FROM ot_materiales mp WHERE mp.insumo_de_id = om.id) AS tiene_materia_prima,
     om.cantidad_requerida,
     COALESCE(ent_tot.total, 0)  AS total_entregado,
+    -- Solo sobrantes: el material fabricado que entra a almacén va aparte,
+    -- porque nunca se había entregado y restarlo daría un neto irreal.
     COALESCE(dev_tot.total, 0)  AS total_devuelto,
+    COALESCE(ing_tot.total, 0)  AS total_ingresado,
     COALESCE(ent_tot.total, 0) - COALESCE(dev_tot.total, 0) AS consumo_neto,
     -- TRUE si alguna entrega/devolución de este pedido fue de un material
     -- distinto al pedido (alternativa o cambio de estructura) — le indica al
@@ -271,7 +306,8 @@ SELECT
     EXISTS (
         SELECT 1 FROM entregas e WHERE e.ot_material_id = om.id AND e.material_id <> om.material_id
     ) OR EXISTS (
-        SELECT 1 FROM devoluciones d WHERE d.ot_material_id = om.id AND d.material_id <> om.material_id
+        SELECT 1 FROM devoluciones d
+        WHERE d.ot_material_id = om.id AND d.material_id <> om.material_id AND NOT d.es_ingreso_produccion
     ) AS material_sustituido
 FROM ot_materiales om
 JOIN ot_procesos otp    ON otp.id = om.ot_proceso_id
@@ -280,6 +316,8 @@ JOIN procesos p         ON p.id = om.proceso_id
 JOIN maquinas mq        ON mq.id = otp.maquina_id
 JOIN materiales mat     ON mat.id = om.material_id
 JOIN estados_sid es     ON es.id = om.estado_sid_id
+LEFT JOIN ot_materiales om_ins ON om_ins.id = om.insumo_de_id
+LEFT JOIN materiales mat_ins   ON mat_ins.id = om_ins.material_id
 LEFT JOIN (
     SELECT e.ot_material_id, SUM(eb.cantidad) AS total
     FROM entregas e
@@ -290,5 +328,13 @@ LEFT JOIN (
     SELECT d.ot_material_id, SUM(db.cantidad) AS total
     FROM devoluciones d
     JOIN devolucion_bobinas db ON db.devolucion_id = d.id
+    WHERE NOT d.es_ingreso_produccion
     GROUP BY d.ot_material_id
-) dev_tot ON dev_tot.ot_material_id = om.id;
+) dev_tot ON dev_tot.ot_material_id = om.id
+LEFT JOIN (
+    SELECT d.ot_material_id, SUM(db.cantidad) AS total
+    FROM devoluciones d
+    JOIN devolucion_bobinas db ON db.devolucion_id = d.id
+    WHERE d.es_ingreso_produccion
+    GROUP BY d.ot_material_id
+) ing_tot ON ing_tot.ot_material_id = om.id;

@@ -101,6 +101,12 @@ class Material(Base):
     # "material" en el Excel OC-MP pero no son materia prima física, así que
     # Registrar Entrega/Devolución los excluyen de la lista de pedidos.
     es_tinta: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Si el material se entrega/devuelve como varias bobinas con su propio
+    # peso cada una (el caso más común: kg de film/rollo) o como un solo
+    # campo de cantidad total. No se deriva de la unidad (ej. ZIPPER es en
+    # "mts" pero NO se maneja en bobinas) — es una propiedad del material,
+    # decidida al crearlo, porque la unidad sola no alcanza para saberlo.
+    usa_bobinas: Mapped[bool] = mapped_column(Boolean, default=True)
 
 
 class Configuracion(Base):
@@ -212,6 +218,15 @@ class OtMaterial(Base):
     # El SID de la devolución es un trámite independiente del de la entrega,
     # por eso es un campo aparte en vez de reutilizar estados_sid.
     sid_devolucion_completado: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Si este pedido es una materia prima que hizo falta para completar OTRO
+    # pedido de la misma OT — apunta a ese pedido (los de LDPE-1 y LDPE-2
+    # apuntan al de LDPE-4, que se fabrica combinándolos). NULL = pedido
+    # normal. Cada materia prima tiene su propio proceso y máquina, que no
+    # tienen por qué coincidir con los del pedido que completa: se consume
+    # donde se fabrica (Extrusión), no donde se usa el resultado (Laminación).
+    # No es exclusivo de Extrusión — cualquier pedido de cualquier proceso
+    # puede necesitar materiales extra que la OT no listó.
+    insumo_de_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ot_materiales.id"))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_proceso: Mapped["OtProceso"] = relationship(
@@ -221,6 +236,12 @@ class OtMaterial(Base):
     estado_sid: Mapped["EstadoSid"] = relationship()
     entregas: Mapped[List["Entrega"]] = relationship(back_populates="ot_material")
     devoluciones: Mapped[List["Devolucion"]] = relationship(back_populates="ot_material")
+    insumo_de: Mapped[Optional["OtMaterial"]] = relationship(
+        remote_side=[id], foreign_keys=[insumo_de_id], back_populates="insumos"
+    )
+    insumos: Mapped[List["OtMaterial"]] = relationship(
+        foreign_keys=[insumo_de_id], back_populates="insumo_de"
+    )
 
 
 class OtMaterialPendiente(Base):
@@ -297,6 +318,13 @@ class Devolucion(Base):
     ot_material_id: Mapped[int] = mapped_column(ForeignKey("ot_materiales.id"))
     material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
+    # TRUE cuando lo que entra a almacén es material FABRICADO en esta OT
+    # (ej. el LDPE-4 que salió de mezclar LDPE-1 y LDPE-2), no un sobrante sin
+    # usar que vuelve de planta. Los dos son producción -> almacén y por eso
+    # comparten tabla y pantalla, pero solo el sobrante descuenta del consumo
+    # neto: el material fabricado nunca se había entregado. Ver vista_consumo
+    # (total_devuelto vs total_ingresado).
+    es_ingreso_produccion: Mapped[bool] = mapped_column(Boolean, default=False)
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

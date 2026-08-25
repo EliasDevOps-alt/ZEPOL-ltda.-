@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRightLeft, PackageCheck, PackageX, Search } from 'lucide-react'
+import { ArrowRightLeft, Beaker, PackageCheck, PackageX, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -43,7 +43,6 @@ export function Historial() {
     queryKey: ['devoluciones-todas'],
     queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token)
   })
-
   const consumoPorOt = useMemo(() => {
     const mapa = new Map<string, Consumo[]>()
     for (const p of consumo.data ?? []) {
@@ -143,6 +142,17 @@ export function Historial() {
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
                             <CardTitle className="text-base">{pedido.codigo_mp}</CardTitle>
+                            {pedido.tiene_materia_prima && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                                <Beaker className="h-3 w-3" />
+                                se fabrica en esta OT
+                              </span>
+                            )}
+                            {pedido.es_materia_prima && (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                materia prima de {pedido.insumo_de_codigo_mp}
+                              </span>
+                            )}
                             {materialesSustituidos.length > 0 && (
                               <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                                 <ArrowRightLeft className="h-3 w-3" />
@@ -159,13 +169,30 @@ export function Historial() {
                         </span>
                       </CardHeader>
                       <CardContent>
-                        <div className="mb-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        {/* "Ingresó a almacén" solo aparece si el material de
+                            este pedido se fabricó en la OT — es material que
+                            entra por primera vez, no un sobrante, así que no
+                            descuenta del consumo neto. */}
+                        <div
+                          className={cn(
+                            'mb-4 grid grid-cols-2 gap-3',
+                            pedido.total_ingresado > 0 ? 'sm:grid-cols-5' : 'sm:grid-cols-4'
+                          )}
+                        >
                           <div className="rounded-md bg-muted p-3">
                             <p className="text-xs text-muted-foreground">Requerido</p>
                             <p className="font-medium">
                               {pedido.cantidad_requerida ?? '—'} {pedido.cantidad_requerida ? pedido.unidad : ''}
                             </p>
                           </div>
+                          {pedido.total_ingresado > 0 && (
+                            <div className="rounded-md bg-muted p-3">
+                              <p className="text-xs text-muted-foreground">Ingresó a almacén</p>
+                              <p className="font-medium">
+                                {pedido.total_ingresado} {pedido.unidad}
+                              </p>
+                            </div>
+                          )}
                           <div className="rounded-md bg-muted p-3">
                             <p className="text-xs text-muted-foreground">Entregado</p>
                             <p className="font-medium">
@@ -186,12 +213,13 @@ export function Historial() {
                           </div>
                         </div>
 
-                        {pedido.cantidad_requerida != null && pedido.cantidad_requerida - pedido.total_entregado > 0 && (
-                          <p className="mb-4 text-xs text-muted-foreground">
-                            Aún falta entregar: {(pedido.cantidad_requerida - pedido.total_entregado).toFixed(2)}{' '}
-                            {pedido.unidad}
-                          </p>
-                        )}
+                        {pedido.cantidad_requerida != null &&
+                          pedido.cantidad_requerida - pedido.total_entregado > 0 && (
+                            <p className="mb-4 text-xs text-muted-foreground">
+                              Aún falta entregar:{' '}
+                              {(pedido.cantidad_requerida - pedido.total_entregado).toFixed(2)} {pedido.unidad}
+                            </p>
+                          )}
 
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                           <div>
@@ -224,7 +252,11 @@ export function Historial() {
                                 </div>
                               ))}
                               {susEntregas.length === 0 && (
-                                <p className="text-xs text-muted-foreground">Sin entregas.</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {pedido.tiene_materia_prima
+                                    ? 'Sin entregas todavía — primero se fabrica con su materia prima.'
+                                    : 'Sin entregas.'}
+                                </p>
                               )}
                             </div>
                           </div>
@@ -232,7 +264,10 @@ export function Historial() {
                           <div>
                             <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                               <PackageX className="h-3.5 w-3.5" />
-                              Devoluciones ({susDevoluciones.length})
+                              {/* La misma lista mezcla sobrantes que vuelven e
+                                  ingresos de material fabricado; cada fila dice
+                                  cuál es. */}
+                              Devoluciones e ingresos ({susDevoluciones.length})
                             </p>
                             <div className="flex flex-col gap-2">
                               {susDevoluciones.map((d) => (
@@ -240,7 +275,9 @@ export function Historial() {
                                   <div className="flex justify-between">
                                     <span>
                                       {d.fecha} · {d.codigo_mp}
-                                      {d.codigo_mp !== pedido.codigo_mp ? (
+                                      {d.es_ingreso_produccion ? (
+                                        <span className="text-warning"> (ingreso a almacén)</span>
+                                      ) : d.codigo_mp !== pedido.codigo_mp ? (
                                         <span className="text-warning"> (pedido: {pedido.codigo_mp})</span>
                                       ) : (
                                         ''
@@ -262,6 +299,7 @@ export function Historial() {
                               )}
                             </div>
                           </div>
+
                         </div>
                       </CardContent>
                     </Card>

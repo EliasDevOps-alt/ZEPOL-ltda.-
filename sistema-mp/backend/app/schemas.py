@@ -82,6 +82,7 @@ class MaterialOut(BaseModel):
     descripcion: Optional[str]
     unidad: str
     es_tinta: bool
+    usa_bobinas: bool
 
 
 class EstadoSidOut(BaseModel):
@@ -126,6 +127,7 @@ class MaterialAdminOut(BaseModel):
     unidad: str
     activo: bool
     es_tinta: bool
+    usa_bobinas: bool
 
 
 class MaterialCreate(BaseModel):
@@ -133,6 +135,7 @@ class MaterialCreate(BaseModel):
     descripcion: Optional[str] = None
     unidad: str
     es_tinta: bool = False
+    usa_bobinas: bool = True
 
 
 class MaterialUpdate(BaseModel):
@@ -141,6 +144,7 @@ class MaterialUpdate(BaseModel):
     unidad: str
     activo: bool = True
     es_tinta: bool = False
+    usa_bobinas: bool = True
 
 
 class OrdenTrabajoOut(BaseModel):
@@ -299,13 +303,33 @@ class PromoverPendienteOut(BaseModel):
 
 
 class EntregaCreate(BaseModel):
+    """La entrega no siempre se registra contra el pedido que el operador
+    tiene en pantalla — hay dos modos, excluyentes entre sí:
+
+    1. Normal (ningún campo extra): se entrega contra ot_material_id, con
+       material_id opcional si almacén dio una alternativa o un cambio de
+       estructura (sustitución 1 a 1).
+    2. como_materia_prima: hace falta OTRO material para poder completar el
+       del pedido (ej. el LDPE-4 que pide la OT se fabrica mezclando LDPE-1 y
+       LDPE-2). No es una sustitución: esa materia prima obtiene su PROPIO
+       pedido, en el proceso y la máquina donde realmente se consume — que no
+       tienen por qué ser los del pedido que completa (ver
+       ordenes_controller.crear_pedido_materia_prima) — y la entrega va contra
+       ese pedido nuevo. Vale para cualquier proceso, no solo Extrusión.
+    """
+
     ot_material_id: int
     fecha: date
     bobinas: List[float] = Field(min_length=1)
     # Material realmente entregado, si difiere del pedido (alternativa o
     # cambio de estructura). None = se entrega el material del pedido tal cual.
+    # Obligatorio con como_materia_prima (es el material que sale de almacén).
     material_id: Optional[int] = None
     observacion: Optional[str] = None
+    como_materia_prima: bool = False
+    # Dónde se consume esa materia prima. Obligatorios con como_materia_prima.
+    proceso_id: Optional[int] = None
+    maquina_id: Optional[int] = None
 
 
 class EntregaOut(BaseModel):
@@ -329,6 +353,11 @@ class EntregaOut(BaseModel):
     codigo_mp_entregado: str
     descripcion_entregado: Optional[str]
     observacion: Optional[str] = None
+    # ot_material_id/proceso/maquina/codigo_mp de arriba son los del pedido
+    # donde REALMENTE quedó la entrega, que con como_materia_prima no es el
+    # que el operador tenía seleccionado. Esto avisa que ese pedido se acaba
+    # de crear, para poder confirmarlo en pantalla.
+    pedido_creado: bool = False
 
 
 class BalanceMaterialOut(BaseModel):
@@ -339,6 +368,7 @@ class BalanceMaterialOut(BaseModel):
     codigo_mp: str
     descripcion: Optional[str]
     unidad: str
+    usa_bobinas: bool
     total_entregado: float
     total_devuelto: float
     disponible: float
@@ -351,6 +381,9 @@ class DevolucionCreate(BaseModel):
     material_id: int
     fecha: date
     bobinas: List[float] = Field(min_length=1)
+    # TRUE = material FABRICADO en esta OT entrando a almacén, no un sobrante.
+    # Ver Devolucion.es_ingreso_produccion.
+    es_ingreso_produccion: bool = False
 
 
 class DevolucionOut(BaseModel):
@@ -363,6 +396,7 @@ class DevolucionOut(BaseModel):
     bobinas: List[float]
     total_devuelto: float
     total_devuelto_pedido: float
+    es_ingreso_produccion: bool
 
 
 class PedidoMaterialOut(BaseModel):
@@ -379,9 +413,25 @@ class PedidoMaterialOut(BaseModel):
     descripcion: Optional[str]
     unidad: str
     es_tinta: bool
+    usa_bobinas: bool
+    # TRUE si este pedido es una materia prima que hizo falta para completar
+    # otro pedido de la OT (ver OtMaterial.insumo_de_id).
+    es_materia_prima: bool
+    # Código del material que se completa con esta materia prima (ej. LDPE-4),
+    # si es_materia_prima. None en cualquier otro pedido.
+    insumo_de_codigo_mp: Optional[str]
+    # TRUE si a este pedido se le agregó materia prima — o sea, su material se
+    # fabrica en esta OT en vez de salir de almacén tal cual. El frontend lo
+    # usa para ofrecer el registro de ingreso a almacén y para el badge.
+    tiene_materia_prima: bool
     cantidad_requerida: Optional[float]
     total_entregado: float
+    # Sobrantes que volvieron de planta. NO incluye el material fabricado que
+    # entró a almacén — eso es total_ingresado.
     total_devuelto: float
+    # Material fabricado en esta OT que entró a almacén (ver
+    # Devolucion.es_ingreso_produccion). 0 en un pedido normal.
+    total_ingresado: float
     consumo_neto: float
     estado_entrega: str
     # TRUE si alguna entrega/devolución de este pedido fue de un material

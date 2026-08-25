@@ -14,7 +14,7 @@ from ..models import Entrega, OtMaterial, Usuario
 router = APIRouter(prefix="/entregas", tags=["entregas"], dependencies=[Depends(security.get_current_usuario)])
 
 
-def _serializar(entrega: Entrega) -> schemas.EntregaOut:
+def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.EntregaOut:
     ot_material = entrega.ot_material
     ot_proceso = ot_material.ot_proceso
     return schemas.EntregaOut(
@@ -36,6 +36,7 @@ def _serializar(entrega: Entrega) -> schemas.EntregaOut:
         codigo_mp_entregado=entrega.material.codigo_mp,
         descripcion_entregado=entrega.material.descripcion,
         observacion=entrega.observacion,
+        pedido_creado=pedido_creado,
     )
 
 
@@ -50,8 +51,8 @@ def registrar_entrega(
     db: Session = Depends(get_db),
     usuario: Usuario = Depends(security.get_current_usuario),
 ):
-    entrega = entregas_controller.registrar_entrega(db, usuario, data)
-    return _serializar(entrega)
+    entrega, pedido_creado = entregas_controller.registrar_entrega(db, usuario, data)
+    return _serializar(entrega, pedido_creado)
 
 
 @router.get("", response_model=List[schemas.EntregaOut])

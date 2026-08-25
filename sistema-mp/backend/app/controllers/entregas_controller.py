@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -8,22 +8,44 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..models import Entrega, EntregaBobina, Material, OrdenTrabajo, OtMaterial, OtProceso, Usuario
+from . import ordenes_controller
 
 
-def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate) -> Entrega:
+def _resolver_pedido(
+    db: Session, ot_material: OtMaterial, data: schemas.EntregaCreate
+) -> Tuple[OtMaterial, bool]:
+    """Contra qué pedido queda realmente la entrega. Ver EntregaCreate para
+    los dos modos; devuelve además si ese pedido se acaba de crear."""
+    if not data.como_materia_prima:
+        return ot_material, False
+
+    if data.material_id is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Indica qué materia prima se está entregando")
+    if data.proceso_id is None or data.maquina_id is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Indica el proceso y la máquina donde se consume esa materia prima"
+        )
+    return ordenes_controller.crear_pedido_materia_prima(
+        db, ot_material, data.material_id, data.proceso_id, data.maquina_id, sum(data.bobinas)
+    )
+
+
+def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate) -> Tuple[Entrega, bool]:
     ot_material = db.get(OtMaterial, data.ot_material_id)
     if ot_material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido de material no encontrado")
 
+    pedido, pedido_creado = _resolver_pedido(db, ot_material, data)
+
     # Sin material_id explícito, se entrega el material del pedido tal cual
     # (el caso normal, sin sustitución).
-    material_id = data.material_id if data.material_id is not None else ot_material.material_id
+    material_id = data.material_id if data.material_id is not None else pedido.material_id
     material = db.get(Material, material_id)
     if material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
     entrega = Entrega(
-        ot_material_id=ot_material.id,
+        ot_material_id=pedido.id,
         material_id=material.id,
         usuario_id=usuario.id,
         fecha=data.fecha,
@@ -33,7 +55,7 @@ def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate
     db.add(entrega)
     db.commit()
     db.refresh(entrega)
-    return entrega
+    return entrega, pedido_creado
 
 
 def listar_entregas_por_ot(db: Session, numero_ot: Optional[str] = None) -> List[Entrega]:

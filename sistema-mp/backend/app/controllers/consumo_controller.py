@@ -7,6 +7,10 @@ from sqlalchemy.orm import Session
 
 
 def _estado_entrega(cantidad_requerida: float | None, total_entregado: float) -> str:
+    """Todo pedido avanza igual: con lo que se le entregó. Un pedido cuyo
+    material se fabrica en la propia OT (ver Devolucion.es_ingreso_produccion)
+    tampoco es excepción — el material fabricado primero entra a almacén y
+    después se entrega al pedido como cualquier otro."""
     if not cantidad_requerida:
         return "SIN REQUERIMIENTO"
     if total_entregado >= float(cantidad_requerida):

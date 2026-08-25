@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ArrowRightLeft, CheckCircle2, Search, X } from 'lucide-react'
+import { ArrowRightLeft, Beaker, CheckCircle2, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -13,107 +13,233 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import { cn, esUnidadDiscreta } from '@renderer/lib/utils'
+import { cn } from '@renderer/lib/utils'
 import type { Consumo, Devolucion } from '@renderer/lib/types'
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-interface SeleccionDevolucion extends BobinasPedido {
+interface EntradaDevolucion extends BobinasPedido {
   // Material que realmente se está devolviendo — un pedido puede tener
-  // entregas de más de uno si hubo una sustitución.
+  // entregas de más de uno (por una sustitución), así que hace falta elegir
+  // de cuál se devuelve.
   materialId: string
+}
+
+function entradaVacia(): EntradaDevolucion {
+  return { materialId: '', cantidadBobinas: '', bobinas: [] }
+}
+
+/** Esta pantalla registra las dos formas en que un material vuelve de planta a
+ * almacén, que van a la misma tabla pero cuentan distinto:
+ *  - 'sobrante': material que se había entregado y no se usó. Descuenta del
+ *    consumo neto del pedido.
+ *  - 'ingreso': material FABRICADO en esta OT entrando a almacén por primera
+ *    vez (el LDPE-4 que salió de mezclar LDPE-1 y LDPE-2). Nunca se había
+ *    entregado, así que no descuenta nada — recién después se entrega al
+ *    proceso que lo pidió, desde Registrar Entrega. Solo se ofrece en pedidos
+ *    con materia prima cargada (Consumo.tiene_materia_prima). */
+type ModoDevolucion = 'sobrante' | 'ingreso'
+
+interface SeleccionDevolucion {
+  modo: ModoDevolucion
+  entradas: EntradaDevolucion[]
+}
+
+function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
+  return {
+    // Si el material de este pedido se fabrica en la OT, lo que se viene a
+    // registrar casi siempre es su ingreso a almacén.
+    modo: pedido.tiene_materia_prima ? 'ingreso' : 'sobrante',
+    entradas: [
+      {
+        ...(pedido.usa_bobinas ? { cantidadBobinas: '', bobinas: [] } : { cantidadBobinas: '1', bobinas: [''] }),
+        materialId: String(pedido.material_id)
+      }
+    ]
+  }
 }
 
 function PedidoDevolucionCard({
   pedido,
-  datos,
+  seleccion,
   onChange,
   onQuitar
 }: {
   pedido: Consumo
-  datos: SeleccionDevolucion
-  onChange: (datos: SeleccionDevolucion) => void
+  seleccion: SeleccionDevolucion
+  onChange: (seleccion: SeleccionDevolucion) => void
   onQuitar: () => void
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
 
+  const entradas = seleccion.entradas
+  // En un ingreso a almacén no hay "materiales entregados" que consultar ni
+  // saldo contra el cual comparar: el material entra por primera vez y siempre
+  // es el del propio pedido.
+  const esIngreso = seleccion.modo === 'ingreso'
+
   const balance = useQuery({
     queryKey: ['materiales-entregados', pedido.ot_material_id],
-    queryFn: () => api.listarMaterialesEntregados(apiBaseUrl, token, pedido.ot_material_id)
+    queryFn: () => api.listarMaterialesEntregados(apiBaseUrl, token, pedido.ot_material_id),
+    enabled: !esIngreso
   })
 
-  const materiales = balance.data ?? []
-  const seleccionado = materiales.find((m) => String(m.material_id) === datos.materialId)
-  const disponible = seleccionado ? seleccionado.disponible : pedido.total_entregado - pedido.total_devuelto
-  const unidad = seleccionado?.unidad ?? pedido.unidad
+  const materiales = esIngreso ? [] : (balance.data ?? [])
 
-  // El material por defecto (el del pedido) puede no ser ninguno de los que
-  // realmente se entregaron si hubo una sustitución — en ese caso hay que
-  // corregir el material seleccionado apenas se sabe cuál fue el real,
-  // porque si no se termina devolviendo contra un material que nunca salió
-  // de almacén. Con un solo material entregado no hace falta preguntar,
-  // simplemente se corrige solo; con más de uno, el Select de abajo deja
-  // elegir entre los que sí se entregaron.
+  // Cuando solo se entregó un material, no tiene sentido preguntar cuál se
+  // devuelve — se corrige solo, en cada entrada, aunque el pedido tenga su
+  // propio material distinto (sustitución total). Con más de un material
+  // entregado, el Select de abajo deja elegir explícitamente.
   useEffect(() => {
-    if (materiales.length === 0) return
-    const coincide = materiales.some((m) => String(m.material_id) === datos.materialId)
-    if (!coincide) onChange({ ...datos, materialId: String(materiales[0].material_id) })
+    if (materiales.length !== 1) return
+    const unico = String(materiales[0].material_id)
+    if (entradas.some((e) => e.materialId !== unico)) {
+      onChange({ ...seleccion, entradas: entradas.map((e) => ({ ...e, materialId: unico })) })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [materiales])
 
+  function cambiarEntradas(nuevas: EntradaDevolucion[]) {
+    onChange({ ...seleccion, entradas: nuevas })
+  }
+  function actualizar(indice: number, cambios: Partial<EntradaDevolucion>) {
+    cambiarEntradas(entradas.map((e, i) => (i === indice ? { ...e, ...cambios } : e)))
+  }
+  function agregar() {
+    cambiarEntradas([...entradas, entradaVacia()])
+  }
+  function quitar(indice: number) {
+    cambiarEntradas(entradas.filter((_, i) => i !== indice))
+  }
+  function cambiarModo(modo: ModoDevolucion) {
+    // Al cambiar de modo el material vuelve al del pedido: en un ingreso
+    // siempre es ése, y en un sobrante el efecto de arriba lo corrige si hay
+    // uno solo entregado.
+    onChange({ modo, entradas: entradas.map((e) => ({ ...e, materialId: String(pedido.material_id) })) })
+  }
+
   return (
-    <div className="rounded-md border border-border p-4">
+    <div className={cn('rounded-md border p-4', esIngreso ? 'border-warning/40 bg-warning/5' : 'border-border')}>
       <div className="mb-3 flex items-center justify-between">
-        {/* Muestra el material que realmente se está devolviendo, no el del
-            pedido — mostrar ambos acá confundía más de lo que aclaraba. */}
-        <p className="text-sm font-medium">{seleccionado?.codigo_mp ?? pedido.codigo_mp}</p>
+        <p className="text-sm font-medium">{pedido.codigo_mp}</p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
           <X className="h-4 w-4" />
         </button>
       </div>
 
-      {materiales.length > 1 && (
+      {/* Un pedido con materia prima puede recibir las dos cosas: el material
+          recién fabricado entrando, y más adelante sobrantes volviendo de
+          planta. Por eso se pregunta en vez de asumir. */}
+      {pedido.tiene_materia_prima && (
         <div className="mb-3 flex flex-col gap-1.5">
-          <Label className="text-xs">¿Qué material se está devolviendo?</Label>
-          <Select value={datos.materialId} onValueChange={(v) => onChange({ ...datos, materialId: v })}>
+          <Label className="text-xs">¿Qué estás registrando?</Label>
+          <Select value={seleccion.modo} onValueChange={(v) => cambiarModo(v as ModoDevolucion)}>
             <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {materiales.map((m) => (
-                <SelectItem key={m.material_id} value={String(m.material_id)}>
-                  {m.codigo_mp} — disponible: {m.disponible.toFixed(2)} {m.unidad}
-                </SelectItem>
-              ))}
+              <SelectItem value="ingreso">Ingreso a almacén — material fabricado en esta OT</SelectItem>
+              <SelectItem value="sobrante">Devolución de sobrante</SelectItem>
             </SelectContent>
           </Select>
         </div>
       )}
 
-      <div className="mb-3 flex flex-col gap-0.5 text-xs text-muted-foreground">
-        <p>Disponible para devolver según el sistema: {disponible.toFixed(2)} {unidad}</p>
-        {/* Dato distinto al de arriba: cuánto falta ENTREGAR del pedido (no
-            confundir con lo disponible para devolver, que nunca es negativo). */}
-        {pedido.cantidad_requerida != null && pedido.cantidad_requerida - pedido.total_entregado > 0 && (
-          <p>
+      {esIngreso && (
+        <p className="mb-3 rounded-md border border-warning/40 bg-warning/10 p-2 text-xs text-muted-foreground">
+          <span className="font-medium text-warning">Registro de ingreso a almacén.</span> Entra{' '}
+          {pedido.codigo_mp} fabricado en esta OT, no un sobrante — no descuenta del consumo.
+          {pedido.cantidad_requerida != null
+            ? ` Van ${pedido.total_ingresado} de ${pedido.cantidad_requerida} ${pedido.unidad}.`
+            : ` Ingresado hasta ahora: ${pedido.total_ingresado} ${pedido.unidad}.`}{' '}
+          Una vez en almacén se entrega desde Registrar Entrega.
+        </p>
+      )}
+
+      {/* Dato del pedido, no de una devolución puntual — se muestra una sola
+          vez para toda la tarjeta. No confundir con "disponible para
+          devolver" de cada entrada, que nunca es negativo. */}
+      {!esIngreso &&
+        pedido.cantidad_requerida != null &&
+        pedido.cantidad_requerida - pedido.total_entregado > 0 && (
+          <p className="mb-3 text-xs text-muted-foreground">
             Aún falta entregar del pedido: {(pedido.cantidad_requerida - pedido.total_entregado).toFixed(2)}{' '}
             {pedido.unidad}
           </p>
         )}
-      </div>
-      <CampoCantidad unidad={unidad} datos={datos} onChange={(d) => onChange({ ...datos, ...d })} />
-      {/* Aviso, no bloqueo: el registro de entregas puede estar incompleto o
-          el conteo físico real puede diferir del sistema — se deja guardar
-          igual, el operador sabe qué volvió realmente a bodega. */}
-      {datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0) > disponible && (
-        <p className="mt-2 text-xs text-warning">
-          Estás registrando más de lo que el sistema tiene como entregado ({disponible.toFixed(2)} {unidad}). Se
-          puede guardar igual si es lo que realmente volvió a bodega.
-        </p>
+
+      {entradas.map((entrada, indice) => {
+        const seleccionado = materiales.find((m) => String(m.material_id) === entrada.materialId)
+        const disponible = seleccionado
+          ? seleccionado.disponible
+          : materiales.length <= 1
+            ? pedido.total_entregado - pedido.total_devuelto
+            : 0
+        const unidad = seleccionado?.unidad ?? pedido.unidad
+        const usaBobinas = seleccionado?.usa_bobinas ?? pedido.usa_bobinas
+        const excedeDisponible = entrada.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0) > disponible
+
+        return (
+          <div key={indice} className={indice > 0 ? 'mt-3 border-t border-border pt-3' : ''}>
+            {materiales.length > 1 && (
+              <div className="mb-2 flex items-end gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Label className="text-xs">¿Qué material se está devolviendo?</Label>
+                  <Select value={entrada.materialId} onValueChange={(v) => actualizar(indice, { materialId: v })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {materiales.map((m) => (
+                        <SelectItem key={m.material_id} value={String(m.material_id)}>
+                          {m.codigo_mp} — disponible: {m.disponible.toFixed(2)} {m.unidad}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {indice > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => quitar(indice)}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            )}
+
+            {!esIngreso && (
+              <p className="mb-1 text-xs text-muted-foreground">
+                Disponible para devolver según el sistema: {disponible.toFixed(2)} {unidad}
+              </p>
+            )}
+            <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={entrada} onChange={(d) => actualizar(indice, d)} />
+            {/* Aviso, no bloqueo: el registro de entregas puede estar
+                incompleto o el conteo físico real puede diferir del sistema —
+                se deja guardar igual, el operador sabe qué volvió a bodega. */}
+            {!esIngreso && excedeDisponible && (
+              <p className="mt-2 text-xs text-warning">
+                Estás registrando más de lo que el sistema tiene como entregado ({disponible.toFixed(2)} {unidad}).
+                Se puede guardar igual si es lo que realmente volvió a bodega.
+              </p>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Devolver varios materiales de un mismo pedido solo tiene sentido si
+          se le entregó más de uno (una sustitución parcial) — si no, alcanza
+          con el selector de arriba. */}
+      {!esIngreso && materiales.length > 1 && (
+        <button type="button" onClick={agregar} className="mt-3 text-xs text-primary hover:underline">
+          + Agregar otro material devuelto
+        </button>
       )}
     </div>
   )
@@ -145,36 +271,41 @@ export function RegistrarDevolucion() {
   const mutation = useMutation({
     mutationFn: async () => {
       const exitos: Devolucion[] = []
-      const fallidos: { codigoMp: string; mensaje: string }[] = []
-      for (const [otMaterialId, datos] of Object.entries(seleccion)) {
-        try {
-          const devolucion = await api.registrarDevolucion(apiBaseUrl, token, {
-            ot_material_id: Number(otMaterialId),
-            material_id: Number(datos.materialId),
-            fecha,
-            bobinas: datos.bobinas.map(Number)
-          })
-          exitos.push(devolucion)
-        } catch (err) {
-          const pedido = pedidos.data?.find((p) => p.ot_material_id === Number(otMaterialId))
-          fallidos.push({
-            codigoMp: pedido?.codigo_mp ?? `#${otMaterialId}`,
-            mensaje: err instanceof ApiError ? err.message : 'error de conexión'
-          })
+      const mensajesFallidos: string[] = []
+      const fallidosPorPedido = new Map<number, SeleccionDevolucion>()
+      for (const [otMaterialIdStr, sel] of Object.entries(seleccion)) {
+        const otMaterialId = Number(otMaterialIdStr)
+        const pedido = pedidos.data?.find((p) => p.ot_material_id === otMaterialId)
+        for (const entrada of sel.entradas) {
+          try {
+            const devolucion = await api.registrarDevolucion(apiBaseUrl, token, {
+              ot_material_id: otMaterialId,
+              material_id: Number(entrada.materialId),
+              fecha,
+              bobinas: entrada.bobinas.map(Number),
+              es_ingreso_produccion: sel.modo === 'ingreso'
+            })
+            exitos.push(devolucion)
+          } catch (err) {
+            mensajesFallidos.push(
+              `${pedido?.codigo_mp ?? `#${otMaterialId}`} (${err instanceof ApiError ? err.message : 'error de conexión'})`
+            )
+            const previo = fallidosPorPedido.get(otMaterialId)
+            fallidosPorPedido.set(otMaterialId, {
+              modo: sel.modo,
+              entradas: [...(previo?.entradas ?? []), entrada]
+            })
+          }
         }
       }
-      return { exitos, fallidos }
+      return { exitos, mensajesFallidos, fallidosPorPedido }
     },
-    onSuccess: ({ exitos, fallidos }) => {
+    onSuccess: ({ exitos, mensajesFallidos, fallidosPorPedido }) => {
       setConfirmaciones(exitos)
-      setError(
-        fallidos.length > 0
-          ? `No se pudieron registrar: ${fallidos.map((f) => `${f.codigoMp} (${f.mensaje})`).join(', ')}`
-          : null
-      )
-      setSeleccion((prev) => {
-        const restante = { ...prev }
-        for (const d of exitos) delete restante[d.ot_material_id]
+      setError(mensajesFallidos.length > 0 ? `No se pudieron registrar: ${mensajesFallidos.join(', ')}` : null)
+      setSeleccion(() => {
+        const restante: Record<number, SeleccionDevolucion> = {}
+        for (const [otMaterialId, sel] of fallidosPorPedido) restante[otMaterialId] = sel
         return restante
       })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
@@ -196,12 +327,7 @@ export function RegistrarDevolucion() {
       if (copia[pedido.ot_material_id]) {
         delete copia[pedido.ot_material_id]
       } else {
-        copia[pedido.ot_material_id] = {
-          ...(esUnidadDiscreta(pedido.unidad)
-            ? { cantidadBobinas: '1', bobinas: [''] }
-            : { cantidadBobinas: '', bobinas: [] }),
-          materialId: String(pedido.material_id)
-        }
+        copia[pedido.ot_material_id] = seleccionVacia(pedido)
       }
       return copia
     })
@@ -214,8 +340,8 @@ export function RegistrarDevolucion() {
       setError('Selecciona al menos un material')
       return
     }
-    for (const [, datos] of pedidosSeleccionados) {
-      if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+    for (const [, sel] of pedidosSeleccionados) {
+      if (sel.entradas.some((e) => e.bobinas.length === 0 || e.bobinas.some((b) => !b || Number(b) <= 0))) {
         setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
         return
       }
@@ -240,7 +366,8 @@ export function RegistrarDevolucion() {
             <div key={confirmacion.id} className="flex items-start gap-3 text-sm">
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
               <p>
-                {confirmacion.total_devuelto} de {confirmacion.codigo_mp} devueltos.
+                {confirmacion.total_devuelto} de {confirmacion.codigo_mp}{' '}
+                {confirmacion.es_ingreso_produccion ? 'ingresados a almacén.' : 'devueltos.'}
               </p>
             </div>
           ))}
@@ -270,7 +397,8 @@ export function RegistrarDevolucion() {
           {pedidosVisibles && pedidosVisibles.length > 0 && (
             <div className="mt-4 flex flex-col gap-2">
               <p className="text-xs text-muted-foreground">
-                Materiales entregados en esta OT — marca todos a los que corresponda la devolución:
+                Materiales de esta OT — marca todos a los que corresponda. Por acá vuelven los sobrantes y también
+                entra a almacén el material que se fabricó en la OT.
               </p>
               {pedidosVisibles.map((pedido) => (
                 <button
@@ -286,6 +414,17 @@ export function RegistrarDevolucion() {
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium">
                     {pedido.proceso} — {pedido.maquina} — {pedido.codigo_mp}
+                    {pedido.tiene_materia_prima && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                        <Beaker className="h-3 w-3" />
+                        se fabrica en esta OT
+                      </span>
+                    )}
+                    {pedido.es_materia_prima && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        materia prima de {pedido.insumo_de_codigo_mp}
+                      </span>
+                    )}
                     {pedido.material_sustituido && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                         <ArrowRightLeft className="h-3 w-3" />
@@ -296,7 +435,11 @@ export function RegistrarDevolucion() {
                   <span className="text-muted-foreground">
                     Entregado: {pedido.total_entregado} {pedido.unidad}
                     {pedido.cantidad_requerida ? ` de ${pedido.cantidad_requerida} requeridos` : ''} · Ya devuelto:{' '}
-                    {pedido.total_devuelto} {pedido.unidad} · {pedido.estado_entrega}
+                    {pedido.total_devuelto} {pedido.unidad}
+                    {pedido.total_ingresado > 0
+                      ? ` · Ingresó fabricado: ${pedido.total_ingresado} ${pedido.unidad}`
+                      : ''}{' '}
+                    · {pedido.estado_entrega}
                   </span>
                 </button>
               ))}
@@ -323,8 +466,8 @@ export function RegistrarDevolucion() {
                   <PedidoDevolucionCard
                     key={pedido.ot_material_id}
                     pedido={pedido}
-                    datos={seleccion[pedido.ot_material_id]}
-                    onChange={(d) => setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: d }))}
+                    seleccion={seleccion[pedido.ot_material_id]}
+                    onChange={(sel) => setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: sel }))}
                     onQuitar={() => toggleSeleccion(pedido)}
                   />
                 ))}

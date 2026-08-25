@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -203,6 +203,58 @@ def listar_pendientes(db: Session, numero_ot: str) -> List[OtMaterialPendiente]:
     ).all()
 
 
+def _crear_o_reutilizar_ot_proceso(db: Session, ot_id: int, proceso_id: int, maquina_id: int) -> OtProceso:
+    maquina = db.get(Maquina, maquina_id)
+    if maquina is None or maquina.proceso_id != proceso_id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa máquina no pertenece al proceso seleccionado")
+
+    ot_proceso = db.scalar(
+        select(OtProceso).where(
+            OtProceso.ot_id == ot_id,
+            OtProceso.proceso_id == proceso_id,
+            OtProceso.maquina_id == maquina_id,
+        )
+    )
+    if ot_proceso is None:
+        ot_proceso = OtProceso(ot_id=ot_id, proceso_id=proceso_id, maquina_id=maquina_id)
+        db.add(ot_proceso)
+        db.flush()
+    return ot_proceso
+
+
+def _crear_o_reutilizar_ot_material(
+    db: Session,
+    ot_proceso: OtProceso,
+    material_id: int,
+    cantidad_requerida: Optional[float],
+    insumo_de_id: Optional[int] = None,
+) -> Tuple[OtMaterial, bool]:
+    """Devuelve el pedido y si hubo que crearlo (False = ya existía y se
+    reutiliza, como hace guardar_detalle)."""
+    ot_material = db.scalar(
+        select(OtMaterial).where(
+            OtMaterial.ot_proceso_id == ot_proceso.id,
+            OtMaterial.material_id == material_id,
+        )
+    )
+    if ot_material is not None:
+        return ot_material, False
+
+    ot_material = OtMaterial(
+        ot_proceso_id=ot_proceso.id,
+        proceso_id=ot_proceso.proceso_id,
+        material_id=material_id,
+        cantidad_requerida=cantidad_requerida,
+        estado_sid_id=_estado_pendiente(db).id,
+        # Solo se marca al crearlo — si ya existía (se está reutilizando un
+        # pedido que ya estaba ahí por otro motivo), no se pisa su origen.
+        insumo_de_id=insumo_de_id,
+    )
+    db.add(ot_material)
+    db.flush()
+    return ot_material, True
+
+
 def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPendienteIn) -> OtMaterial:
     """Convierte un material pendiente (importado del Excel, sin proceso ni
     máquina) en un pedido real: crea o reutiliza el OtProceso/OtMaterial
@@ -221,40 +273,46 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
     if db.get(Material, material_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
 
-    maquina = db.get(Maquina, data.maquina_id)
-    if maquina is None or maquina.proceso_id != data.proceso_id:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa máquina no pertenece al proceso seleccionado")
-
-    ot_proceso = db.scalar(
-        select(OtProceso).where(
-            OtProceso.ot_id == pendiente.ot_id,
-            OtProceso.proceso_id == data.proceso_id,
-            OtProceso.maquina_id == data.maquina_id,
-        )
-    )
-    if ot_proceso is None:
-        ot_proceso = OtProceso(ot_id=pendiente.ot_id, proceso_id=data.proceso_id, maquina_id=data.maquina_id)
-        db.add(ot_proceso)
-        db.flush()
-
-    ot_material = db.scalar(
-        select(OtMaterial).where(
-            OtMaterial.ot_proceso_id == ot_proceso.id,
-            OtMaterial.material_id == material_id,
-        )
-    )
-    if ot_material is None:
-        ot_material = OtMaterial(
-            ot_proceso_id=ot_proceso.id,
-            proceso_id=data.proceso_id,
-            material_id=material_id,
-            cantidad_requerida=pendiente.cantidad_requerida,
-            estado_sid_id=_estado_pendiente(db).id,
-        )
-        db.add(ot_material)
-        db.flush()
+    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, data.proceso_id, data.maquina_id)
+    ot_material, _ = _crear_o_reutilizar_ot_material(db, ot_proceso, material_id, pendiente.cantidad_requerida)
 
     db.delete(pendiente)
     db.commit()
     db.refresh(ot_material)
     return ot_material
+
+
+def crear_pedido_materia_prima(
+    db: Session,
+    pedido: OtMaterial,
+    material_id: int,
+    proceso_id: int,
+    maquina_id: int,
+    cantidad_entregada: float,
+) -> Tuple[OtMaterial, bool]:
+    """Crea (o reutiliza) el pedido de un material que hizo falta para poder
+    completar otro pedido de la misma OT — la OT pide LDPE-4 pero almacén no
+    lo tiene, así que se fabrica mezclando LDPE-1 y LDPE-2, y cada uno de esos
+    pasa a ser un pedido propio.
+
+    Antes esto se guardaba como una entrega del pedido de LDPE-4 con otro
+    material, y quedaba marcado como 'sustitución', que es justo lo que no es:
+    no se reemplazó nada, del pedido nacieron pedidos nuevos. Con pedido
+    propio, cada materia prima aparece por separado en Registrar Devolución
+    (se pueden devolver sus sobrantes) y se le puede entregar más cantidad
+    después, como a cualquier otro pedido.
+
+    El proceso y la máquina son los suyos, no los del pedido que completa: la
+    materia prima se consume donde se fabrica (Extrusión/CHINA) aunque el
+    resultado se use en otro lado (Laminación/NORD). No es exclusivo de
+    Extrusión — cualquier pedido puede necesitar materiales extra.
+
+    No hace commit: se llama desde entregas_controller.registrar_entrega,
+    dentro de la misma transacción que registra la entrega."""
+    if db.get(Material, material_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+
+    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pedido.ot_proceso.ot_id, proceso_id, maquina_id)
+    return _crear_o_reutilizar_ot_material(
+        db, ot_proceso, material_id, cantidad_entregada, insumo_de_id=pedido.id
+    )

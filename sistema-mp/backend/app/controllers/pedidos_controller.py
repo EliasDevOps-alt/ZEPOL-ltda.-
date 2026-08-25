@@ -10,7 +10,15 @@ def total_entregado_pedido(ot_material: OtMaterial) -> float:
 
 
 def total_devuelto_pedido(ot_material: OtMaterial) -> float:
-    return sum(float(b.cantidad) for devolucion in ot_material.devoluciones for b in devolucion.bobinas)
+    """Solo sobrantes. El material fabricado que entró a almacén se cuenta
+    aparte (ver Devolucion.es_ingreso_produccion) porque nunca se había
+    entregado: sumarlo acá restaría de más en el consumo neto."""
+    return sum(
+        float(b.cantidad)
+        for devolucion in ot_material.devoluciones
+        if not devolucion.es_ingreso_produccion
+        for b in devolucion.bobinas
+    )
 
 
 def total_entregado_material(ot_material: OtMaterial, material_id: int) -> float:
@@ -26,7 +34,7 @@ def total_devuelto_material(ot_material: OtMaterial, material_id: int) -> float:
     return sum(
         float(b.cantidad)
         for devolucion in ot_material.devoluciones
-        if devolucion.material_id == material_id
+        if devolucion.material_id == material_id and not devolucion.es_ingreso_produccion
         for b in devolucion.bobinas
     )
 
@@ -50,6 +58,7 @@ def materiales_entregados_pedido(ot_material: OtMaterial) -> List[Dict[str, Any]
                 "codigo_mp": material.codigo_mp,
                 "descripcion": material.descripcion,
                 "unidad": material.unidad,
+                "usa_bobinas": material.usa_bobinas,
                 "total_entregado": entregado,
                 "total_devuelto": devuelto,
                 "disponible": entregado - devuelto,

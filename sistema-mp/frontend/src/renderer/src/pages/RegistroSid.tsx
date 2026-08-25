@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Beaker } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent } from '@renderer/components/ui/card'
@@ -103,9 +104,14 @@ export function RegistroSid() {
   const pedidosNoTinta = useMemo(() => (pedidos.data ?? []).filter((p) => !p.es_tinta), [pedidos.data])
 
   // Solo listamos lo que realmente ya se movió — nada de "cantidad entregada
-  // 0" mezclado con lo que sí se entregó.
+  // 0" mezclado con lo que sí se entregó. En la pestaña de devueltos cuentan
+  // también los ingresos de material fabricado: son movimientos hacia almacén
+  // con su propio trámite, igual que un sobrante.
   const visiblesEnPestana = useMemo(
-    () => pedidosNoTinta.filter((p) => (pestana === 'entregados' ? p.total_entregado > 0 : p.total_devuelto > 0)),
+    () =>
+      pedidosNoTinta.filter((p) =>
+        pestana === 'entregados' ? p.total_entregado > 0 : p.total_devuelto + p.total_ingresado > 0
+      ),
     [pedidosNoTinta, pestana]
   )
 
@@ -342,7 +348,20 @@ function FilaMaterial({
           <CeldaCopiable texto={pedido.cliente ?? ''} />
         </div>
         <div>
-          <p className="text-xs text-muted-foreground">Material {pedido.material_sustituido ? '(pedido)' : ''}</p>
+          <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            Material {pedido.material_sustituido ? '(pedido)' : ''}
+            {pedido.es_materia_prima && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                materia prima de {pedido.insumo_de_codigo_mp}
+              </span>
+            )}
+            {pedido.tiene_materia_prima && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                <Beaker className="h-2.5 w-2.5" />
+                se fabrica en esta OT
+              </span>
+            )}
+          </p>
           <CeldaCopiable texto={pedido.codigo_mp} />
         </div>
         {pedido.material_sustituido && (
@@ -380,6 +399,12 @@ function FilaMaterial({
           <p className="text-xs text-muted-foreground">Cantidad devuelta</p>
           <CeldaCopiable texto={`${pedido.total_devuelto} ${pedido.unidad}`} />
         </div>
+        {pedido.total_ingresado > 0 && (
+          <div>
+            <p className="text-xs text-muted-foreground">Ingresó a almacén (fabricado)</p>
+            <CeldaCopiable texto={`${pedido.total_ingresado} ${pedido.unidad}`} />
+          </div>
+        )}
       </div>
     </div>
   )

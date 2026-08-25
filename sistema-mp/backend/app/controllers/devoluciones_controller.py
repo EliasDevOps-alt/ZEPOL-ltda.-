@@ -25,7 +25,11 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
     # bodega mejor que la cuenta del sistema. El frontend avisa cuando esto
     # pasa (ver PedidoDevolucionCard), pero no impide guardar.
     devolucion = Devolucion(
-        ot_material_id=ot_material.id, material_id=material.id, usuario_id=usuario.id, fecha=data.fecha
+        ot_material_id=ot_material.id,
+        material_id=material.id,
+        usuario_id=usuario.id,
+        fecha=data.fecha,
+        es_ingreso_produccion=data.es_ingreso_produccion,
     )
     devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(devolucion)

@@ -25,6 +25,7 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         bobinas=[float(b.cantidad) for b in sorted(devolucion.bobinas, key=lambda b: b.numero)],
         total_devuelto=sum(float(b.cantidad) for b in devolucion.bobinas),
         total_devuelto_pedido=total_devuelto_pedido(devolucion.ot_material),
+        es_ingreso_produccion=devolucion.es_ingreso_produccion,
     )
 
 

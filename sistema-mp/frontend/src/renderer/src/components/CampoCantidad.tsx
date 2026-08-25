@@ -1,7 +1,6 @@
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
-import { esUnidadDiscreta } from '@renderer/lib/utils'
 
 export interface BobinasPedido {
   cantidadBobinas: string
@@ -10,16 +9,20 @@ export interface BobinasPedido {
 
 export function CampoCantidad({
   unidad,
+  usaBobinas = true,
   datos,
   onChange
 }: {
   unidad: string
+  // Propiedad del material (Material.usa_bobinas), no se adivina por el
+  // texto de la unidad — ej. ZIPPER es "mts" pero NO usa bobinas.
+  usaBobinas?: boolean
   datos: BobinasPedido
   onChange: (datos: BobinasPedido) => void
 }) {
   const total = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
 
-  if (esUnidadDiscreta(unidad)) {
+  if (!usaBobinas) {
     return (
       <div className="flex flex-col gap-1.5">
         <Label>Cantidad {unidad ? `(${unidad})` : ''}</Label>
