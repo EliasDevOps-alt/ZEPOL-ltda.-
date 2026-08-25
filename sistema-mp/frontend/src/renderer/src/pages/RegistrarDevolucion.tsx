@@ -32,6 +32,11 @@ function entradaVacia(): EntradaDevolucion {
   return { materialId: '', cantidadBobinas: '', bobinas: [] }
 }
 
+/** Lo que entra a almacén de un material que todavía no tiene pedido. */
+interface EntradaIngreso extends BobinasPedido {
+  materialId: string
+}
+
 /** Esta pantalla registra las dos formas en que un material vuelve de planta a
  * almacén, que van a la misma tabla pero cuentan distinto:
  *  - 'sobrante': material que se había entregado y no se usó. Descuenta del
@@ -70,77 +75,46 @@ function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
  * Acá NO se pregunta proceso ni máquina, a propósito: este movimiento es
  * producción -> almacén, y almacén no tiene máquinas. El proceso se elige
  * cuando el material sale hacia producción, en Registrar Entrega. Lo único que
- * hace falta registrar es cuánto entró. */
+ * hace falta registrar es cuánto entró — y se puede registrar varias veces,
+ * porque producción puede entregar en tandas (hoy 2 bobinas, mañana 1). */
 function PendienteIngresoCard({
   pendiente,
   materiales,
   materialOptions,
-  fecha,
-  onRegistrado
+  datos,
+  onChange,
+  onQuitar
 }: {
   pendiente: OtMaterialPendiente
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
-  fecha: string
-  onRegistrado: (devolucion: Devolucion) => void
+  datos: EntradaIngreso
+  onChange: (datos: EntradaIngreso) => void
+  onQuitar: () => void
 }) {
-  const { apiBaseUrl } = useConfig()
-  const { sesion } = useAuth()
-  const token = sesion!.token
-
-  const [materialId, setMaterialId] = useState(
-    pendiente.material_id != null ? String(pendiente.material_id) : ''
-  )
-  const material = materiales.find((m) => String(m.id) === materialId)
-  const [cantidad, setCantidad] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
-  const [error, setError] = useState<string | null>(null)
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      api.registrarDevolucion(apiBaseUrl, token, {
-        pendiente_id: pendiente.id,
-        material_id: Number(materialId),
-        fecha,
-        bobinas: cantidad.bobinas.map(Number),
-        es_ingreso_produccion: true
-      }),
-    onSuccess: (devolucion) => {
-      setError(null)
-      setCantidad({ cantidadBobinas: '', bobinas: [] })
-      onRegistrado(devolucion)
-    },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
-  })
-
-  function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    if (!materialId) {
-      setError('Indica a qué material del catálogo corresponde')
-      return
-    }
-    if (cantidad.bobinas.length === 0 || cantidad.bobinas.some((b) => !b || Number(b) <= 0)) {
-      setError('Completa la cantidad que entra a almacén')
-      return
-    }
-    setError(null)
-    mutation.mutate()
-  }
+  const material = materiales.find((m) => String(m.id) === datos.materialId)
 
   return (
-    <form onSubmit={handleSubmit} className="rounded-md border border-warning/40 bg-warning/5 p-4">
-      <p className="mb-1 text-sm font-medium">{pendiente.codigo_mp}</p>
+    <div className="rounded-md border border-warning/40 bg-warning/5 p-4">
+      <div className="mb-1 flex items-center justify-between">
+        <p className="text-sm font-medium">{pendiente.codigo_mp}</p>
+        <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
+          <X className="h-4 w-4" />
+        </button>
+      </div>
       <p className="mb-3 text-xs text-muted-foreground">
         <span className="font-medium text-warning">Producción lo está entregando.</span> Entra a almacén, no es un
-        sobrante — no descuenta del consumo. Materia prima usada: {pendiente.materias_primas.join(', ')}.
-        {pendiente.total_ingresado > 0 && ` Ya entraron ${pendiente.total_ingresado} ${material?.unidad ?? ''}.`}
+        sobrante — no descuenta del consumo.
+        {pendiente.total_ingresado > 0 &&
+          ` Ya entraron ${pendiente.total_ingresado} ${material?.unidad ?? ''} en entregas anteriores.`}
       </p>
 
       {pendiente.material_id == null && (
         <div className="mb-3 flex flex-col gap-1.5">
           <Label className="text-xs">¿A qué material del catálogo corresponde?</Label>
           <Combobox
-            value={materialId}
-            onChange={setMaterialId}
+            value={datos.materialId}
+            onChange={(v) => onChange({ ...datos, materialId: v })}
             options={materialOptions}
             placeholder="Buscar código MP..."
             emptyText="Sin materiales activos que coincidan"
@@ -151,20 +125,14 @@ function PendienteIngresoCard({
       <CampoCantidad
         unidad={material?.unidad ?? ''}
         usaBobinas={material?.usa_bobinas ?? true}
-        datos={cantidad}
-        onChange={setCantidad}
+        datos={datos}
+        onChange={(d) => onChange({ ...datos, ...d })}
       />
 
       <p className="mt-1.5 text-xs text-muted-foreground">
-        Después, cuando salga hacia producción, en Registrar Entrega elegís el proceso y la máquina.
+        Cuando salga hacia producción, en Registrar Entrega elegís el proceso y la máquina.
       </p>
-
-      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-
-      <Button type="submit" className="mt-3" disabled={mutation.isPending}>
-        {mutation.isPending ? 'Guardando...' : 'Registrar ingreso a almacén'}
-      </Button>
-    </form>
+    </div>
   )
 }
 
@@ -361,6 +329,10 @@ export function RegistrarDevolucion() {
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
   const [seleccion, setSeleccion] = useState<Record<number, SeleccionDevolucion>>({})
+  // Los materiales que entrega producción se eligen de la misma lista que los
+  // pedidos, pero son otra cosa (no tienen pedido todavía), así que llevan su
+  // propia selección, indexada por id de pendiente.
+  const [ingresos, setIngresos] = useState<Record<number, EntradaIngreso>>({})
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
   const [confirmaciones, setConfirmaciones] = useState<Devolucion[]>([])
@@ -401,12 +373,6 @@ export function RegistrarDevolucion() {
     [materiales.data]
   )
 
-  function alRegistrarIngreso(devolucion: Devolucion) {
-    setConfirmaciones([devolucion])
-    queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
-    queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
-  }
-
   const mutation = useMutation({
     mutationFn: async () => {
       const exitos: Devolucion[] = []
@@ -437,9 +403,31 @@ export function RegistrarDevolucion() {
           }
         }
       }
-      return { exitos, mensajesFallidos, fallidosPorPedido }
+      const ingresosFallidos = new Map<number, EntradaIngreso>()
+      for (const [pendienteIdStr, datos] of Object.entries(ingresos)) {
+        const pendienteId = Number(pendienteIdStr)
+        const pendiente = pendientes.data?.find((p) => p.id === pendienteId)
+        try {
+          exitos.push(
+            await api.registrarDevolucion(apiBaseUrl, token, {
+              pendiente_id: pendienteId,
+              material_id: Number(datos.materialId),
+              fecha,
+              bobinas: datos.bobinas.map(Number),
+              es_ingreso_produccion: true
+            })
+          )
+        } catch (err) {
+          mensajesFallidos.push(
+            `${pendiente?.codigo_mp ?? `#${pendienteId}`} (${err instanceof ApiError ? err.message : 'error de conexión'})`
+          )
+          ingresosFallidos.set(pendienteId, datos)
+        }
+      }
+
+      return { exitos, mensajesFallidos, fallidosPorPedido, ingresosFallidos }
     },
-    onSuccess: ({ exitos, mensajesFallidos, fallidosPorPedido }) => {
+    onSuccess: ({ exitos, mensajesFallidos, fallidosPorPedido, ingresosFallidos }) => {
       setConfirmaciones(exitos)
       setError(mensajesFallidos.length > 0 ? `No se pudieron registrar: ${mensajesFallidos.join(', ')}` : null)
       setSeleccion(() => {
@@ -447,7 +435,13 @@ export function RegistrarDevolucion() {
         for (const [otMaterialId, sel] of fallidosPorPedido) restante[otMaterialId] = sel
         return restante
       })
+      setIngresos(() => {
+        const restante: Record<number, EntradaIngreso> = {}
+        for (const [pendienteId, datos] of ingresosFallidos) restante[pendienteId] = datos
+        return restante
+      })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+      queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
     },
     onError: () => setError('Error al registrar las devoluciones')
   })
@@ -456,7 +450,25 @@ export function RegistrarDevolucion() {
     e.preventDefault()
     setConfirmaciones([])
     setSeleccion({})
+    setIngresos({})
     setOtBuscada(numeroOt)
+  }
+
+  function toggleIngreso(pendiente: OtMaterialPendiente) {
+    setConfirmaciones([])
+    setIngresos((prev) => {
+      const copia = { ...prev }
+      if (copia[pendiente.id]) {
+        delete copia[pendiente.id]
+      } else {
+        copia[pendiente.id] = {
+          cantidadBobinas: '',
+          bobinas: [],
+          materialId: pendiente.material_id != null ? String(pendiente.material_id) : ''
+        }
+      }
+      return copia
+    })
   }
 
   function toggleSeleccion(pedido: Consumo) {
@@ -475,7 +487,8 @@ export function RegistrarDevolucion() {
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
     const pedidosSeleccionados = Object.entries(seleccion)
-    if (pedidosSeleccionados.length === 0) {
+    const ingresosSeleccionados = Object.entries(ingresos)
+    if (pedidosSeleccionados.length === 0 && ingresosSeleccionados.length === 0) {
       setError('Selecciona al menos un material')
       return
     }
@@ -485,11 +498,21 @@ export function RegistrarDevolucion() {
         return
       }
     }
+    for (const [, datos] of ingresosSeleccionados) {
+      if (!datos.materialId) {
+        setError('Indica a qué material del catálogo corresponde lo que entrega producción')
+        return
+      }
+      if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+        setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
+        return
+      }
+    }
     setError(null)
     mutation.mutate()
   }
 
-  const hayPedidosSeleccionados = Object.keys(seleccion).length > 0
+  const cantidadSeleccionada = Object.keys(seleccion).length + Object.keys(ingresos).length
 
   return (
     <div className="max-w-2xl">
@@ -539,6 +562,34 @@ export function RegistrarDevolucion() {
                 Materiales de esta OT — marca todos a los que corresponda. Por acá vuelven los sobrantes y también
                 entra a almacén el material que se fabricó en la OT.
               </p>
+              {/* Los materiales que entrega producción van en la misma lista
+                  que los pedidos: se registran en tandas (hoy dos bobinas,
+                  mañana una) y tener que buscarlos en otra sección hacía
+                  parecer que ya estaban cerrados. */}
+              {pendientesConMateriaPrima.map((pendiente) => (
+                <button
+                  key={`pendiente-${pendiente.id}`}
+                  type="button"
+                  onClick={() => toggleIngreso(pendiente)}
+                  className={cn(
+                    'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
+                    ingresos[pendiente.id] ? 'border-warning bg-warning/10' : 'border-warning/40 hover:bg-warning/5'
+                  )}
+                >
+                  <span className="flex flex-wrap items-center gap-2 font-medium">
+                    {pendiente.codigo_mp}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-xs font-medium text-warning">
+                      <Beaker className="h-3 w-3" />
+                      lo entrega producción
+                    </span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    Ingresó a almacén: {pendiente.total_ingresado}
+                    {pendiente.cantidad_requerida ? ` de ${pendiente.cantidad_requerida}` : ''} · Materia prima:{' '}
+                    {pendiente.materias_primas.join(', ')} · Sin proceso asignado todavía
+                  </span>
+                </button>
+              ))}
               {pedidosVisibles.map((pedido) => (
                 <button
                   key={pedido.ot_material_id}
@@ -587,38 +638,10 @@ export function RegistrarDevolucion() {
         </CardContent>
       </Card>
 
-      {pendientesConMateriaPrima.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle>Material que entrega producción</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <p className="text-xs text-muted-foreground">
-              A estos materiales se les cargó materia prima y producción todavía no los entregó. Registrá solo
-              cuánto entra a almacén — el proceso y la máquina se eligen después, al sacarlo hacia producción.
-            </p>
-            <div className="flex flex-col gap-1.5">
-              <Label>Fecha</Label>
-              <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="max-w-40" />
-            </div>
-            {pendientesConMateriaPrima.map((pendiente) => (
-              <PendienteIngresoCard
-                key={pendiente.id}
-                pendiente={pendiente}
-                materiales={materiales.data ?? []}
-                materialOptions={materialOptions}
-                fecha={fecha}
-                onRegistrado={alRegistrarIngreso}
-              />
-            ))}
-          </CardContent>
-        </Card>
-      )}
-
-      {hayPedidosSeleccionados && (
+      {cantidadSeleccionada > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Cantidades devueltas</CardTitle>
+            <CardTitle>Cantidades a registrar</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -639,12 +662,26 @@ export function RegistrarDevolucion() {
                   />
                 ))}
 
+              {pendientesConMateriaPrima
+                .filter((p) => ingresos[p.id])
+                .map((pendiente) => (
+                  <PendienteIngresoCard
+                    key={pendiente.id}
+                    pendiente={pendiente}
+                    materiales={materiales.data ?? []}
+                    materialOptions={materialOptions}
+                    datos={ingresos[pendiente.id]}
+                    onChange={(datos) => setIngresos((prev) => ({ ...prev, [pendiente.id]: datos }))}
+                    onQuitar={() => toggleIngreso(pendiente)}
+                  />
+                ))}
+
               {error && <p className="text-sm text-destructive">{error}</p>}
 
               <Button type="submit" disabled={mutation.isPending}>
                 {mutation.isPending
                   ? 'Guardando...'
-                  : `Guardar ${Object.keys(seleccion).length > 1 ? `${Object.keys(seleccion).length} devoluciones` : 'devolución'}`}
+                  : `Guardar ${cantidadSeleccionada > 1 ? `${cantidadSeleccionada} registros` : 'registro'}`}
               </Button>
             </form>
           </CardContent>

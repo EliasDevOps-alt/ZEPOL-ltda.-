@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
@@ -402,7 +402,7 @@ function PendienteCard({
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
   fecha: string
-  onRegistrado: () => void
+  onRegistrado: (entregas: Entrega[]) => void
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -443,24 +443,18 @@ function PendienteCard({
             ).ot_material_id
           }
         : { pendiente_id: pendiente.id }
-      const { fallos } = await enviarSeleccion(
-        apiBaseUrl,
-        token,
-        destino,
-        fecha,
-        seleccion,
-        pendiente.codigo_mp,
-        materiales
-      )
-      return fallos
+      return enviarSeleccion(apiBaseUrl, token, destino, fecha, seleccion, pendiente.codigo_mp, materiales)
     },
-    onSuccess: (fallos) => {
+    onSuccess: ({ exitos, fallos }) => {
       setError(
         fallos.length > 0
-          ? `El pedido quedó creado, pero algunos materiales no se pudieron registrar (podés reintentarlos desde la lista de pedidos de la OT): ${fallos.join(', ')}`
+          ? `Algunos materiales no se pudieron registrar (podés reintentarlos): ${fallos.join(', ')}`
           : null
       )
-      onRegistrado()
+      // Limpiar lo que sí entró, para que no quede en pantalla como si
+      // faltara guardarlo — y no se registre dos veces de un click de más.
+      if (fallos.length === 0) setSeleccion(seleccionVacia({ usa_bobinas: true }))
+      onRegistrado(exitos)
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
   })
@@ -798,6 +792,10 @@ export function RegistrarEntrega() {
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
   const [confirmaciones, setConfirmaciones] = useState<Entrega[]>([])
+  // El cartel de confirmación está arriba de todo y las tarjetas de pendientes
+  // quedan bastante más abajo: sin traerlo a la vista, guardar desde una de
+  // ellas no daba ninguna señal en pantalla.
+  const confirmacionRef = useRef<HTMLDivElement>(null)
 
   const pedidos = useQuery({
     queryKey: ['consumo', otBuscada],
@@ -849,7 +847,12 @@ export function RegistrarEntrega() {
     queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
   }
 
-  function alPromoverPendiente() {
+  // Lo registrado desde una tarjeta de pendiente va al mismo cartel verde de
+  // arriba que el resto: sin eso no quedaba ninguna señal de que se guardó.
+  function alPromoverPendiente(entregas: Entrega[]) {
+    setConfirmaciones(entregas)
+    setError(null)
+    requestAnimationFrame(() => confirmacionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
     queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
     queryClient.invalidateQueries({ queryKey: ['entregas', otBuscada] })
@@ -940,6 +943,7 @@ export function RegistrarEntrega() {
 
       {confirmaciones.length > 0 && (
         <motion.div
+          ref={confirmacionRef}
           initial={{ opacity: 0, scale: 0.98 }}
           animate={{ opacity: 1, scale: 1 }}
           className="mb-6 flex flex-col gap-2 rounded-md border border-success/30 bg-success/10 p-4"
