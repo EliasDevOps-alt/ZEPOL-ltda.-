@@ -8,13 +8,14 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
+import { Combobox } from '@renderer/components/ui/combobox'
 import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import type { Consumo, Devolucion } from '@renderer/lib/types'
+import type { Consumo, Devolucion, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
@@ -59,6 +60,169 @@ function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
       }
     ]
   }
+}
+
+/** Material que producción entrega y entra a almacén, cuando todavía figura
+ * como pendiente (sin proceso asignado). Pasa siempre que a un material hubo
+ * que fabricarlo: su materia prima salió de almacén antes de que se supiera a
+ * qué proceso iría el resultado, así que el pedido nunca llegó a crearse.
+ *
+ * Para poder registrar lo que entra hace falta el pedido, y para el pedido
+ * hace falta el proceso — a esta altura el material ya existe y está por
+ * usarse, así que preguntarlo acá no es adivinar. Si igual se elige mal, se
+ * corrige después con "mover a otro proceso" en Registrar Entrega. */
+function PendienteIngresoCard({
+  pendiente,
+  procesos,
+  materiales,
+  materialOptions,
+  fecha,
+  onRegistrado
+}: {
+  pendiente: OtMaterialPendiente
+  procesos: Proceso[]
+  materiales: Material[]
+  materialOptions: { value: string; label: string }[]
+  fecha: string
+  onRegistrado: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [materialId, setMaterialId] = useState(
+    pendiente.material_id != null ? String(pendiente.material_id) : ''
+  )
+  const [procesoId, setProcesoId] = useState('')
+  const [maquinaId, setMaquinaId] = useState('')
+  const material = materiales.find((m) => String(m.id) === materialId)
+  const [cantidad, setCantidad] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
+  const [error, setError] = useState<string | null>(null)
+
+  const maquinas = useQuery({
+    queryKey: ['maquinas', procesoId],
+    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
+    enabled: !!procesoId
+  })
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const { ot_material_id } = await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
+        proceso_id: Number(procesoId),
+        maquina_id: Number(maquinaId),
+        material_id: Number(materialId)
+      })
+      return api.registrarDevolucion(apiBaseUrl, token, {
+        ot_material_id,
+        material_id: Number(materialId),
+        fecha,
+        bobinas: cantidad.bobinas.map(Number),
+        es_ingreso_produccion: true
+      })
+    },
+    onSuccess: () => {
+      setError(null)
+      onRegistrado()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!materialId) {
+      setError('Indica a qué material del catálogo corresponde')
+      return
+    }
+    if (!procesoId || !maquinaId) {
+      setError('Elige a qué proceso y máquina va este material')
+      return
+    }
+    if (cantidad.bobinas.length === 0 || cantidad.bobinas.some((b) => !b || Number(b) <= 0)) {
+      setError('Completa la cantidad que entra a almacén')
+      return
+    }
+    setError(null)
+    mutation.mutate()
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="rounded-md border border-warning/40 bg-warning/5 p-4">
+      <p className="mb-1 text-sm font-medium">{pendiente.codigo_mp}</p>
+      <p className="mb-3 text-xs text-muted-foreground">
+        <span className="font-medium text-warning">Producción lo está entregando.</span> Entra a almacén, no es un
+        sobrante — no descuenta del consumo. Materia prima usada: {pendiente.materias_primas.join(', ')}.
+      </p>
+
+      {pendiente.material_id == null && (
+        <div className="mb-3 flex flex-col gap-1.5">
+          <Label className="text-xs">¿A qué material del catálogo corresponde?</Label>
+          <Combobox
+            value={materialId}
+            onChange={setMaterialId}
+            options={materialOptions}
+            placeholder="Buscar código MP..."
+            emptyText="Sin materiales activos que coincidan"
+          />
+        </div>
+      )}
+
+      <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Proceso donde se va a usar</Label>
+          <Select
+            value={procesoId}
+            onValueChange={(v) => {
+              setProcesoId(v)
+              setMaquinaId('')
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Selecciona" />
+            </SelectTrigger>
+            <SelectContent>
+              {procesos.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Máquina</Label>
+          <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Selecciona" />
+            </SelectTrigger>
+            <SelectContent>
+              {maquinas.data?.map((m) => (
+                <SelectItem key={m.id} value={String(m.id)}>
+                  {m.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <CampoCantidad
+        unidad={material?.unidad ?? ''}
+        usaBobinas={material?.usa_bobinas ?? true}
+        datos={cantidad}
+        onChange={setCantidad}
+      />
+
+      <p className="mt-1.5 text-xs text-muted-foreground">
+        Si después resulta que va a otro proceso, se puede mover desde Registrar Entrega.
+      </p>
+
+      {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+
+      <Button type="submit" className="mt-3" disabled={mutation.isPending}>
+        {mutation.isPending ? 'Guardando...' : 'Registrar ingreso a almacén'}
+      </Button>
+    </form>
+  )
 }
 
 function PedidoDevolucionCard({
@@ -268,6 +432,38 @@ export function RegistrarDevolucion() {
   // en planta — se registran en Crear OT, pero no aparecen aquí.
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
 
+  // Un material al que hubo que fabricarle materia prima puede seguir sin
+  // proceso asignado, así que no tiene pedido y no sale en /consumo. Igual
+  // producción lo entrega y hay que poder registrar su ingreso — ver
+  // PendienteIngresoCard.
+  const pendientes = useQuery({
+    queryKey: ['pendientes', otBuscada],
+    queryFn: () => api.listarPendientes(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada
+  })
+
+  const pendientesConMateriaPrima = useMemo(
+    () => (pendientes.data ?? []).filter((p) => !p.es_tinta && p.materias_primas.length > 0),
+    [pendientes.data]
+  )
+
+  const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
+  const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
+
+  const materialOptions = useMemo(
+    () =>
+      (materiales.data ?? []).map((m) => ({
+        value: String(m.id),
+        label: m.codigo_mp + (m.descripcion ? ` — ${m.descripcion}` : '')
+      })),
+    [materiales.data]
+  )
+
+  function alRegistrarIngreso() {
+    queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
+    queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+  }
+
   const mutation = useMutation({
     mutationFn: async () => {
       const exitos: Devolucion[] = []
@@ -390,7 +586,7 @@ export function RegistrarDevolucion() {
             </Button>
           </form>
 
-          {pedidos.isSuccess && pedidosVisibles?.length === 0 && (
+          {pedidos.isSuccess && pedidosVisibles?.length === 0 && pendientesConMateriaPrima.length === 0 && (
             <p className="mt-4 text-sm text-muted-foreground">No hay materiales entregados para esa OT.</p>
           )}
 
@@ -447,6 +643,35 @@ export function RegistrarDevolucion() {
           )}
         </CardContent>
       </Card>
+
+      {pendientesConMateriaPrima.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Material que entrega producción</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <p className="text-xs text-muted-foreground">
+              A estos materiales se les cargó materia prima y todavía no tienen proceso asignado. Al registrar lo
+              que entra a almacén se les asigna.
+            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label>Fecha</Label>
+              <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="max-w-40" />
+            </div>
+            {pendientesConMateriaPrima.map((pendiente) => (
+              <PendienteIngresoCard
+                key={pendiente.id}
+                pendiente={pendiente}
+                procesos={procesos.data ?? []}
+                materiales={materiales.data ?? []}
+                materialOptions={materialOptions}
+                fecha={fecha}
+                onRegistrado={alRegistrarIngreso}
+              />
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {hayPedidosSeleccionados && (
         <Card>

@@ -472,9 +472,7 @@ function PendienteCard({
       return
     }
     if (requiereAsignacion(seleccion) && !asignar) {
-      setError(
-        `Para entregar ${pendiente.codigo_mp} hay que elegir su proceso y su máquina. Si todavía no se sabe, dejá su cantidad vacía y cargá solo la materia prima.`
-      )
+      setError(`Para entregar ${pendiente.codigo_mp} elegí su proceso y su máquina`)
       return
     }
     if (Boolean(form.procesoId) !== Boolean(form.maquinaId)) {
@@ -499,8 +497,7 @@ function PendienteCard({
 
       {pendiente.materias_primas.length > 0 && (
         <p className="mb-3 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-          Ya se entregó materia prima para fabricarlo: {pendiente.materias_primas.join(', ')}. Cuando esté fabricado
-          y sepas a qué proceso va, completá proceso y máquina acá arriba.
+          Materia prima ya entregada: {pendiente.materias_primas.join(', ')}.
         </p>
       )}
 
@@ -533,7 +530,7 @@ function PendienteCard({
 
       <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso donde se usa {pendiente.codigo_mp} (si ya se sabe)</Label>
+          <Label className="text-xs">Proceso (opcional)</Label>
           <Select value={form.procesoId} onValueChange={(v) => setForm({ ...form, procesoId: v, maquinaId: '' })}>
             <SelectTrigger>
               <SelectValue placeholder="Selecciona" />
@@ -548,7 +545,7 @@ function PendienteCard({
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina de ese proceso</Label>
+          <Label className="text-xs">Máquina</Label>
           <Select
             value={form.maquinaId}
             onValueChange={(v) => setForm({ ...form, maquinaId: v })}
@@ -568,13 +565,11 @@ function PendienteCard({
         </div>
       </div>
 
-      {/* El proceso del pedido hace falta siempre —es lo que lo convierte en
-          un pedido de la OT, y sin él la materia prima no tiene a qué
-          colgarse—, pero la entrega puede quedar vacía: si el material hay que
-          fabricarlo, recién se entrega cuando producción lo devuelva. */}
+      {/* Proceso y máquina solo hacen falta para entregar el material; para
+          cargarle materia prima no, y a veces todavía no se sabe adónde va.
+          Ver requiereAsignacion. */}
       <p className="mb-2 text-xs text-muted-foreground">
-        Cantidad de {pendiente.codigo_mp} que sale de almacén ahora. Si hay que fabricarlo primero, dejala vacía y
-        cargá abajo la materia prima — el proceso de arriba se puede completar después, cuando se sepa.
+        Cantidad que sale de almacén ahora. Si todavía no sale nada, dejala vacía.
       </p>
 
       <EntregaDelPedido
