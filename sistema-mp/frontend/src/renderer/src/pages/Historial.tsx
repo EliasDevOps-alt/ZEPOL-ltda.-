@@ -1,16 +1,20 @@
 import type { FormEvent } from 'react'
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowRightLeft, Beaker, PackageCheck, PackageX, Search } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowRightLeft, Beaker, PackageCheck, PackageX, Pencil, Search, Trash2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
+import { Combobox } from '@renderer/components/ui/combobox'
+import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import type { Consumo } from '@renderer/lib/types'
+import type { Consumo, Devolucion, Entrega, Material, Proceso } from '@renderer/lib/types'
 
 const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
   COMPLETO: 'bg-success/10 text-success',
@@ -19,10 +23,355 @@ const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
   'SIN REQUERIMIENTO': 'bg-muted text-muted-foreground'
 }
 
+function bobinasDesde(valores: number[]): BobinasPedido {
+  return {
+    cantidadBobinas: valores.length ? String(valores.length) : '1',
+    bobinas: valores.length ? valores.map(String) : ['']
+  }
+}
+
+/** Corregir/borrar una entrega ya registrada — el personal de planta no
+ * siempre tipea bien a la primera y hasta ahora no había forma de arreglar
+ * una cantidad o fecha mal cargada. Igual que en Crear OT/Registrar Entrega,
+ * queda como formulario inline detrás de un lápiz en vez de un modal aparte.
+ * Quién corrigió y cuándo se muestra directo en la ficha (Entrega.editado_por),
+ * no en un registro aparte. */
+function FilaEntrega({
+  entrega,
+  pedido,
+  materiales,
+  materialOptions,
+  procesos,
+  onCambiado
+}: {
+  entrega: Entrega
+  // Proceso/máquina del pedido, para saber si esta entrega puntual quedó en
+  // uno distinto y para preseleccionar el picker al corregirla.
+  pedido: { proceso: string; proceso_id: number; maquina: string; maquina_id: number }
+  materiales: Material[]
+  materialOptions: { value: string; label: string }[]
+  procesos: Proceso[]
+  onCambiado: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [editando, setEditando] = useState(false)
+  const [fecha, setFecha] = useState(entrega.fecha)
+  const [materialId, setMaterialId] = useState(String(entrega.material_entregado_id))
+  const [observacion, setObservacion] = useState(entrega.observacion ?? '')
+  const [seleccion, setSeleccion] = useState<BobinasPedido>(() => bobinasDesde(entrega.bobinas))
+  const [procesoId, setProcesoId] = useState(String(entrega.proceso_id))
+  const [maquinaId, setMaquinaId] = useState(String(entrega.maquina_id))
+  const [error, setError] = useState<string | null>(null)
+
+  const material = materiales.find((m) => String(m.id) === materialId)
+  const unidad = material?.unidad ?? entrega.unidad
+  const usaBobinas = material?.usa_bobinas ?? entrega.usa_bobinas
+  const maquinaDistinta = entrega.proceso_id !== pedido.proceso_id || entrega.maquina_id !== pedido.maquina_id
+
+  const maquinas = useQuery({
+    queryKey: ['maquinas', procesoId],
+    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
+    enabled: editando && !!procesoId
+  })
+
+  const editar = useMutation({
+    mutationFn: () =>
+      api.editarEntrega(apiBaseUrl, token, entrega.id, {
+        fecha,
+        material_id: Number(materialId),
+        observacion: observacion || null,
+        bobinas: seleccion.bobinas.map(Number).filter((n) => n > 0),
+        proceso_id: Number(procesoId),
+        maquina_id: Number(maquinaId)
+      }),
+    onSuccess: () => {
+      setEditando(false)
+      setError(null)
+      onCambiado()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo guardar')
+  })
+
+  const eliminar = useMutation({
+    mutationFn: () => api.eliminarEntrega(apiBaseUrl, token, entrega.id),
+    onSuccess: onCambiado,
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
+  })
+
+  function handleEliminar() {
+    if (!confirm(`¿Eliminar esta entrega de ${entrega.codigo_mp_entregado}? Esta acción no se puede deshacer.`))
+      return
+    eliminar.mutate()
+  }
+
+  if (!editando) {
+    return (
+      <div className="rounded-md border border-border p-2 text-xs">
+        <div className="flex justify-between">
+          <span>
+            {entrega.fecha} · {entrega.codigo_mp_entregado}
+            {entrega.codigo_mp_entregado !== entrega.codigo_mp ? (
+              <span className="text-warning"> (pedido: {entrega.codigo_mp})</span>
+            ) : (
+              ''
+            )}
+            {maquinaDistinta && (
+              <span className="text-warning">
+                {' '}
+                ({entrega.proceso} · {entrega.maquina}; pedido: {pedido.proceso} · {pedido.maquina})
+              </span>
+            )}
+          </span>
+          <span className="font-medium">
+            {entrega.total_entregado} {entrega.unidad}
+          </span>
+        </div>
+        <p className="text-muted-foreground">{entrega.usuario}</p>
+        {entrega.observacion && <p className="text-muted-foreground">Nota: {entrega.observacion}</p>}
+        {entrega.usa_bobinas && (
+          <p className="mt-1 text-muted-foreground">
+            {entrega.bobinas.length} {entrega.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+            {entrega.bobinas.map((b) => `${b} ${entrega.unidad}`).join(', ')}
+          </p>
+        )}
+        {entrega.editado_por && (
+          <p className="mt-1 text-primary">
+            Editado por {entrega.editado_por} el {new Date(entrega.editado_en!).toLocaleDateString('es-BO')}
+          </p>
+        )}
+        {error && <p className="mt-1 text-destructive">{error}</p>}
+        <div className="mt-2 flex gap-1">
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
+            <Pencil className="h-3 w-3" />
+            Corregir
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={eliminar.isPending}
+            onClick={handleEliminar}
+          >
+            <Trash2 className="h-3 w-3" />
+            {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
+      <div className="mb-2 flex flex-col gap-1.5">
+        <Label className="text-xs">Fecha</Label>
+        <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+      </div>
+      <div className="mb-2 flex flex-col gap-1.5">
+        <Label className="text-xs">Material entregado</Label>
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Buscar código MP..."
+          emptyText="Sin materiales activos que coincidan"
+        />
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Proceso</Label>
+          <Select
+            value={procesoId}
+            onValueChange={(v) => {
+              setProcesoId(v)
+              setMaquinaId('')
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Proceso" />
+            </SelectTrigger>
+            <SelectContent>
+              {procesos.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-xs">Máquina</Label>
+          <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Máquina" />
+            </SelectTrigger>
+            <SelectContent>
+              {maquinas.data?.map((m) => (
+                <SelectItem key={m.id} value={String(m.id)}>
+                  {m.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+      <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={seleccion} onChange={setSeleccion} />
+      <div className="mt-2 flex flex-col gap-1.5">
+        <Label className="text-xs">Nota (opcional)</Label>
+        <Input value={observacion} onChange={(e) => setObservacion(e.target.value)} />
+      </div>
+      {error && <p className="mt-2 text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
+          {editar.isPending ? 'Guardando...' : 'Guardar'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setEditando(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/** Igual que FilaEntrega pero para devoluciones/ingresos — ver esa nota. No
+ * se restringe el material a "lo que se entregó" como en el formulario de
+ * registrar (RegistrarDevolucion.tsx): acá se corrige un dato ya cargado, no
+ * se valida contra el saldo disponible. */
+function FilaDevolucion({
+  devolucion,
+  pedidoUnidad,
+  materiales,
+  materialOptions,
+  onCambiado
+}: {
+  devolucion: Devolucion
+  pedidoUnidad: string
+  materiales: Material[]
+  materialOptions: { value: string; label: string }[]
+  onCambiado: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [editando, setEditando] = useState(false)
+  const [fecha, setFecha] = useState(devolucion.fecha)
+  const [materialId, setMaterialId] = useState(String(devolucion.material_id))
+  const [seleccion, setSeleccion] = useState<BobinasPedido>(() => bobinasDesde(devolucion.bobinas))
+  const [error, setError] = useState<string | null>(null)
+
+  const material = materiales.find((m) => String(m.id) === materialId)
+  const unidad = material?.unidad ?? pedidoUnidad
+  const usaBobinas = material?.usa_bobinas ?? devolucion.usa_bobinas
+
+  const editar = useMutation({
+    mutationFn: () =>
+      api.editarDevolucion(apiBaseUrl, token, devolucion.id, {
+        fecha,
+        material_id: Number(materialId),
+        bobinas: seleccion.bobinas.map(Number).filter((n) => n > 0)
+      }),
+    onSuccess: () => {
+      setEditando(false)
+      setError(null)
+      onCambiado()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo guardar')
+  })
+
+  const eliminar = useMutation({
+    mutationFn: () => api.eliminarDevolucion(apiBaseUrl, token, devolucion.id),
+    onSuccess: onCambiado,
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
+  })
+
+  function handleEliminar() {
+    if (!confirm(`¿Eliminar esta devolución de ${devolucion.codigo_mp}? Esta acción no se puede deshacer.`)) return
+    eliminar.mutate()
+  }
+
+  if (!editando) {
+    return (
+      <div className="rounded-md border border-border p-2 text-xs">
+        <div className="flex justify-between">
+          <span>
+            {devolucion.fecha} · {devolucion.codigo_mp}
+            {devolucion.es_ingreso_produccion && <span className="text-warning"> (ingreso a almacén)</span>}
+          </span>
+          <span className="font-medium">
+            {devolucion.total_devuelto} {pedidoUnidad}
+          </span>
+        </div>
+        <p className="text-muted-foreground">{devolucion.usuario}</p>
+        {devolucion.usa_bobinas && (
+          <p className="mt-1 text-muted-foreground">
+            {devolucion.bobinas.length} {devolucion.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+            {devolucion.bobinas.map((b) => `${b} ${pedidoUnidad}`).join(', ')}
+          </p>
+        )}
+        {devolucion.editado_por && (
+          <p className="mt-1 text-primary">
+            Editado por {devolucion.editado_por} el {new Date(devolucion.editado_en!).toLocaleDateString('es-BO')}
+          </p>
+        )}
+        {error && <p className="mt-1 text-destructive">{error}</p>}
+        <div className="mt-2 flex gap-1">
+          <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
+            <Pencil className="h-3 w-3" />
+            Corregir
+          </Button>
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={eliminar.isPending}
+            onClick={handleEliminar}
+          >
+            <Trash2 className="h-3 w-3" />
+            {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-xs">
+      <div className="mb-2 flex flex-col gap-1.5">
+        <Label className="text-xs">Fecha</Label>
+        <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+      </div>
+      <div className="mb-2 flex flex-col gap-1.5">
+        <Label className="text-xs">Material</Label>
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Buscar código MP..."
+          emptyText="Sin materiales activos que coincidan"
+        />
+      </div>
+      <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={seleccion} onChange={setSeleccion} />
+      {error && <p className="mt-2 text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
+          {editar.isPending ? 'Guardando...' : 'Guardar'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setEditando(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 export function Historial() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const queryClient = useQueryClient()
 
   const [q, setQ] = useState('')
 
@@ -43,6 +392,26 @@ export function Historial() {
     queryKey: ['devoluciones-todas'],
     queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token)
   })
+  const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
+  const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
+  const materialOptions = useMemo(
+    () =>
+      (materiales.data ?? []).map((m) => ({
+        value: String(m.id),
+        label: m.codigo_mp + (m.descripcion ? ` — ${m.descripcion}` : '')
+      })),
+    [materiales.data]
+  )
+
+  // Corregir o borrar una entrega/devolución cambia lo que ya se mostró acá
+  // (totales, estado del pedido, quién la editó) — refrescar las consultas es
+  // más simple y confiable que actualizar el cache a mano.
+  function alCorregirMovimiento() {
+    queryClient.invalidateQueries({ queryKey: ['entregas-todas'] })
+    queryClient.invalidateQueries({ queryKey: ['devoluciones-todas'] })
+    queryClient.invalidateQueries({ queryKey: ['consumo-todos'] })
+  }
+
   const consumoPorOt = useMemo(() => {
     const mapa = new Map<string, Consumo[]>()
     for (const p of consumo.data ?? []) {
@@ -233,29 +602,15 @@ export function Historial() {
                             </p>
                             <div className="flex flex-col gap-2">
                               {susEntregas.map((e) => (
-                                <div key={e.id} className="rounded-md border border-border p-2 text-xs">
-                                  <div className="flex justify-between">
-                                    <span>
-                                      {e.fecha} · {e.codigo_mp_entregado}
-                                      {e.codigo_mp_entregado !== e.codigo_mp ? (
-                                        <span className="text-warning"> (pedido: {e.codigo_mp})</span>
-                                      ) : (
-                                        ''
-                                      )}
-                                    </span>
-                                    <span className="font-medium">
-                                      {e.total_entregado} {e.unidad}
-                                    </span>
-                                  </div>
-                                  <p className="text-muted-foreground">{e.usuario}</p>
-                                  {e.observacion && <p className="text-muted-foreground">Nota: {e.observacion}</p>}
-                                  {e.usa_bobinas && (
-                                    <p className="mt-1 text-muted-foreground">
-                                      {e.bobinas.length} {e.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
-                                      {e.bobinas.map((b) => `${b} ${e.unidad}`).join(', ')}
-                                    </p>
-                                  )}
-                                </div>
+                                <FilaEntrega
+                                  key={e.id}
+                                  entrega={e}
+                                  pedido={pedido}
+                                  materiales={materiales.data ?? []}
+                                  materialOptions={materialOptions}
+                                  procesos={procesos.data ?? []}
+                                  onCambiado={alCorregirMovimiento}
+                                />
                               ))}
                               {susEntregas.length === 0 && (
                                 <p className="text-xs text-muted-foreground">
@@ -277,30 +632,14 @@ export function Historial() {
                             </p>
                             <div className="flex flex-col gap-2">
                               {susDevoluciones.map((d) => (
-                                <div key={d.id} className="rounded-md border border-border p-2 text-xs">
-                                  <div className="flex justify-between">
-                                    <span>
-                                      {d.fecha} · {d.codigo_mp}
-                                      {d.es_ingreso_produccion ? (
-                                        <span className="text-warning"> (ingreso a almacén)</span>
-                                      ) : d.codigo_mp !== pedido.codigo_mp ? (
-                                        <span className="text-warning"> (pedido: {pedido.codigo_mp})</span>
-                                      ) : (
-                                        ''
-                                      )}
-                                    </span>
-                                    <span className="font-medium">
-                                      {d.total_devuelto} {pedido.unidad}
-                                    </span>
-                                  </div>
-                                  <p className="text-muted-foreground">{d.usuario}</p>
-                                  {d.usa_bobinas && (
-                                    <p className="mt-1 text-muted-foreground">
-                                      {d.bobinas.length} {d.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
-                                      {d.bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
-                                    </p>
-                                  )}
-                                </div>
+                                <FilaDevolucion
+                                  key={d.id}
+                                  devolucion={d}
+                                  pedidoUnidad={pedido.unidad}
+                                  materiales={materiales.data ?? []}
+                                  materialOptions={materialOptions}
+                                  onCambiado={alCorregirMovimiento}
+                                />
                               ))}
                               {susDevoluciones.length === 0 && (
                                 <p className="text-xs text-muted-foreground">Sin devoluciones.</p>

@@ -1,9 +1,9 @@
 import type { FormEvent } from 'react'
 import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRightLeft, Beaker, CheckCircle2, PackagePlus, Search, X } from 'lucide-react'
+import { ArrowRightLeft, Beaker, CheckCircle2, PackagePlus, Plus, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -26,12 +26,19 @@ function hoyISO(): string {
 interface EntradaMaterial extends BobinasPedido {
   // '' = se entrega el material del pedido tal cual (el caso normal).
   materialId: string
+  // Dónde se consume ESTA entrega puntual — arrancan en el proceso/máquina
+  // del pedido (el caso normal) pero se pueden cambiar sin mover el pedido
+  // ni sus otras entregas (ver EntregaCreate.proceso_id/maquina_id).
+  procesoId: string
+  maquinaId: string
   observacion: string
 }
 
-function entregaVacia(usaBobinas: boolean): EntradaMaterial {
+function entregaVacia(usaBobinas: boolean, procesoId = '', maquinaId = ''): EntradaMaterial {
   return {
     materialId: '',
+    procesoId,
+    maquinaId,
     observacion: '',
     ...(usaBobinas ? { cantidadBobinas: '', bobinas: [] } : { cantidadBobinas: '1', bobinas: [''] })
   }
@@ -61,8 +68,15 @@ interface SeleccionPedido {
   materiasPrimas: MateriaPrima[]
 }
 
-function seleccionVacia(pedido: { usa_bobinas: boolean }): SeleccionPedido {
-  return { entrega: entregaVacia(pedido.usa_bobinas), materiasPrimas: [] }
+function seleccionVacia(pedido: { usa_bobinas: boolean; proceso_id?: number; maquina_id?: number }): SeleccionPedido {
+  return {
+    entrega: entregaVacia(
+      pedido.usa_bobinas,
+      pedido.proceso_id != null ? String(pedido.proceso_id) : '',
+      pedido.maquina_id != null ? String(pedido.maquina_id) : ''
+    ),
+    materiasPrimas: []
+  }
 }
 
 function tieneCantidad(datos: BobinasPedido): boolean {
@@ -82,7 +96,10 @@ function EntregaDelPedido({
   materialOptions,
   unidadPedido,
   usaBobinasPedido,
-  requerido
+  requerido,
+  procesos,
+  procesoIdPedido,
+  maquinaIdPedido
 }: {
   datos: EntradaMaterial
   onChange: (datos: EntradaMaterial) => void
@@ -93,26 +110,117 @@ function EntregaDelPedido({
   // Solo hace falta esta cantidad si no se va a cargar materia prima en su
   // lugar — ver requiereAsignacion/validarSeleccion.
   requerido?: boolean
+  // Con estos tres se puede corregir dónde se consume ESTA entrega puntual
+  // (ver EntradaMaterial.procesoId/maquinaId). Sin ellos (pendiente recién
+  // promovido, todavía sin pedido "hogar") esa opción no tiene sentido y no
+  // se ofrece.
+  procesos?: Proceso[]
+  procesoIdPedido?: string
+  maquinaIdPedido?: string
 }) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
   const [cambiarMaterial, setCambiarMaterial] = useState(false)
+  const [cambiarMaquina, setCambiarMaquina] = useState(false)
   const material = materiales.find((m) => String(m.id) === datos.materialId)
   const unidad = material?.unidad ?? unidadPedido
   const usaBobinas = material?.usa_bobinas ?? usaBobinasPedido
+
+  const maquinas = useQuery({
+    queryKey: ['maquinas', datos.procesoId],
+    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(datos.procesoId)),
+    enabled: !!datos.procesoId
+  })
+
+  function cancelarCambioMaterial() {
+    setCambiarMaterial(false)
+    onChange({ ...datos, materialId: '' })
+  }
+
+  function cancelarCambioMaquina() {
+    setCambiarMaquina(false)
+    onChange({ ...datos, procesoId: procesoIdPedido ?? '', maquinaId: maquinaIdPedido ?? '' })
+  }
+
+  const puedeElegirMaquina = procesos !== undefined && procesoIdPedido !== undefined && maquinaIdPedido !== undefined
 
   return (
     <div>
       {(cambiarMaterial || datos.materialId) && (
         <div className="mb-2 flex flex-col gap-1.5">
           <Label className="text-xs">Material realmente entregado</Label>
-          <Combobox
-            value={datos.materialId}
-            onChange={(v) => onChange({ ...datos, materialId: v })}
-            options={materialOptions}
-            placeholder="Buscar código MP..."
-            emptyText="Sin materiales activos que coincidan"
-          />
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Combobox
+                value={datos.materialId}
+                onChange={(v) => onChange({ ...datos, materialId: v })}
+                options={materialOptions}
+                placeholder="Buscar código MP..."
+                emptyText="Sin materiales activos que coincidan"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={cancelarCambioMaterial}
+              className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
+              aria-label="Cancelar — entregar el material del pedido"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       )}
+      {puedeElegirMaquina &&
+        (cambiarMaquina || datos.procesoId !== procesoIdPedido || datos.maquinaId !== maquinaIdPedido) && (
+          <div className="mb-2 flex flex-col gap-1.5">
+            <Label className="text-xs">Proceso y máquina de esta entrega</Label>
+            <div className="flex items-end gap-2">
+              <div className="grid flex-1 grid-cols-2 gap-2">
+                <Select
+                  value={datos.procesoId}
+                  onValueChange={(v) => onChange({ ...datos, procesoId: v, maquinaId: '' })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Proceso" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {procesos.map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={datos.maquinaId}
+                  onValueChange={(v) => onChange({ ...datos, maquinaId: v })}
+                  disabled={!datos.procesoId}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Máquina" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {maquinas.data?.map((m) => (
+                      <SelectItem key={m.id} value={String(m.id)}>
+                        {m.nombre}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <button
+                type="button"
+                onClick={cancelarCambioMaquina}
+                className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
+                aria-label="Cancelar — entregar en el proceso y máquina del pedido"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        )}
       <CampoCantidad
         unidad={unidad}
         usaBobinas={usaBobinas}
@@ -128,15 +236,21 @@ function EntregaDelPedido({
         value={datos.observacion}
         onChange={(e) => onChange({ ...datos, observacion: e.target.value })}
       />
-      {!cambiarMaterial && !datos.materialId && (
-        <button
-          type="button"
-          onClick={() => setCambiarMaterial(true)}
-          className="mt-2 text-xs text-primary hover:underline"
-        >
-          ¿Se entregó un material distinto? (alternativa o cambio de estructura)
-        </button>
-      )}
+      <div className="mt-2 flex flex-wrap gap-2">
+        {!cambiarMaterial && !datos.materialId && (
+          <Button type="button" variant="outline" size="sm" onClick={() => setCambiarMaterial(true)}>
+            ¿Se entregó un material distinto? (alternativa o cambio de estructura)
+          </Button>
+        )}
+        {puedeElegirMaquina &&
+          !cambiarMaquina &&
+          datos.procesoId === procesoIdPedido &&
+          datos.maquinaId === maquinaIdPedido && (
+            <Button type="button" variant="outline" size="sm" onClick={() => setCambiarMaquina(true)}>
+              ¿Se entregó en otro proceso/máquina?
+            </Button>
+          )}
+      </div>
     </div>
   )
 }
@@ -183,7 +297,12 @@ function FilaMateriaPrima({
             emptyText="Sin materiales activos que coincidan"
           />
         </div>
-        <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
+        <button
+          type="button"
+          onClick={onQuitar}
+          className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
+          aria-label="Quitar esta materia prima"
+        >
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -279,13 +398,16 @@ function MateriasPrimas({
           procesos={procesos}
         />
       ))}
-      <button
+      <Button
         type="button"
+        variant="outline"
+        size="sm"
+        className="self-start"
         onClick={() => onChange([...entradas, materiaPrimaVacia()])}
-        className="self-start text-xs text-primary hover:underline"
       >
-        + Agregar materia prima
-      </button>
+        <Plus className="h-3.5 w-3.5" />
+        Agregar materia prima
+      </Button>
     </div>
   )
 }
@@ -320,6 +442,8 @@ async function enviarSeleccion(
           fecha,
           bobinas: sel.entrega.bobinas.map(Number),
           material_id: sel.entrega.materialId ? Number(sel.entrega.materialId) : undefined,
+          proceso_id: sel.entrega.procesoId ? Number(sel.entrega.procesoId) : undefined,
+          maquina_id: sel.entrega.maquinaId ? Number(sel.entrega.maquinaId) : undefined,
           observacion: sel.entrega.observacion.trim() || undefined
         })
       )
@@ -517,13 +641,15 @@ function PendienteCard({
             placeholder="Buscar código MP..."
             emptyText="Sin materiales activos que coincidan"
           />
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="sm"
+            className="self-start"
             onClick={() => setCrearMaterialAbierto(true)}
-            className="self-start text-xs text-primary hover:underline"
           >
             No está en el catálogo — crear "{pendiente.codigo_mp}" como material nuevo
-          </button>
+          </Button>
           <CrearMaterialDialog
             open={crearMaterialAbierto}
             codigoInicial={pendiente.codigo_mp}
@@ -658,13 +784,9 @@ function MoverPedido({
 
   if (!abierto) {
     return (
-      <button
-        type="button"
-        onClick={() => setAbierto(true)}
-        className="mt-3 text-xs text-primary hover:underline"
-      >
+      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setAbierto(true)}>
         Este pedido va a otro proceso — mover
-      </button>
+      </Button>
     )
   }
 
@@ -782,18 +904,13 @@ function EditarPedido({
 
   if (!abierto) {
     return (
-      <div className="mt-3 flex items-center gap-3">
-        <button type="button" onClick={() => setAbierto(true)} className="text-xs text-primary hover:underline">
+      <div className="mt-3 flex items-center gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={() => setAbierto(true)}>
           Corregir material/cantidad
-        </button>
-        <button
-          type="button"
-          disabled={eliminar.isPending}
-          onClick={handleEliminar}
-          className="text-xs text-destructive hover:underline"
-        >
+        </Button>
+        <Button type="button" variant="destructive" size="sm" disabled={eliminar.isPending} onClick={handleEliminar}>
           {eliminar.isPending ? 'Eliminando...' : 'Eliminar pedido'}
-        </button>
+        </Button>
         {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
     )
@@ -885,6 +1002,9 @@ function PedidoEntregaCard({
         unidadPedido={pedido.unidad}
         usaBobinasPedido={pedido.usa_bobinas}
         requerido={!seleccion.materiasPrimas.some(tieneCantidad)}
+        procesos={procesos}
+        procesoIdPedido={String(pedido.proceso_id)}
+        maquinaIdPedido={String(pedido.maquina_id)}
       />
 
       <MateriasPrimas
@@ -920,6 +1040,7 @@ export function RegistrarEntrega() {
   const { sesion } = useAuth()
   const token = sesion!.token
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
@@ -942,6 +1063,18 @@ export function RegistrarEntrega() {
     queryKey: ['pendientes', otBuscada],
     queryFn: () => api.listarPendientes(apiBaseUrl, token, otBuscada!),
     enabled: !!otBuscada
+  })
+
+  // Solo para ubicar de qué cliente/producto es esta OT en pantalla — el
+  // personal en planta trabaja con muchas OT abiertas a la vez y el número
+  // solo no alcanza para reconocerla de un vistazo. Si la OT no existe en
+  // la base (todavía solo en Excel) esto falla en silencio y no se muestra
+  // el encabezado; el aviso de "Ve a Crear OT" ya cubre ese caso.
+  const otDetalle = useQuery({
+    queryKey: ['ot-detalle', otBuscada],
+    queryFn: () => api.obtenerDetalleOt(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada,
+    retry: false
   })
 
   // Solo para mostrar "¿por cuál material se entregó?" en la lista de
@@ -1183,19 +1316,27 @@ export function RegistrarEntrega() {
             </Button>
           </form>
 
+          {otDetalle.isSuccess && (otDetalle.data.cliente || otDetalle.data.descripcion_producto) && (
+            <div className="mt-4 rounded-md border border-border bg-muted/40 p-3 text-sm">
+              <p className="font-medium">{otDetalle.data.cliente ?? 'Sin cliente'}</p>
+              {otDetalle.data.descripcion_producto && (
+                <p className="text-muted-foreground">{otDetalle.data.descripcion_producto}</p>
+              )}
+            </div>
+          )}
+
           {pedidos.isSuccess &&
             pedidosVisibles?.length === 0 &&
             pendientes.isSuccess &&
             pendientesVisibles?.length === 0 && (
-              <div className="mt-4 flex items-start gap-2 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
-                <PackagePlus className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
-                <p>
-                  Esta OT no tiene materiales pedidos todavía.{' '}
-                  <Link to="/crear-ot" className="text-primary hover:underline">
-                    Ve a Crear OT
-                  </Link>{' '}
-                  para definir sus procesos y materiales antes de registrar una entrega.
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
+                <p className="flex items-start gap-2">
+                  <PackagePlus className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+                  Esta OT no tiene materiales pedidos todavía.
                 </p>
+                <Button type="button" size="sm" variant="outline" onClick={() => navigate('/crear-ot')}>
+                  Ve a Crear OT
+                </Button>
               </div>
             )}
 

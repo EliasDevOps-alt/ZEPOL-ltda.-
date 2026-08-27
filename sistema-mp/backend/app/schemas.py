@@ -353,6 +353,17 @@ class EntregaCreate(BaseModel):
        tienen por qué ser los del pedido que completa (ver
        ordenes_controller.crear_pedido_materia_prima) — y la entrega va contra
        ese pedido nuevo. Vale para cualquier proceso, no solo Extrusión.
+
+    proceso_id/maquina_id cumplen doble función según el modo:
+    - Con como_materia_prima: obligatorios, son dónde se consume esa materia
+      prima (define el pedido nuevo que se crea).
+    - Sin como_materia_prima: opcionales. Dos entregas parciales del mismo
+      pedido pueden terminar corriendo en máquinas distintas (ej. una tanda
+      salió como ZIPPER PE en Confección/POUCH1 y la siguiente, con cambio a
+      ZIPPER PP, corre en POUCH2) sin que eso sea "mover el pedido entero" —
+      mover el pedido (MoverPedidoIn) arrastra TODAS sus entregas, esto solo
+      afecta la que se está registrando. None = se consume donde vive el
+      pedido, el caso normal (ver Entrega.ot_proceso_id).
     """
 
     # Uno de los dos, no ambos. pendiente_id solo vale con como_materia_prima:
@@ -368,7 +379,6 @@ class EntregaCreate(BaseModel):
     material_id: Optional[int] = None
     observacion: Optional[str] = None
     como_materia_prima: bool = False
-    # Dónde se consume esa materia prima. Obligatorios con como_materia_prima.
     proceso_id: Optional[int] = None
     maquina_id: Optional[int] = None
 
@@ -377,8 +387,15 @@ class EntregaOut(BaseModel):
     id: int
     ot_material_id: int
     numero_ot: str
+    # Proceso/máquina donde REALMENTE se consumió ESTA entrega — el del
+    # pedido, salvo que se haya indicado uno distinto al registrarla (ver
+    # EntregaCreate.proceso_id/maquina_id sin como_materia_prima). El
+    # frontend lo compara contra el proceso/máquina del pedido (que sale por
+    # separado, en /consumo) para saber si vale la pena resaltarlo.
     proceso: str
+    proceso_id: int
     maquina: str
+    maquina_id: int
     diseno: Optional[str]
     codigo_mp: str
     unidad: str
@@ -401,6 +418,10 @@ class EntregaOut(BaseModel):
     # que el operador tenía seleccionado. Esto avisa que ese pedido se acaba
     # de crear, para poder confirmarlo en pantalla.
     pedido_creado: bool = False
+    # Quién la corrigió por última vez y cuándo — None mientras nadie la
+    # corrigió. Se muestra en la propia ficha de la entrega en Historial.
+    editado_por: Optional[str] = None
+    editado_en: Optional[datetime] = None
 
 
 class BalanceMaterialOut(BaseModel):
@@ -450,6 +471,33 @@ class DevolucionOut(BaseModel):
     usa_bobinas: bool
     sid_completado: bool
     es_ingreso_produccion: bool
+    # Quién la corrigió por última vez y cuándo — ver EntregaOut.editado_por.
+    editado_por: Optional[str] = None
+    editado_en: Optional[datetime] = None
+
+
+# Corregir una entrega/devolución ya registrada — típicamente un error de
+# tipeo (cantidad, fecha, material). Todos los campos son opcionales: solo
+# se cambia lo que venga, el resto queda como estaba. Deliberadamente NO se
+# puede reasignar a qué pedido queda la entrega/devolución (ot_material_id) —
+# eso es un cambio de fondo, no una corrección de tipeo, y mover un pedido
+# completo ya tiene su propia herramienta (ver MoverPedido).
+class EntregaUpdate(BaseModel):
+    fecha: Optional[date] = None
+    bobinas: Optional[List[float]] = Field(default=None, min_length=1)
+    material_id: Optional[int] = None
+    observacion: Optional[str] = None
+    # Corrige dónde se consumió ESTA entrega puntual (ver
+    # Entrega.ot_proceso_id) — no mueve el pedido ni sus otras entregas.
+    # Mandar ambos, o ninguno.
+    proceso_id: Optional[int] = None
+    maquina_id: Optional[int] = None
+
+
+class DevolucionUpdate(BaseModel):
+    fecha: Optional[date] = None
+    bobinas: Optional[List[float]] = Field(default=None, min_length=1)
+    material_id: Optional[int] = None
 
 
 class PedidoMaterialOut(BaseModel):
@@ -459,7 +507,13 @@ class PedidoMaterialOut(BaseModel):
     numero_ot: str
     cliente: Optional[str]
     proceso: str
+    # IDs del proceso/máquina "hogar" del pedido — el frontend los usa para
+    # preseleccionar el picker al registrar una entrega y para saber si una
+    # entrega puntual quedó en un proceso/máquina distinto (ver
+    # EntregaOut.proceso/maquina).
+    proceso_id: int
     maquina: str
+    maquina_id: int
     diseno: Optional[str]
     material_id: int
     codigo_mp: str

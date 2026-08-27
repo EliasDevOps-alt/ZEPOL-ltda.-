@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException, status
@@ -65,6 +66,27 @@ def _resolver_pedido(db: Session, data: schemas.EntregaCreate) -> Tuple[OtMateri
     )
 
 
+def _resolver_ot_proceso_entrega(
+    db: Session, pedido: OtMaterial, proceso_id: Optional[int], maquina_id: Optional[int]
+) -> Optional[int]:
+    """Si se pidió un proceso/máquina distinto del "hogar" del pedido,
+    resuelve (o crea) el OtProceso correspondiente dentro de la misma OT —
+    ver Entrega.ot_proceso_id. None si no se pidió nada, o si coincide con el
+    del pedido: significa "se consumió donde vive el pedido", el caso normal.
+
+    Con como_materia_prima esto siempre da None sin necesidad de un caso
+    aparte: el pedido que llega acá ya es el que crear_pedido_materia_prima[_
+    de_pendiente] armó exactamente con ese proceso_id/maquina_id como hogar,
+    así que la comparación de abajo ya los encuentra iguales."""
+    if proceso_id is None or maquina_id is None:
+        return None
+    ot_proceso_pedido = pedido.ot_proceso
+    if proceso_id == ot_proceso_pedido.proceso_id and maquina_id == ot_proceso_pedido.maquina_id:
+        return None
+    ot_proceso = ordenes_controller.crear_o_reutilizar_ot_proceso(db, ot_proceso_pedido.ot_id, proceso_id, maquina_id)
+    return ot_proceso.id
+
+
 def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate) -> Tuple[Entrega, bool]:
     pedido, pedido_creado = _resolver_pedido(db, data)
 
@@ -78,6 +100,7 @@ def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate
     entrega = Entrega(
         ot_material_id=pedido.id,
         material_id=material.id,
+        ot_proceso_id=_resolver_ot_proceso_entrega(db, pedido, data.proceso_id, data.maquina_id),
         usuario_id=usuario.id,
         fecha=data.fecha,
         observacion=data.observacion,
@@ -105,3 +128,59 @@ def listar_entregas_por_ot(db: Session, numero_ot: Optional[str] = None) -> List
     if numero_ot is not None:
         stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot)
     return db.scalars(stmt).all()
+
+
+# Corregir/borrar una entrega ya registrada — a diferencia del resto del
+# sistema (donde un pedido con movimiento real queda bloqueado, ver
+# ordenes_controller.actualizar_pedido), esto SÍ se permite siempre: el
+# personal de planta no siempre tipea bien a la primera y no hay otra forma
+# de arreglar una cantidad o fecha mal cargada una vez guardada. Lo que
+# deja rastro de que pasó es editado_por_id/editado_en, que se muestran en
+# la propia ficha de la entrega (ver EntregaOut).
+def editar_entrega(db: Session, usuario: Usuario, entrega_id: int, data: schemas.EntregaUpdate) -> Entrega:
+    entrega = db.get(Entrega, entrega_id)
+    if entrega is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
+
+    pedido = entrega.ot_material
+
+    if data.fecha is not None:
+        entrega.fecha = data.fecha
+    if data.material_id is not None:
+        material = db.get(Material, data.material_id)
+        if material is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
+        entrega.material_id = material.id
+    if data.observacion is not None:
+        entrega.observacion = data.observacion
+    if (data.proceso_id is None) != (data.maquina_id is None):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Indica el proceso y la máquina, o ninguno de los dos")
+    if data.proceso_id is not None and data.maquina_id is not None:
+        entrega.ot_proceso_id = _resolver_ot_proceso_entrega(db, pedido, data.proceso_id, data.maquina_id)
+    if data.bobinas is not None:
+        for bobina in list(entrega.bobinas):
+            db.delete(bobina)
+        db.flush()
+        entrega.bobinas = [EntregaBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
+
+    entrega.editado_por_id = usuario.id
+    entrega.editado_en = datetime.utcnow()
+
+    db.flush()
+    sid_controller.recalcular_estado_entrega(db, pedido)
+    db.commit()
+    db.refresh(entrega)
+    return entrega
+
+
+def eliminar_entrega(db: Session, usuario: Usuario, entrega_id: int) -> None:
+    entrega = db.get(Entrega, entrega_id)
+    if entrega is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
+
+    pedido = entrega.ot_material
+
+    db.delete(entrega)
+    db.flush()
+    sid_controller.recalcular_estado_entrega(db, pedido)
+    db.commit()

@@ -221,6 +221,15 @@ CREATE TABLE entregas (
     -- pero puede diferir cuando almacén entrega una alternativa (otro micronaje/ancho)
     -- o un cambio de estructura por falta de stock del material pedido.
     material_id    INTEGER   NOT NULL REFERENCES materiales(id),
+    -- Proceso/máquina donde REALMENTE se consumió esta entrega puntual, si es
+    -- distinto del proceso/máquina "hogar" del pedido (ot_materiales.ot_proceso_id).
+    -- NULL = se consumió en el proceso/máquina del pedido, el caso normal.
+    -- Existe porque dos entregas parciales del mismo pedido (ej. una tanda de
+    -- ZIPPER PE y, después, un cambio a ZIPPER PP) pueden terminar corriendo en
+    -- máquinas distintas sin que eso signifique mover el pedido entero — mover
+    -- el pedido (ver ordenes_controller.mover_pedido) arrastra TODAS sus
+    -- entregas/devoluciones; esto cambia solo la entrega puntual.
+    ot_proceso_id  INTEGER   REFERENCES ot_procesos(id),
     usuario_id     INTEGER   NOT NULL REFERENCES usuarios(id),
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
@@ -231,7 +240,14 @@ CREATE TABLE entregas (
     -- partir de estos (ver sid_controller.recalcular_estado_entrega) — nunca
     -- se marca completado si hay una entrega nueva sin registrar.
     sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
-    creado_en      TIMESTAMP NOT NULL DEFAULT now()
+    creado_en      TIMESTAMP NOT NULL DEFAULT now(),
+    -- Quién corrigió esta entrega por última vez (y cuándo) — a diferencia de
+    -- casi todo lo demás en el sistema, una entrega SÍ se puede corregir
+    -- después de guardada (el personal de planta no siempre tipea bien a la
+    -- primera). NULL mientras nadie la corrigió. Se muestra en su propia
+    -- ficha en Historial.
+    editado_por_id INTEGER   REFERENCES usuarios(id),
+    editado_en     TIMESTAMP
 );
 
 -- Peso/cantidad por bobina de una entrega. Sin columna de unidad: la unidad
@@ -279,6 +295,9 @@ CREATE TABLE devoluciones (
     -- agregado ot_materiales.sid_devolucion_completado se recalcula solo.
     sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
+    -- Ver la nota equivalente en entregas.editado_por_id/editado_en.
+    editado_por_id INTEGER   REFERENCES usuarios(id),
+    editado_en     TIMESTAMP,
 
     CHECK ((ot_material_id IS NOT NULL) <> (ot_material_pendiente_id IS NOT NULL))
 );
@@ -302,7 +321,9 @@ SELECT
     ot.cliente,
     ot.diseno,
     p.nombre                    AS proceso,
+    om.proceso_id,
     mq.nombre                   AS maquina,
+    mq.id                       AS maquina_id,
     om.material_id,
     mat.codigo_mp,
     mat.descripcion,

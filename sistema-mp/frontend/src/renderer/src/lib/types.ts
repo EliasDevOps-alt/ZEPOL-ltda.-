@@ -294,7 +294,11 @@ export interface EntregaCreate {
   material_id?: number | null
   observacion?: string | null
   como_materia_prima?: boolean
-  // Dónde se consume esa materia prima. Obligatorios con como_materia_prima.
+  // Doble función según el modo: con como_materia_prima, obligatorios (dónde
+  // se consume esa materia prima). Sin como_materia_prima, opcionales — un
+  // proceso/máquina distinto del "hogar" del pedido para ESTA entrega puntual
+  // (ej. una tanda salió en otra máquina), sin mover el pedido ni sus otras
+  // entregas. Sin indicar nada, se consume donde vive el pedido.
   proceso_id?: number | null
   maquina_id?: number | null
 }
@@ -303,8 +307,14 @@ export interface Entrega {
   id: number
   ot_material_id: number
   numero_ot: string
+  // Proceso/máquina donde REALMENTE se consumió esta entrega puntual — el
+  // del pedido, salvo que se haya indicado uno distinto (ver
+  // EntregaCreate.proceso_id/maquina_id). Comparar contra el proceso/máquina
+  // del pedido (Consumo.proceso/maquina) para saber si conviene resaltarlo.
   proceso: string
+  proceso_id: number
   maquina: string
+  maquina_id: number
   diseno: string | null
   codigo_mp: string
   unidad: string
@@ -324,6 +334,24 @@ export interface Entrega {
   // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
   // seleccionado. Esto avisa que ese pedido se acaba de crear.
   pedido_creado: boolean
+  // Quién la corrigió por última vez y cuándo — null mientras nadie la
+  // corrigió. Se muestra en la propia ficha en Historial.
+  editado_por: string | null
+  editado_en: string | null
+}
+
+// Corregir una entrega ya registrada — solo lo que venga se cambia, el
+// resto queda igual. No se puede reasignar a qué pedido queda (ver
+// MoverPedido para mover un pedido completo).
+export interface EntregaUpdate {
+  fecha?: string
+  bobinas?: number[]
+  material_id?: number | null
+  observacion?: string | null
+  // Corrige dónde se consumió esta entrega puntual (no mueve el pedido).
+  // Mandar ambos, o ninguno.
+  proceso_id?: number | null
+  maquina_id?: number | null
 }
 
 export interface BalanceMaterial {
@@ -376,6 +404,16 @@ export interface Devolucion {
   usa_bobinas: boolean
   sid_completado: boolean
   es_ingreso_produccion: boolean
+  // Quién la corrigió por última vez y cuándo — ver Entrega.editado_por.
+  editado_por: string | null
+  editado_en: string | null
+}
+
+// Corregir una devolución ya registrada — mismo criterio que EntregaUpdate.
+export interface DevolucionUpdate {
+  fecha?: string
+  bobinas?: number[]
+  material_id?: number | null
 }
 
 // Un material pedido dentro de una OT+proceso, con su avance de entrega/devolución.
@@ -384,7 +422,12 @@ export interface Consumo {
   numero_ot: string
   cliente: string | null
   proceso: string
+  // IDs del proceso/máquina "hogar" del pedido — para preseleccionar el
+  // picker al registrar una entrega y para detectar si una entrega puntual
+  // quedó en un proceso/máquina distinto (ver Entrega.proceso/maquina).
+  proceso_id: number
   maquina: string
+  maquina_id: number
   diseno: string | null
   material_id: number
   codigo_mp: string

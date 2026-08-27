@@ -364,6 +364,26 @@ export function RegistrarDevolucion() {
 
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
+  // Materiales entregados y todavía no devueltos del todo, de cualquier OT —
+  // para no obligar a saberse el número de OT de memoria, igual que "OT
+  // recientes con entregas pendientes" en Registrar Entrega, pero acá a nivel
+  // material en vez de a nivel OT (es lo que hay que devolver, no la OT en
+  // general). Solo se muestra antes de buscar una OT puntual. No incluye los
+  // ingresos a almacén pendientes (material que se está fabricando en otra
+  // OT): eso vive en /pendientes por OT, no hay un listado cruzado de eso.
+  const consumoTodo = useQuery({
+    queryKey: ['consumo-todo'],
+    queryFn: () => api.consultarConsumo(apiBaseUrl, token),
+    enabled: !otBuscada
+  })
+
+  const materialesPendientesDevolver = useMemo(() => {
+    return (consumoTodo.data ?? [])
+      .filter((p) => !p.es_tinta && p.total_entregado - p.total_devuelto > 0.005)
+      .sort((a, b) => b.total_entregado - b.total_devuelto - (a.total_entregado - a.total_devuelto))
+      .slice(0, 15)
+  }, [consumoTodo.data])
+
   const materialOptions = useMemo(
     () =>
       (materiales.data ?? []).map((m) => ({
@@ -452,6 +472,14 @@ export function RegistrarDevolucion() {
     setSeleccion({})
     setIngresos({})
     setOtBuscada(numeroOt)
+  }
+
+  function seleccionarOtRecomendada(numero: string) {
+    setNumeroOt(numero)
+    setConfirmaciones([])
+    setSeleccion({})
+    setIngresos({})
+    setOtBuscada(numero)
   }
 
   function toggleIngreso(pendiente: OtMaterialPendiente) {
@@ -637,6 +665,35 @@ export function RegistrarDevolucion() {
           )}
         </CardContent>
       </Card>
+
+      {!otBuscada && materialesPendientesDevolver.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>Materiales pendientes de devolver</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {materialesPendientesDevolver.map((p) => (
+              <button
+                key={p.ot_material_id}
+                type="button"
+                onClick={() => seleccionarOtRecomendada(p.numero_ot)}
+                className="flex flex-col rounded-md border border-border p-3 text-left text-sm transition-colors hover:bg-muted"
+              >
+                <span className="font-medium">
+                  {p.codigo_mp} <span className="font-normal text-muted-foreground">— OT {p.numero_ot}</span>
+                </span>
+                <span className="text-muted-foreground">
+                  {p.cliente ?? 'Sin cliente'}
+                  {p.diseno ? ` · ${p.diseno}` : ''} · {p.proceso} · {p.maquina}
+                </span>
+                <span className="text-muted-foreground">
+                  Disponible para devolver: {(p.total_entregado - p.total_devuelto).toFixed(2)} {p.unidad}
+                </span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {cantidadSeleccionada > 0 && (
         <Card>

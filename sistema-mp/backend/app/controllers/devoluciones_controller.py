@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Optional
 
 from fastapi import HTTPException, status
@@ -101,3 +102,52 @@ def listar_devoluciones_por_ot(db: Session, numero_ot: Optional[str] = None) -> 
     if numero_ot is not None:
         stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot)
     return db.scalars(stmt).all()
+
+
+# Ver la nota equivalente en entregas_controller.editar_entrega: esto se
+# permite siempre (no se bloquea por tener movimiento real) porque de eso se
+# trata — corregir un movimiento real mal cargado. editado_por_id/editado_en
+# dejan rastro de que pasó, mostrado en la propia ficha (ver DevolucionOut).
+def editar_devolucion(db: Session, usuario: Usuario, devolucion_id: int, data: schemas.DevolucionUpdate) -> Devolucion:
+    devolucion = db.get(Devolucion, devolucion_id)
+    if devolucion is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
+
+    ot_material = devolucion.ot_material
+
+    if data.fecha is not None:
+        devolucion.fecha = data.fecha
+    if data.material_id is not None:
+        material = db.get(Material, data.material_id)
+        if material is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
+        devolucion.material_id = material.id
+    if data.bobinas is not None:
+        for bobina in list(devolucion.bobinas):
+            db.delete(bobina)
+        db.flush()
+        devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
+
+    devolucion.editado_por_id = usuario.id
+    devolucion.editado_en = datetime.utcnow()
+
+    db.flush()
+    if ot_material is not None:
+        sid_controller.recalcular_sid_devolucion(db, ot_material)
+    db.commit()
+    db.refresh(devolucion)
+    return devolucion
+
+
+def eliminar_devolucion(db: Session, usuario: Usuario, devolucion_id: int) -> None:
+    devolucion = db.get(Devolucion, devolucion_id)
+    if devolucion is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
+
+    ot_material = devolucion.ot_material
+
+    db.delete(devolucion)
+    db.flush()
+    if ot_material is not None:
+        sid_controller.recalcular_sid_devolucion(db, ot_material)
+    db.commit()

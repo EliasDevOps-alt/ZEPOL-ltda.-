@@ -5,9 +5,11 @@ import type {
   Consumo,
   Devolucion,
   DevolucionCreate,
+  DevolucionUpdate,
   EditarMaterialPedidoIn,
   Entrega,
   EntregaCreate,
+  EntregaUpdate,
   EstadoSid,
   Maquina,
   MaquinaAdmin,
@@ -119,6 +121,16 @@ export function listarEntregas(baseUrl: string, token: string, numeroOt?: string
   return request<Entrega[]>(baseUrl, `/entregas${qs}`, { token })
 }
 
+// Corregir/borrar una entrega ya registrada — típicamente un error de
+// tipeo. Queda registrado en /auditoria (ver Historial.tsx).
+export function editarEntrega(baseUrl: string, token: string, entregaId: number, data: EntregaUpdate) {
+  return request<Entrega>(baseUrl, `/entregas/${entregaId}`, { method: 'PATCH', token, body: data })
+}
+
+export function eliminarEntrega(baseUrl: string, token: string, entregaId: number) {
+  return request<void>(baseUrl, `/entregas/${entregaId}`, { method: 'DELETE', token })
+}
+
 // Materiales realmente entregados contra un pedido (normalmente uno solo,
 // más de uno si hubo sustituciones) — lo usa Registrar Devolución para
 // saber contra cuál material validar/registrar.
@@ -148,6 +160,16 @@ export function listarDevoluciones(baseUrl: string, token: string, otMaterialId:
 export function listarDevolucionesPorOt(baseUrl: string, token: string, numeroOt?: string) {
   const qs = numeroOt ? `?numero_ot=${encodeURIComponent(numeroOt)}` : ''
   return request<Devolucion[]>(baseUrl, `/devoluciones${qs}`, { token })
+}
+
+// Corregir/borrar una devolución ya registrada — mismo criterio que
+// editarEntrega/eliminarEntrega.
+export function editarDevolucion(baseUrl: string, token: string, devolucionId: number, data: DevolucionUpdate) {
+  return request<Devolucion>(baseUrl, `/devoluciones/${devolucionId}`, { method: 'PATCH', token, body: data })
+}
+
+export function eliminarDevolucion(baseUrl: string, token: string, devolucionId: number) {
+  return request<void>(baseUrl, `/devoluciones/${devolucionId}`, { method: 'DELETE', token })
 }
 
 export function listarOrdenes(

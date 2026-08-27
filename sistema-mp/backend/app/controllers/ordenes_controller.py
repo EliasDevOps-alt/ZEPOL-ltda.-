@@ -419,7 +419,7 @@ def eliminar_pendiente(db: Session, pendiente_id: int) -> None:
     _sincronizar_excel(db, ot)
 
 
-def _crear_o_reutilizar_ot_proceso(db: Session, ot_id: int, proceso_id: int, maquina_id: int) -> OtProceso:
+def crear_o_reutilizar_ot_proceso(db: Session, ot_id: int, proceso_id: int, maquina_id: int) -> OtProceso:
     maquina = db.get(Maquina, maquina_id)
     if maquina is None or maquina.proceso_id != proceso_id:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa máquina no pertenece al proceso seleccionado")
@@ -489,7 +489,7 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
     if db.get(Material, material_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
 
-    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, data.proceso_id, data.maquina_id)
+    ot_proceso = crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, data.proceso_id, data.maquina_id)
     ot_material, _ = _crear_o_reutilizar_ot_material(db, ot_proceso, material_id, pendiente.cantidad_requerida)
 
     # La materia prima que se entregó mientras esto era un pendiente ya apunta
@@ -525,7 +525,7 @@ def crear_pedido_materia_prima_de_pendiente(
     if db.get(Material, material_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
 
-    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, proceso_id, maquina_id)
+    ot_proceso = crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, proceso_id, maquina_id)
     ot_material, creado = _crear_o_reutilizar_ot_material(
         db, ot_proceso, material_id, cantidad_entregada
     )
@@ -565,7 +565,7 @@ def crear_pedido_materia_prima(
     if db.get(Material, material_id) is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
 
-    ot_proceso = _crear_o_reutilizar_ot_proceso(db, pedido.ot_proceso.ot_id, proceso_id, maquina_id)
+    ot_proceso = crear_o_reutilizar_ot_proceso(db, pedido.ot_proceso.ot_id, proceso_id, maquina_id)
     return _crear_o_reutilizar_ot_material(
         db, ot_proceso, material_id, cantidad_entregada, insumo_de_id=pedido.id
     )
@@ -589,7 +589,7 @@ def mover_pedido(db: Session, ot_material_id: int, proceso_id: int, maquina_id: 
     if ot_proceso_anterior.proceso_id == proceso_id and ot_proceso_anterior.maquina_id == maquina_id:
         return ot_material
 
-    ot_proceso = _crear_o_reutilizar_ot_proceso(db, ot_proceso_anterior.ot_id, proceso_id, maquina_id)
+    ot_proceso = crear_o_reutilizar_ot_proceso(db, ot_proceso_anterior.ot_id, proceso_id, maquina_id)
 
     # Un mismo material no puede tener dos pedidos en el mismo paso de OT
     # (UNIQUE (ot_proceso_id, material_id)) — sin este aviso el error saldría

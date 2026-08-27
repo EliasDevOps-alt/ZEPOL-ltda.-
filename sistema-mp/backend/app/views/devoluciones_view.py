@@ -33,6 +33,8 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         usa_bobinas=devolucion.material.usa_bobinas,
         sid_completado=devolucion.sid_completado,
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
+        editado_por=devolucion.editado_por.inicial if devolucion.editado_por else None,
+        editado_en=devolucion.editado_en,
     )
 
 
@@ -69,6 +71,34 @@ def marcar_sid_completado(devolucion_id: int, db: Session = Depends(get_db)):
 def marcar_sid_pendiente(devolucion_id: int, db: Session = Depends(get_db)):
     devolucion = sid_controller.marcar_devolucion_sid(db, devolucion_id, False)
     return _serializar(devolucion)
+
+
+@router.patch(
+    "/{devolucion_id}",
+    response_model=schemas.DevolucionOut,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
+def editar_devolucion(
+    devolucion_id: int,
+    data: schemas.DevolucionUpdate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    devolucion = devoluciones_controller.editar_devolucion(db, usuario, devolucion_id, data)
+    return _serializar(devolucion)
+
+
+@router.delete(
+    "/{devolucion_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
+def eliminar_devolucion(
+    devolucion_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    devoluciones_controller.eliminar_devolucion(db, usuario, devolucion_id)
 
 
 @router.get("", response_model=List[schemas.DevolucionOut])

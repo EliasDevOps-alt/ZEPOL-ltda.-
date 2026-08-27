@@ -294,6 +294,13 @@ class Entrega(Base):
     # pero puede diferir cuando almacén da una alternativa (otro micronaje/ancho)
     # o un cambio de estructura por falta de stock del material pedido.
     material_id: Mapped[int] = mapped_column(ForeignKey("materiales.id"))
+    # Proceso/máquina donde REALMENTE se consumió esta entrega puntual, si es
+    # distinto del "hogar" del pedido (ot_material.ot_proceso_id). None = se
+    # consumió donde vive el pedido, el caso normal. Existe porque dos
+    # entregas parciales del mismo pedido pueden terminar en máquinas
+    # distintas sin que eso sea "mover el pedido entero" (ver
+    # ordenes_controller.mover_pedido, que sí arrastra todas las entregas).
+    ot_proceso_id: Mapped[Optional[int]] = mapped_column(ForeignKey("ot_procesos.id"))
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
@@ -303,10 +310,20 @@ class Entrega(Base):
     # check (ver sid_controller.recalcular_estado_entrega).
     sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Quién corrigió esta entrega por última vez (y cuándo) — el personal de
+    # planta no siempre tipea bien a la primera, así que a diferencia de casi
+    # todo lo demás en el sistema, una entrega SÍ se puede corregir después de
+    # guardada (ver entregas_controller.editar_entrega). Esto se muestra en su
+    # propia ficha en Historial en vez de en un registro aparte: null mientras
+    # nadie la corrigió.
+    editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
+    editado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     ot_material: Mapped["OtMaterial"] = relationship(back_populates="entregas")
     material: Mapped["Material"] = relationship()
-    usuario: Mapped["Usuario"] = relationship()
+    ot_proceso: Mapped[Optional["OtProceso"]] = relationship()
+    usuario: Mapped["Usuario"] = relationship(foreign_keys="Entrega.usuario_id")
+    editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Entrega.editado_por_id")
     bobinas: Mapped[List["EntregaBobina"]] = relationship(back_populates="entrega", cascade="all, delete-orphan")
 
 
@@ -361,13 +378,17 @@ class Devolucion(Base):
     # SID de ESTE movimiento puntual — ver Entrega.sid_completado.
     sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Ver la nota equivalente en Entrega.editado_por_id/editado_en.
+    editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
+    editado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     ot_material: Mapped[Optional["OtMaterial"]] = relationship(back_populates="devoluciones")
     ot_material_pendiente: Mapped[Optional["OtMaterialPendiente"]] = relationship(
         back_populates="ingresos"
     )
     material: Mapped["Material"] = relationship()
-    usuario: Mapped["Usuario"] = relationship()
+    usuario: Mapped["Usuario"] = relationship(foreign_keys="Devolucion.usuario_id")
+    editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Devolucion.editado_por_id")
     bobinas: Mapped[List["DevolucionBobina"]] = relationship(
         back_populates="devolucion", cascade="all, delete-orphan"
     )

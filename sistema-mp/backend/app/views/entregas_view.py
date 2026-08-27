@@ -17,12 +17,18 @@ router = APIRouter(prefix="/entregas", tags=["entregas"], dependencies=[Depends(
 def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.EntregaOut:
     ot_material = entrega.ot_material
     ot_proceso = ot_material.ot_proceso
+    # Dónde REALMENTE se consumió esta entrega puntual — el override si se
+    # indicó uno al registrarla/corregirla (ver Entrega.ot_proceso_id), si no
+    # el "hogar" del pedido.
+    ot_proceso_entrega = entrega.ot_proceso or ot_proceso
     return schemas.EntregaOut(
         id=entrega.id,
         ot_material_id=ot_material.id,
         numero_ot=ot_proceso.ot.numero_ot,
-        proceso=ot_proceso.proceso.nombre,
-        maquina=ot_proceso.maquina.nombre,
+        proceso=ot_proceso_entrega.proceso.nombre,
+        proceso_id=ot_proceso_entrega.proceso_id,
+        maquina=ot_proceso_entrega.maquina.nombre,
+        maquina_id=ot_proceso_entrega.maquina_id,
         diseno=ot_proceso.ot.diseno,
         codigo_mp=ot_material.material.codigo_mp,
         unidad=ot_material.material.unidad,
@@ -39,6 +45,8 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         sid_completado=entrega.sid_completado,
         observacion=entrega.observacion,
         pedido_creado=pedido_creado,
+        editado_por=entrega.editado_por.inicial if entrega.editado_por else None,
+        editado_en=entrega.editado_en,
     )
 
 
@@ -81,6 +89,34 @@ def marcar_sid_completado(entrega_id: int, db: Session = Depends(get_db)):
 def marcar_sid_pendiente(entrega_id: int, db: Session = Depends(get_db)):
     entrega = sid_controller.marcar_entrega_sid(db, entrega_id, False)
     return _serializar(entrega)
+
+
+@router.patch(
+    "/{entrega_id}",
+    response_model=schemas.EntregaOut,
+    dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
+)
+def editar_entrega(
+    entrega_id: int,
+    data: schemas.EntregaUpdate,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    entrega = entregas_controller.editar_entrega(db, usuario, entrega_id, data)
+    return _serializar(entrega)
+
+
+@router.delete(
+    "/{entrega_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
+)
+def eliminar_entrega(
+    entrega_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    entregas_controller.eliminar_entrega(db, usuario, entrega_id)
 
 
 @router.get("/materiales-entregados/{ot_material_id}", response_model=List[schemas.BalanceMaterialOut])
