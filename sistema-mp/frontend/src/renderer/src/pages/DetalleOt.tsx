@@ -28,6 +28,7 @@ import { ApiError } from '@renderer/lib/api'
 import type {
   CamposComercialesOt,
   ComparacionExcel,
+  Material,
   OtDetalleOut,
   OtExcel,
   OtMaterialPendiente,
@@ -41,6 +42,31 @@ interface FilaMaterial {
 
 function filaMaterialVacia(): FilaMaterial {
   return { materialId: '', cantidad: '' }
+}
+
+// La unidad siempre sale del catálogo de Materiales (nunca se asume ni se
+// hardcodea) — busca primero por material_id (match exacto) y si no hay,
+// por codigo_mp (caso de materiales que vienen del Excel, sin material_id
+// resuelto todavía).
+function unidadDeMaterial(
+  materiales: Material[] | undefined,
+  opts: { materialId?: number | null; codigoMp?: string }
+): string | null {
+  if (!materiales) return null
+  if (opts.materialId != null) {
+    const porId = materiales.find((m) => m.id === opts.materialId)
+    if (porId) return porId.unidad
+  }
+  if (opts.codigoMp) {
+    const porCodigo = materiales.find((m) => m.codigo_mp.toLowerCase() === opts.codigoMp!.toLowerCase())
+    if (porCodigo) return porCodigo.unidad
+  }
+  return null
+}
+
+function conCantidadYUnidad(cantidad: number | null, unidad: string | null): string {
+  if (cantidad == null) return ''
+  return ` — ${cantidad}${unidad ? ` ${unidad}` : ''}`
 }
 
 interface ComercialesForm {
@@ -157,10 +183,12 @@ function sumarPrecioTotal(ptUsd: string, precioClise: string): string {
 function FilaPendienteExistente({
   pendiente,
   materialOptions,
+  materialesData,
   onCambiado
 }: {
   pendiente: OtMaterialPendiente
   materialOptions: { value: string; label: string }[]
+  materialesData: Material[] | undefined
   onCambiado: () => void
 }) {
   const { apiBaseUrl } = useConfig()
@@ -231,11 +259,16 @@ function FilaPendienteExistente({
     )
   }
 
+  const unidad = unidadDeMaterial(materialesData, {
+    materialId: pendiente.material_id,
+    codigoMp: pendiente.codigo_mp
+  })
+
   return (
     <li className="flex items-center justify-between gap-2">
       <span>
         {pendiente.codigo_mp}
-        {pendiente.cantidad_requerida != null ? ` — ${pendiente.cantidad_requerida}` : ''}
+        {conCantidadYUnidad(pendiente.cantidad_requerida, unidad)}
       </span>
       {bloqueado ? (
         <span className="text-xs text-muted-foreground">ya tiene materia prima/ingreso registrado</span>
@@ -545,7 +578,10 @@ export function DetalleOt() {
                 {datosExcel.materiales.map((m, i) => (
                   <li key={i} className="text-muted-foreground">
                     {m.codigo_mp}
-                    {m.cantidad_requerida != null ? ` — ${m.cantidad_requerida}` : ''}
+                    {conCantidadYUnidad(
+                      m.cantidad_requerida,
+                      unidadDeMaterial(materiales.data, { codigoMp: m.codigo_mp })
+                    )}
                   </li>
                 ))}
               </ul>
@@ -571,6 +607,7 @@ export function DetalleOt() {
                 key={p.id}
                 pendiente={p}
                 materialOptions={materialOptions}
+                materialesData={materiales.data}
                 onCambiado={recargarOt}
               />
             ))}
@@ -593,7 +630,7 @@ export function DetalleOt() {
               p.materiales.map((m) => (
                 <li key={m.ot_material_id}>
                   {m.codigo_mp} — {p.proceso} / {p.maquina}
-                  {m.cantidad_requerida != null ? ` — ${m.cantidad_requerida}` : ''}
+                  {conCantidadYUnidad(m.cantidad_requerida, m.unidad)}
                 </li>
               ))
             )}
@@ -656,7 +693,10 @@ export function DetalleOt() {
                         {comparacion.materiales_nuevos.map((m) => (
                           <li key={m.codigo_mp}>
                             {m.codigo_mp}
-                            {m.cantidad_requerida != null ? ` — ${m.cantidad_requerida}` : ''}
+                            {conCantidadYUnidad(
+                              m.cantidad_requerida,
+                              unidadDeMaterial(materiales.data, { codigoMp: m.codigo_mp })
+                            )}
                           </li>
                         ))}
                       </ul>

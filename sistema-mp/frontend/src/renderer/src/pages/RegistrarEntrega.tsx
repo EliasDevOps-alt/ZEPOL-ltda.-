@@ -496,7 +496,9 @@ function PendienteCard({
     <form onSubmit={handleSubmit} className="rounded-md border border-warning/30 bg-warning/5 p-4">
       <p className="mb-3 text-sm font-medium">
         {pendiente.codigo_mp}
-        {pendiente.cantidad_requerida != null ? ` — ${pendiente.cantidad_requerida} (del Excel)` : ''}
+        {pendiente.cantidad_requerida != null
+          ? ` — ${pendiente.cantidad_requerida}${materialPedido?.unidad ? ` ${materialPedido.unidad}` : ''} (del Excel)`
+          : ''}
       </p>
 
       {pendiente.materias_primas.length > 0 && (
@@ -815,7 +817,7 @@ function EditarPedido({
           step="0.01"
           value={cantidad}
           onChange={(e) => setCantidad(e.target.value)}
-          placeholder="Cantidad"
+          placeholder={`Cantidad${pedido.unidad ? ` (${pedido.unidad})` : ''}`}
         />
       </div>
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
