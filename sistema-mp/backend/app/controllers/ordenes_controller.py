@@ -71,14 +71,31 @@ def _agregar_o_actualizar_pendiente(
         pendiente.cantidad_requerida = cantidad_requerida
 
 
+def _materiales_para_excel(ot: OrdenTrabajo) -> List[Dict[str, Any]]:
+    """Todos los materiales que el cliente pidió en esta OT, tal como deben
+    verse en las columnas de 'oc mp': los que siguen pendientes de proceso y
+    máquina, más los que ya se promovieron a pedido real. NO incluye la
+    materia prima que se les haya agregado para poder fabricarlos — eso es
+    un detalle interno de almacén que el cliente nunca pidió en el Excel."""
+    materiales = [{"codigo_mp": p.codigo_mp, "cantidad_requerida": p.cantidad_requerida} for p in ot.pendientes]
+    for ot_proceso in ot.procesos:
+        for om in ot_proceso.materiales:
+            if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
+                continue
+            materiales.append({"codigo_mp": om.material.codigo_mp, "cantidad_requerida": om.cantidad_requerida})
+    return materiales
+
+
 def _sincronizar_excel(db: Session, ot: OrdenTrabajo) -> None:
-    """Intenta escribir (o reescribir) la OT en el Excel OC-MP y actualiza
+    """Escribe (o actualiza) la fila de esta OT en el Excel OC-MP y actualiza
     sincronizado_excel/excel_sync_error según el resultado. Nunca relanza: un
     fallo al sincronizar con Excel no debe tumbar el guardado de la OT, que
-    ya está segura en la base de datos de todas formas. Se usa tanto para el
-    intento automático al crear la OT como para el reintento manual."""
+    ya está segura en la base de datos de todas formas. Se llama cada vez que
+    se guarda algo de la OT desde el sistema (creación, materiales nuevos,
+    datos comerciales) y también desde el reintento manual — escribir_oc_mp
+    actualiza la fila existente si ya hay una en vez de duplicarla."""
     campos = {campo: getattr(ot, campo) for campo in CAMPOS_COMERCIALES}
-    materiales = [{"codigo_mp": p.codigo_mp, "cantidad_requerida": p.cantidad_requerida} for p in ot.pendientes]
+    materiales = _materiales_para_excel(ot)
     try:
         excel_oc_mp.escribir_oc_mp(db, ot.numero_ot, ot.cliente, campos, materiales)
     except Exception as exc:
@@ -97,12 +114,12 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
     'pendientes' — el proceso y la máquina se asignan después, en Registrar
     Entrega, al momento de entregar cada material. Si el material ya estaba
     pendiente, actualiza la cantidad en vez de duplicar — así esta misma
-    acción sirve para crear la OT o para agregarle más materiales después.
-    Si es una OT nueva (no viene de Excel), además intenta escribirla en el
-    Excel OC-MP — ver _sincronizar_excel."""
+    acción sirve para crear la OT o para agregarle más materiales/corregir
+    datos comerciales después. Siempre intenta reflejar el resultado en el
+    Excel OC-MP — ver _sincronizar_excel — tanto al crear como al ampliar,
+    para que el Excel no quede desactualizado apenas se edita algo más."""
 
     ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
-    es_nueva = ot is None
     if ot is None:
         ot = OrdenTrabajo(numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno)
         db.add(ot)
@@ -123,8 +140,7 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
     db.commit()
     db.refresh(ot)
 
-    if es_nueva:
-        _sincronizar_excel(db, ot)
+    _sincronizar_excel(db, ot)
 
     return ot
 
@@ -134,6 +150,153 @@ def reintentar_sincronizacion_excel(db: Session, numero_ot: str) -> OrdenTrabajo
     if ot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
     _sincronizar_excel(db, ot)
+    return ot
+
+
+# Etiquetas legibles para el comparador — solo los campos que también se
+# escriben hacia Excel (ver excel_oc_mp.CAMPOS_A_COLUMNAS); total_ot y
+# precio_total_pedido_usd quedan afuera porque son fórmulas allá.
+ETIQUETAS_COMERCIALES: Dict[str, str] = {
+    "fecha_seguimiento_mp": "Fecha seguimiento MP",
+    "alm": "Alm",
+    "so": "SO",
+    "tipo_trabajo": "Tipo de trabajo",
+    "indicador": "Indicador",
+    "status_entrega_mp": "Status entrega MP",
+    "vendedor": "Vendedor",
+    "ciudad": "Ciudad",
+    "fecha_pedido": "Fecha pedido",
+    "fecha_entrega": "Fecha entrega",
+    "descripcion_producto": "Descripción producto",
+    "codigo_producto": "Código producto",
+    "entrega_mes": "Entrega mes",
+    "medida": "Medida",
+    "equivalencia_kg": "Equivalencia kg",
+    "pu_usd": "P.U. US$",
+    "pt_usd": "P.T. US$",
+    "factura_clises": "Factura clisés",
+    "precio_clise_usd": "Precio clisé US$",
+}
+
+
+def _valores_difieren(sistema: Any, excel: Any) -> bool:
+    if isinstance(sistema, str):
+        sistema = sistema.strip() or None
+    if isinstance(excel, str):
+        excel = excel.strip() or None
+    if sistema is None and excel is None:
+        return False
+    if isinstance(sistema, (int, float)) or isinstance(excel, (int, float)):
+        try:
+            return abs(float(sistema or 0) - float(excel or 0)) > 0.005
+        except (TypeError, ValueError):
+            return sistema != excel
+    return sistema != excel
+
+
+def _formatear_valor(valor: Any) -> Optional[str]:
+    if valor is None:
+        return None
+    if isinstance(valor, float):
+        return f"{valor:.2f}".rstrip("0").rstrip(".")
+    return str(valor)
+
+
+def _codigos_materiales_en_sistema(ot: OrdenTrabajo) -> set:
+    """Códigos (normalizados) de todos los materiales que la OT ya tiene,
+    pendientes o ya promovidos a pedido — no incluye la materia prima
+    agregada para fabricarlos, esa nunca vino del Excel."""
+    codigos = {p.codigo_mp.strip().lower() for p in ot.pendientes}
+    for ot_proceso in ot.procesos:
+        for om in ot_proceso.materiales:
+            if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
+                continue
+            codigos.add(om.material.codigo_mp.strip().lower())
+    return codigos
+
+
+def comparar_con_excel(db: Session, numero_ot: str) -> Dict[str, Any]:
+    """Compara una OT que ya está en la base de datos contra su fila del
+    Excel OC-MP — de solo lectura, no cambia nada. Pensado para el caso en
+    que el cliente sigue editando esa OT directamente en el Excel después de
+    que ya se importó al sistema (algo que hoy no se entera solo)."""
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
+    if datos_excel is None:
+        return {"encontrado_en_excel": False, "diferencias_comerciales": [], "materiales_nuevos": []}
+
+    # Solo los campos que también se escriben hacia Excel (CAMPOS_A_COLUMNAS)
+    # — total_ot/precio_total_pedido_usd son fórmulas allá y valores
+    # calculados acá, comparar esos dos solo generaría ruido.
+    diferencias = []
+    for campo in excel_oc_mp.CAMPOS_A_COLUMNAS:
+        valor_sistema = getattr(ot, campo)
+        valor_excel = datos_excel.get(campo)
+        if _valores_difieren(valor_sistema, valor_excel):
+            diferencias.append(
+                {
+                    "campo": campo,
+                    "etiqueta": ETIQUETAS_COMERCIALES.get(campo, campo),
+                    "valor_sistema": _formatear_valor(valor_sistema),
+                    "valor_excel": _formatear_valor(valor_excel),
+                }
+            )
+
+    codigos_existentes = _codigos_materiales_en_sistema(ot)
+    materiales_nuevos = [
+        m for m in datos_excel["materiales"] if m["codigo_mp"].strip().lower() not in codigos_existentes
+    ]
+
+    return {
+        "encontrado_en_excel": True,
+        "diferencias_comerciales": diferencias,
+        "materiales_nuevos": materiales_nuevos,
+    }
+
+
+def aplicar_cambios_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
+    """Trae al sistema los campos comerciales y los materiales nuevos que
+    haya en el Excel OC-MP para esta OT — pensado para usarse después de
+    comparar_con_excel, una vez que el usuario revisó las diferencias.
+    Nunca toca proceso/máquina ni borra materiales existentes: solo
+    actualiza los campos comerciales y agrega como pendientes los
+    materiales del Excel que el sistema todavía no tenga (ni pendientes ni
+    ya promovidos)."""
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
+    if datos_excel is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa OT no está en el Excel OC-MP")
+
+    if datos_excel.get("cliente"):
+        ot.cliente = datos_excel["cliente"]
+    for campo in excel_oc_mp.CAMPOS_A_COLUMNAS:
+        valor = datos_excel.get(campo)
+        if valor is not None:
+            setattr(ot, campo, valor)
+
+    codigos_existentes = _codigos_materiales_en_sistema(ot)
+    for material_excel in datos_excel["materiales"]:
+        codigo = material_excel["codigo_mp"]
+        if codigo.strip().lower() in codigos_existentes:
+            continue
+        material = db.scalar(select(Material).where(Material.codigo_mp.ilike(codigo)))
+        db.add(
+            OtMaterialPendiente(
+                ot_id=ot.id,
+                codigo_mp=codigo,
+                material_id=material.id if material else None,
+                cantidad_requerida=material_excel["cantidad_requerida"],
+            )
+        )
+
+    db.commit()
+    db.refresh(ot)
     return ot
 
 
@@ -201,6 +364,59 @@ def listar_pendientes(db: Session, numero_ot: str) -> List[OtMaterialPendiente]:
     return db.scalars(
         select(OtMaterialPendiente).where(OtMaterialPendiente.ot_id == ot.id).order_by(OtMaterialPendiente.id)
     ).all()
+
+
+def _obtener_pendiente(db: Session, pendiente_id: int) -> OtMaterialPendiente:
+    pendiente = db.get(OtMaterialPendiente, pendiente_id)
+    if pendiente is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Material pendiente no encontrado")
+    return pendiente
+
+
+def _bloquear_si_pendiente_tiene_movimientos(pendiente: OtMaterialPendiente) -> None:
+    # Un pendiente puede recibir materia prima o un ingreso a almacén antes de
+    # tener proceso asignado (ver domain doc) — si ya pasó algo de eso, hubo
+    # material físico de por medio y no se puede simplemente editar/borrar
+    # como si el registro nunca hubiera existido.
+    if pendiente.materias_primas or pendiente.ingresos:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Ya se registró materia prima o un ingreso a almacén para este material — no se puede editar ni "
+            "eliminar desde acá",
+        )
+
+
+def actualizar_pendiente(
+    db: Session, pendiente_id: int, material_id: Optional[int], cantidad_requerida: Optional[float]
+) -> OtMaterialPendiente:
+    """Corrige el material o la cantidad de un pendiente — para errores de
+    tipeo en el Excel (código equivocado, cantidad mal puesta) que hoy no
+    hay forma de arreglar salvo entrando a la base a mano."""
+    pendiente = _obtener_pendiente(db, pendiente_id)
+    _bloquear_si_pendiente_tiene_movimientos(pendiente)
+
+    if material_id is not None:
+        material = db.get(Material, material_id)
+        if material is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+        pendiente.material_id = material.id
+        pendiente.codigo_mp = material.codigo_mp
+    if cantidad_requerida is not None:
+        pendiente.cantidad_requerida = cantidad_requerida
+
+    db.commit()
+    db.refresh(pendiente)
+    _sincronizar_excel(db, pendiente.ot)
+    return pendiente
+
+
+def eliminar_pendiente(db: Session, pendiente_id: int) -> None:
+    pendiente = _obtener_pendiente(db, pendiente_id)
+    _bloquear_si_pendiente_tiene_movimientos(pendiente)
+    ot = pendiente.ot
+    db.delete(pendiente)
+    db.commit()
+    _sincronizar_excel(db, ot)
 
 
 def _crear_o_reutilizar_ot_proceso(db: Session, ot_id: int, proceso_id: int, maquina_id: int) -> OtProceso:
@@ -402,3 +618,71 @@ def mover_pedido(db: Session, ot_material_id: int, proceso_id: int, maquina_id: 
     db.commit()
     db.refresh(ot_material)
     return ot_material
+
+
+def _bloquear_si_pedido_tiene_movimientos(ot_material: OtMaterial) -> None:
+    # Una vez que hubo una entrega, una devolución, o se le agregó materia
+    # prima (otros pedidos dependen de este vía insumo_de_id), el pedido deja
+    # de ser "solo un dato pedido" — ya representa material que se movió de
+    # verdad, y editarlo/borrarlo silenciosamente desalinearía esos registros.
+    if ot_material.entregas or ot_material.devoluciones or ot_material.insumos:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Este pedido ya tiene entregas, devoluciones o materia prima registrada — no se puede editar ni "
+            "eliminar. Si el material está mal, corregilo antes de que se le registre algo.",
+        )
+
+
+def actualizar_pedido(
+    db: Session, ot_material_id: int, material_id: Optional[int], cantidad_requerida: Optional[float]
+) -> OtMaterial:
+    """Corrige el material o la cantidad de un pedido ya asignado a un
+    proceso, siempre que todavía no tenga ningún movimiento real (ver
+    _bloquear_si_pedido_tiene_movimientos) — para el mismo tipo de error de
+    tipeo que actualizar_pendiente, pero cuando el material ya se promovió."""
+    ot_material = db.get(OtMaterial, ot_material_id)
+    if ot_material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
+    _bloquear_si_pedido_tiene_movimientos(ot_material)
+
+    if material_id is not None and material_id != ot_material.material_id:
+        ya_existe = db.scalar(
+            select(OtMaterial).where(
+                OtMaterial.ot_proceso_id == ot_material.ot_proceso_id,
+                OtMaterial.material_id == material_id,
+                OtMaterial.id != ot_material.id,
+            )
+        )
+        if ya_existe is not None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ese proceso ya tiene un pedido para ese material")
+        material = db.get(Material, material_id)
+        if material is None:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+        ot_material.material_id = material.id
+
+    if cantidad_requerida is not None:
+        ot_material.cantidad_requerida = cantidad_requerida
+
+    db.commit()
+    db.refresh(ot_material)
+    _sincronizar_excel(db, ot_material.ot_proceso.ot)
+    return ot_material
+
+
+def eliminar_pedido(db: Session, ot_material_id: int) -> None:
+    ot_material = db.get(OtMaterial, ot_material_id)
+    if ot_material is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
+    _bloquear_si_pedido_tiene_movimientos(ot_material)
+
+    ot = ot_material.ot_proceso.ot
+    ot_proceso = ot_material.ot_proceso
+    db.delete(ot_material)
+    db.flush()
+
+    # Si era el único pedido de ese paso de OT, no lo dejamos vacío.
+    if not db.scalar(select(OtMaterial).where(OtMaterial.ot_proceso_id == ot_proceso.id)):
+        db.delete(ot_proceso)
+
+    db.commit()
+    _sincronizar_excel(db, ot)

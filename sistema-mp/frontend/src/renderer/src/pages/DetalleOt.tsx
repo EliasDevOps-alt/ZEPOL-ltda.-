@@ -3,7 +3,17 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { AlertTriangle, CheckCircle2, ChevronDown, FileSpreadsheet, History, Plus, Trash2, Upload } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  ChevronDown,
+  FileSpreadsheet,
+  History,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload
+} from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -17,6 +27,7 @@ import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import type {
   CamposComercialesOt,
+  ComparacionExcel,
   OtDetalleOut,
   OtExcel,
   OtMaterialPendiente,
@@ -138,6 +149,120 @@ function sumarPrecioTotal(ptUsd: string, precioClise: string): string {
   return total.toFixed(2)
 }
 
+/** Un material pendiente se puede corregir o quitar mientras no tenga nada
+ * físico de por medio todavía (ni materia prima cargada ni un ingreso a
+ * almacén) — típicamente para arreglar un error de tipeo que vino del Excel
+ * (código equivocado, cantidad mal puesta). Una vez que hay movimiento real,
+ * el backend rechaza el cambio y acá ni se ofrece el botón. */
+function FilaPendienteExistente({
+  pendiente,
+  materialOptions,
+  onCambiado
+}: {
+  pendiente: OtMaterialPendiente
+  materialOptions: { value: string; label: string }[]
+  onCambiado: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [editando, setEditando] = useState(false)
+  const [materialId, setMaterialId] = useState(pendiente.material_id != null ? String(pendiente.material_id) : '')
+  const [cantidad, setCantidad] = useState(
+    pendiente.cantidad_requerida != null ? String(pendiente.cantidad_requerida) : ''
+  )
+  const [error, setError] = useState<string | null>(null)
+
+  const bloqueado = pendiente.materias_primas.length > 0 || pendiente.total_ingresado > 0
+
+  const editar = useMutation({
+    mutationFn: () =>
+      api.editarPendiente(apiBaseUrl, token, pendiente.id, {
+        material_id: materialId ? Number(materialId) : undefined,
+        cantidad_requerida: cantidad ? Number(cantidad) : undefined
+      }),
+    onSuccess: () => {
+      setEditando(false)
+      setError(null)
+      onCambiado()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo guardar')
+  })
+
+  const eliminar = useMutation({
+    mutationFn: () => api.eliminarPendiente(apiBaseUrl, token, pendiente.id),
+    onSuccess: onCambiado,
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
+  })
+
+  function handleEliminar() {
+    if (!confirm(`¿Eliminar ${pendiente.codigo_mp} de esta OT?`)) return
+    eliminar.mutate()
+  }
+
+  if (editando) {
+    return (
+      <li className="flex flex-col gap-1.5 rounded-md border border-border bg-background p-2">
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Buscar código MP..."
+          emptyText="Sin materiales activos que coincidan"
+        />
+        <Input
+          type="number"
+          step="0.01"
+          value={cantidad}
+          onChange={(e) => setCantidad(e.target.value)}
+          placeholder="Cantidad"
+        />
+        {error && <p className="text-xs text-destructive">{error}</p>}
+        <div className="flex gap-2">
+          <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
+            {editar.isPending ? 'Guardando...' : 'Guardar'}
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => setEditando(false)}>
+            Cancelar
+          </Button>
+        </div>
+      </li>
+    )
+  }
+
+  return (
+    <li className="flex items-center justify-between gap-2">
+      <span>
+        {pendiente.codigo_mp}
+        {pendiente.cantidad_requerida != null ? ` — ${pendiente.cantidad_requerida}` : ''}
+      </span>
+      {bloqueado ? (
+        <span className="text-xs text-muted-foreground">ya tiene materia prima/ingreso registrado</span>
+      ) : (
+        <span className="flex shrink-0 items-center gap-1">
+          {error && <span className="text-xs text-destructive">{error}</span>}
+          <button
+            type="button"
+            onClick={() => setEditando(true)}
+            className="p-1 text-muted-foreground hover:text-foreground"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            disabled={eliminar.isPending}
+            onClick={handleEliminar}
+            className="p-1 text-muted-foreground hover:text-destructive"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </span>
+      )}
+    </li>
+  )
+}
+
 export function DetalleOt() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -157,6 +282,7 @@ export function DetalleOt() {
   const [procesosExistentes, setProcesosExistentes] = useState<ProcesoDetalleOut[]>([])
   const [pendientesExistentes, setPendientesExistentes] = useState<OtMaterialPendiente[]>([])
   const [syncExcel, setSyncExcel] = useState<{ ok: boolean; error: string | null } | null>(null)
+  const [comparacion, setComparacion] = useState<ComparacionExcel | null>(null)
 
   const [searchParams] = useSearchParams()
   const autoCargadoRef = useRef(false)
@@ -175,6 +301,7 @@ export function DetalleOt() {
   function cargarDesdeDetalle(detalle: OtDetalleOut) {
     setOrigenCargado('bd')
     setDatosExcel(null)
+    setComparacion(null)
     setCliente(detalle.cliente ?? '')
     setDiseno(detalle.diseno ?? '')
     setComerciales(comercialesDesdeApi(detalle))
@@ -182,6 +309,13 @@ export function DetalleOt() {
     setPendientesExistentes(detalle.pendientes)
     setMaterialesForm([filaMaterialVacia()])
     setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
+  }
+
+  // Después de editar/eliminar un pendiente hace falta la lista al día —
+  // simplemente vuelve a traer la OT completa y refresca todo con eso.
+  async function recargarOt() {
+    const detalle = await api.obtenerDetalleOt(apiBaseUrl, token, numeroOt)
+    cargarDesdeDetalle(detalle)
   }
 
   const cargar = useMutation({
@@ -270,6 +404,29 @@ export function DetalleOt() {
     onSuccess: (detalle) => setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
   })
 
+  // El Excel sigue siendo el sistema principal del cliente para muchos
+  // datos que no vive en sistema-mp — esto es de solo lectura, muestra qué
+  // cambió antes de traer nada. Aplicar es un paso aparte y explícito.
+  const compararExcel = useMutation({
+    mutationFn: () => api.compararConExcel(apiBaseUrl, token, numeroOt),
+    onSuccess: (resultado) => {
+      setError(null)
+      setComparacion(resultado)
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo comparar con el Excel')
+  })
+
+  const aplicarExcel = useMutation({
+    mutationFn: () => api.aplicarCambiosExcel(apiBaseUrl, token, numeroOt),
+    onSuccess: (detalle) => {
+      setError(null)
+      setComparacion(null)
+      cargarDesdeDetalle(detalle)
+      queryClient.invalidateQueries({ queryKey: ['consumo', numeroOt] })
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudieron aplicar los cambios')
+  })
+
   function actualizarFilaMaterial(i: number, cambios: Partial<FilaMaterial>) {
     setMaterialesForm(materialesForm.map((f, idx) => (idx === i ? { ...f, ...cambios } : f)))
   }
@@ -287,7 +444,9 @@ export function DetalleOt() {
   return (
     <div className="max-w-3xl">
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Crear OT</h1>
+        <h1 className="text-2xl font-semibold">
+          {origenCargado === 'bd' ? `Editando OT ${numeroOt}` : 'Crear OT'}
+        </h1>
         <Link
           to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
           className="flex items-center gap-1.5 text-sm text-primary hover:underline"
@@ -298,8 +457,10 @@ export function DetalleOt() {
       </div>
 
       <p className="mb-6 text-sm text-muted-foreground">
-        Define el cliente, el diseño y los materiales que necesita esta OT, con su cantidad. El proceso y la
-        máquina de cada material se asignan después, en "Registrar Entrega", en el momento de entregarlo.
+        {origenCargado === 'bd'
+          ? 'Esta OT ya existe: podés agregar materiales nuevos abajo, o corregir/eliminar los que ya tiene con el lápiz y el tacho de cada uno.'
+          : 'Define el cliente, el diseño y los materiales que necesita esta OT, con su cantidad. El proceso y la ' +
+            'máquina de cada material se asignan después, en "Registrar Entrega", en el momento de entregarlo.'}
       </p>
 
       {materiales.isError && (
@@ -406,10 +567,12 @@ export function DetalleOt() {
           </p>
           <ul className="mb-2 flex flex-col gap-0.5 text-muted-foreground">
             {pendientesExistentes.map((p) => (
-              <li key={p.id}>
-                {p.codigo_mp}
-                {p.cantidad_requerida != null ? ` — ${p.cantidad_requerida}` : ''}
-              </li>
+              <FilaPendienteExistente
+                key={p.id}
+                pendiente={p}
+                materialOptions={materialOptions}
+                onCambiado={recargarOt}
+              />
             ))}
           </ul>
           <p className="text-muted-foreground">
@@ -436,6 +599,82 @@ export function DetalleOt() {
             )}
           </ul>
         </div>
+      )}
+
+      {origenCargado === 'bd' && (
+        <Card className="mb-6">
+          <CardContent className="flex flex-col gap-3 pt-6">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <p className="text-sm font-medium">¿El cliente siguió editando esta OT en el Excel?</p>
+                <p className="text-xs text-muted-foreground">
+                  Compará contra su fila en "oc mp" y revisá las diferencias antes de traerlas al sistema.
+                </p>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={compararExcel.isPending}
+                onClick={() => compararExcel.mutate()}
+              >
+                {compararExcel.isPending ? 'Comparando...' : 'Comparar con Excel'}
+              </Button>
+            </div>
+
+            {comparacion && !comparacion.encontrado_en_excel && (
+              <p className="text-sm text-muted-foreground">Esta OT no se encontró en el Excel OC-MP.</p>
+            )}
+
+            {comparacion &&
+              comparacion.encontrado_en_excel &&
+              comparacion.diferencias_comerciales.length === 0 &&
+              comparacion.materiales_nuevos.length === 0 && (
+                <p className="text-sm text-muted-foreground">Sin diferencias — el sistema ya tiene lo último del Excel.</p>
+              )}
+
+            {comparacion &&
+              (comparacion.diferencias_comerciales.length > 0 || comparacion.materiales_nuevos.length > 0) && (
+                <div className="flex flex-col gap-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
+                  {comparacion.diferencias_comerciales.length > 0 && (
+                    <div>
+                      <p className="mb-1 font-medium text-warning">Datos comerciales distintos</p>
+                      <ul className="flex flex-col gap-0.5 text-muted-foreground">
+                        {comparacion.diferencias_comerciales.map((d) => (
+                          <li key={d.campo}>
+                            {d.etiqueta}: <span className="line-through">{d.valor_sistema ?? '(vacío)'}</span> →{' '}
+                            <span className="font-medium text-foreground">{d.valor_excel ?? '(vacío)'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {comparacion.materiales_nuevos.length > 0 && (
+                    <div>
+                      <p className="mb-1 font-medium text-warning">Materiales del Excel que el sistema no tiene</p>
+                      <ul className="flex flex-col gap-0.5 text-muted-foreground">
+                        {comparacion.materiales_nuevos.map((m) => (
+                          <li key={m.codigo_mp}>
+                            {m.codigo_mp}
+                            {m.cantidad_requerida != null ? ` — ${m.cantidad_requerida}` : ''}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="self-start"
+                    disabled={aplicarExcel.isPending}
+                    onClick={() => aplicarExcel.mutate()}
+                  >
+                    {aplicarExcel.isPending ? 'Aplicando...' : 'Aplicar cambios del Excel'}
+                  </Button>
+                </div>
+              )}
+          </CardContent>
+        </Card>
       )}
 
       <Card>

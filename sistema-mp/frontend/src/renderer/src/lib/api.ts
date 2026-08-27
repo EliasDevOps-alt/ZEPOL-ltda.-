@@ -1,9 +1,11 @@
 import type {
   BalanceMaterial,
+  ComparacionExcel,
   ConfiguracionExcel,
   Consumo,
   Devolucion,
   DevolucionCreate,
+  EditarMaterialPedidoIn,
   Entrega,
   EntregaCreate,
   EstadoSid,
@@ -16,6 +18,7 @@ import type {
   Material,
   MaterialAdmin,
   MaterialCreate,
+  MaterialPedidoOut,
   MaterialUpdate,
   OrdenTrabajo,
   OtBusqueda,
@@ -186,6 +189,21 @@ export function reintentarSincronizacionExcel(baseUrl: string, token: string, nu
   })
 }
 
+// Compara la OT (ya en la base) contra su fila del Excel OC-MP, de solo
+// lectura — para revisar qué cambió antes de traerlo.
+export function compararConExcel(baseUrl: string, token: string, numeroOt: string) {
+  return request<ComparacionExcel>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/comparar-excel`, {
+    token
+  })
+}
+
+export function aplicarCambiosExcel(baseUrl: string, token: string, numeroOt: string) {
+  return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/aplicar-excel`, {
+    method: 'POST',
+    token
+  })
+}
+
 export function listarPendientes(baseUrl: string, token: string, numeroOt: string) {
   return request<OtMaterialPendiente[]>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/pendientes`, {
     token
@@ -198,6 +216,35 @@ export function promoverPendiente(baseUrl: string, token: string, pendienteId: n
     token,
     body: data
   })
+}
+
+// Corregir un pendiente (todavía sin proceso/máquina) — típico error de
+// tipeo del Excel. Se rechaza si ya se le cargó materia prima o un ingreso.
+export function editarPendiente(baseUrl: string, token: string, pendienteId: number, data: EditarMaterialPedidoIn) {
+  return request<OtMaterialPendiente>(baseUrl, `/ot-materiales-pendientes/${pendienteId}`, {
+    method: 'PATCH',
+    token,
+    body: data
+  })
+}
+
+export function eliminarPendiente(baseUrl: string, token: string, pendienteId: number) {
+  return request<void>(baseUrl, `/ot-materiales-pendientes/${pendienteId}`, { method: 'DELETE', token })
+}
+
+// Igual que editarPendiente/eliminarPendiente pero para un pedido que ya
+// tiene proceso/máquina asignado — se rechaza si ya tiene entregas,
+// devoluciones o materia prima registrada.
+export function editarPedido(baseUrl: string, token: string, otMaterialId: number, data: EditarMaterialPedidoIn) {
+  return request<MaterialPedidoOut>(baseUrl, `/ot-materiales/${otMaterialId}`, {
+    method: 'PATCH',
+    token,
+    body: data
+  })
+}
+
+export function eliminarPedido(baseUrl: string, token: string, otMaterialId: number) {
+  return request<void>(baseUrl, `/ot-materiales/${otMaterialId}`, { method: 'DELETE', token })
 }
 
 export function consultarConsumo(baseUrl: string, token: string, numeroOt?: string) {

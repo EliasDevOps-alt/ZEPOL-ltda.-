@@ -142,6 +142,14 @@ export interface ProcesoDetalleOut {
   materiales: MaterialPedidoOut[]
 }
 
+// Corrige el material y/o la cantidad de un pendiente o de un pedido ya
+// asignado — se rechaza si ya tiene algún movimiento real (entregas,
+// devoluciones, materia prima, ingresos).
+export interface EditarMaterialPedidoIn {
+  material_id?: number | null
+  cantidad_requerida?: number | null
+}
+
 export interface OtDetalleOut extends CamposComercialesOt {
   numero_ot: string
   cliente: string | null
@@ -203,6 +211,21 @@ export interface OtBusqueda {
   origen: 'bd' | 'excel' | 'no_encontrada'
   bd: OtDetalleOut | null
   excel: OtExcel | null
+}
+
+export interface DiferenciaExcel {
+  campo: string
+  etiqueta: string
+  valor_sistema: string | null
+  valor_excel: string | null
+}
+
+// Resultado de comparar una OT que ya está en la base contra su fila en el
+// Excel OC-MP — de solo lectura, para revisar antes de traer los cambios.
+export interface ComparacionExcel {
+  encontrado_en_excel: boolean
+  diferencias_comerciales: DiferenciaExcel[]
+  materiales_nuevos: MaterialExcel[]
 }
 
 export interface MaquinaAdmin {

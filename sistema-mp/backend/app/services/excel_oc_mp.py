@@ -273,6 +273,20 @@ def _primera_fila_vacia(ws: Any) -> int:
     )
 
 
+def _buscar_fila_por_ot(ws: Any, numero_ot: str) -> Optional[int]:
+    """Fila donde ya está esta OT en 'oc mp', si existe — para actualizarla
+    en vez de agregar una fila duplicada. Mismo batch-read de
+    _primera_fila_vacia, por la misma razón de performance (una sola llamada
+    COM para todo el rango en vez de una por celda)."""
+    rango = ws.Range(ws.Cells(FILA_DATOS_INICIO, COL_OT), ws.Cells(FILA_BUSQUEDA_MAX, COL_OT))
+    valores = rango.Value
+    objetivo = numero_ot.strip()
+    for i, (v,) in enumerate(valores):
+        if _coincide_ot(v, objetivo):
+            return FILA_DATOS_INICIO + i
+    return None
+
+
 def escribir_oc_mp(
     db: Session,
     numero_ot: str,
@@ -280,11 +294,14 @@ def escribir_oc_mp(
     campos: Dict[str, Any],
     materiales: List[Dict[str, Any]],
 ) -> None:
-    """Agrega una fila nueva a 'oc mp' para una OT creada nativamente en
-    sistema-mp (nunca se llama para una OT que ya vino de Excel — ver
-    guardar_desde_excel, que no pasa por acá). Maneja el Excel real vía COM
-    (win32com) en vez de reescribir el .xlsx con openpyxl, para no arriesgar
-    las fórmulas de 'oc resumen'/'oc i-pt'/'oc s-pt' que leen esta hoja.
+    """Escribe esta OT en 'oc mp': si ya tiene una fila (la OT vino de Excel
+    originalmente, o ya se sincronizó antes) la ACTUALIZA; si no, agrega una
+    fila nueva. Se llama tanto al crear la OT en sistema-mp como cada vez que
+    se le agregan materiales o se editan sus datos comerciales después — así
+    el Excel no queda congelado en el estado del momento de la creación.
+    Maneja el Excel real vía COM (win32com) en vez de reescribir el .xlsx con
+    openpyxl, para no arriesgar las fórmulas de 'oc resumen'/'oc i-pt'/
+    'oc s-pt' que leen esta hoja.
 
     Lanza ExcelBloqueadoError si el archivo está en uso en otro lado
     (reintentable) o ExcelEscrituraError para cualquier otro fallo (no
@@ -355,7 +372,8 @@ def escribir_oc_mp(
                 except Exception as exc:
                     raise ExcelEscrituraError(f"No se encontró la hoja '{HOJA}': {exc}") from exc
 
-                fila = _con_reintentos(lambda: _primera_fila_vacia(ws))
+                fila_existente = _con_reintentos(lambda: _buscar_fila_por_ot(ws, numero_ot))
+                fila = fila_existente if fila_existente is not None else _con_reintentos(lambda: _primera_fila_vacia(ws))
 
                 def _escribir_celdas() -> None:
                     ws.Cells(fila, COL_OT).Value = numero_ot
@@ -365,10 +383,18 @@ def escribir_oc_mp(
                         valor = campos.get(campo)
                         if valor is not None:
                             ws.Cells(fila, col).Value = _valor_com(valor)
-                    for (col_codigo, col_cantidad), material in zip(COLS_MATERIALES, materiales):
-                        ws.Cells(fila, col_codigo).Value = material["codigo_mp"]
-                        if material.get("cantidad_requerida") is not None:
-                            ws.Cells(fila, col_cantidad).Value = material["cantidad_requerida"]
+                    for i, (col_codigo, col_cantidad) in enumerate(COLS_MATERIALES):
+                        if i < len(materiales):
+                            material = materiales[i]
+                            ws.Cells(fila, col_codigo).Value = material["codigo_mp"]
+                            if material.get("cantidad_requerida") is not None:
+                                ws.Cells(fila, col_cantidad).Value = material["cantidad_requerida"]
+                        elif fila_existente is not None:
+                            # Solo limpiamos slots sobrantes al ACTUALIZAR una
+                            # fila que ya existía — en una fila nueva ya están
+                            # vacíos, no hace falta la escritura de más.
+                            ws.Cells(fila, col_codigo).Value = None
+                            ws.Cells(fila, col_cantidad).Value = None
 
                 # Reintentable sin riesgo: la fila ya quedó fija arriba, así
                 # que repetir esta escritura solo vuelve a poner los mismos

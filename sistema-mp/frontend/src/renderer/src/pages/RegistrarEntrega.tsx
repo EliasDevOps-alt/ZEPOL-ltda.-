@@ -725,6 +725,112 @@ function MoverPedido({
   )
 }
 
+/** Corregir el material o la cantidad de un pedido ya asignado a un proceso
+ * — para el mismo tipo de error de tipeo del Excel que ya se puede arreglar
+ * en un pendiente (ver DetalleOt.tsx), pero para cuando el material ya se
+ * promovió. Se bloquea (ni se ofrece el botón) en cuanto el pedido tiene
+ * algo real registrado — entregas, devoluciones o materia prima — porque
+ * ahí ya no es "solo un dato pedido", es material que se movió de verdad. */
+function EditarPedido({
+  pedido,
+  materialOptions,
+  onEditado,
+  onEliminado
+}: {
+  pedido: Consumo
+  materialOptions: { value: string; label: string }[]
+  onEditado: () => void
+  onEliminado: () => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [abierto, setAbierto] = useState(false)
+  const [materialId, setMaterialId] = useState('')
+  const [cantidad, setCantidad] = useState(
+    pedido.cantidad_requerida != null ? String(pedido.cantidad_requerida) : ''
+  )
+  const [error, setError] = useState<string | null>(null)
+
+  const editar = useMutation({
+    mutationFn: () =>
+      api.editarPedido(apiBaseUrl, token, pedido.ot_material_id, {
+        material_id: materialId ? Number(materialId) : undefined,
+        cantidad_requerida: cantidad ? Number(cantidad) : undefined
+      }),
+    onSuccess: () => {
+      setAbierto(false)
+      setError(null)
+      onEditado()
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo guardar')
+  })
+
+  const eliminar = useMutation({
+    mutationFn: () => api.eliminarPedido(apiBaseUrl, token, pedido.ot_material_id),
+    onSuccess: onEliminado,
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
+  })
+
+  function handleEliminar() {
+    if (!confirm(`¿Eliminar el pedido de ${pedido.codigo_mp}? Esta acción no se puede deshacer.`)) return
+    eliminar.mutate()
+  }
+
+  if (!abierto) {
+    return (
+      <div className="mt-3 flex items-center gap-3">
+        <button type="button" onClick={() => setAbierto(true)} className="text-xs text-primary hover:underline">
+          Corregir material/cantidad
+        </button>
+        <button
+          type="button"
+          disabled={eliminar.isPending}
+          onClick={handleEliminar}
+          className="text-xs text-destructive hover:underline"
+        >
+          {eliminar.isPending ? 'Eliminando...' : 'Eliminar pedido'}
+        </button>
+        {error && <span className="text-xs text-destructive">{error}</span>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
+      <p className="mb-2 text-xs text-muted-foreground">
+        Corregir {pedido.codigo_mp} — por ejemplo si el código o la cantidad vinieron mal del Excel:
+      </p>
+      <div className="flex flex-col gap-2">
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Nuevo material (dejalo vacío para no cambiarlo)"
+          emptyText="Sin materiales activos que coincidan"
+        />
+        <Input
+          type="number"
+          step="0.01"
+          value={cantidad}
+          onChange={(e) => setCantidad(e.target.value)}
+          placeholder="Cantidad"
+        />
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
+          {editar.isPending ? 'Guardando...' : 'Guardar'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAbierto(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function PedidoEntregaCard({
   pedido,
   seleccion,
@@ -788,6 +894,21 @@ function PedidoEntregaCard({
       />
 
       <MoverPedido pedido={pedido} procesos={procesos} onMovido={onMovido} />
+
+      {pedido.total_entregado === 0 &&
+        pedido.total_devuelto === 0 &&
+        pedido.total_ingresado === 0 &&
+        !pedido.tiene_materia_prima && (
+          <EditarPedido
+            pedido={pedido}
+            materialOptions={materialOptions}
+            onEditado={onMovido}
+            onEliminado={() => {
+              onQuitar()
+              onMovido()
+            }}
+          />
+        )}
     </div>
   )
 }

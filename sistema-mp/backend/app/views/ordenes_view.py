@@ -20,6 +20,15 @@ router_pendientes = APIRouter(
     tags=["ordenes-trabajo"],
     dependencies=[Depends(security.requiere_modulo("registrar_entrega"))],
 )
+# Editar/eliminar un pendiente es corregir un error de tipeo del Excel (o de
+# Crear OT) antes de que se le asigne proceso — va con el módulo de Crear OT,
+# no con el de Registrar Entrega, por eso es un router aparte con el mismo
+# prefijo en vez de sumar rutas al de arriba.
+router_pendientes_crear_ot = APIRouter(
+    prefix="/ot-materiales-pendientes",
+    tags=["ordenes-trabajo"],
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
 # Corregir el proceso/máquina de un pedido ya creado. Va con el módulo de
 # entregas porque es ahí donde se asigna el proceso y donde se descubre el
 # error, no en Crear OT.
@@ -129,6 +138,21 @@ def importar_desde_excel(numero_ot: str, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{numero_ot}/comparar-excel", response_model=schemas.ComparacionExcelOut)
+def comparar_excel(numero_ot: str, db: Session = Depends(get_db)):
+    return ordenes_controller.comparar_con_excel(db, numero_ot)
+
+
+@router.post(
+    "/{numero_ot}/aplicar-excel",
+    response_model=schemas.OtDetalleOut,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
+def aplicar_excel(numero_ot: str, db: Session = Depends(get_db)):
+    ot = ordenes_controller.aplicar_cambios_excel(db, numero_ot)
+    return _serializar_detalle(ot)
+
+
 @router.get("/{numero_ot}/pendientes", response_model=List[schemas.OtMaterialPendienteOut])
 def listar_pendientes(numero_ot: str, db: Session = Depends(get_db)):
     pendientes = ordenes_controller.listar_pendientes(db, numero_ot)
@@ -151,6 +175,17 @@ def promover_pendiente(pendiente_id: int, data: schemas.PromoverPendienteIn, db:
     return schemas.PromoverPendienteOut(ot_material_id=ot_material.id)
 
 
+@router_pendientes_crear_ot.patch("/{pendiente_id}", response_model=schemas.OtMaterialPendienteOut)
+def editar_pendiente(pendiente_id: int, data: schemas.EditarMaterialPedidoIn, db: Session = Depends(get_db)):
+    pendiente = ordenes_controller.actualizar_pendiente(db, pendiente_id, data.material_id, data.cantidad_requerida)
+    return _serializar_pendiente(pendiente)
+
+
+@router_pendientes_crear_ot.delete("/{pendiente_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_pendiente(pendiente_id: int, db: Session = Depends(get_db)):
+    ordenes_controller.eliminar_pendiente(db, pendiente_id)
+
+
 @router_pedidos.patch("/{ot_material_id}/proceso", response_model=schemas.MoverPedidoOut)
 def mover_pedido(ot_material_id: int, data: schemas.MoverPedidoIn, db: Session = Depends(get_db)):
     """Mueve un pedido a otro proceso/máquina de la misma OT, con todo lo que
@@ -161,3 +196,29 @@ def mover_pedido(ot_material_id: int, data: schemas.MoverPedidoIn, db: Session =
         proceso=ot_material.ot_proceso.proceso.nombre,
         maquina=ot_material.ot_proceso.maquina.nombre,
     )
+
+
+def _serializar_material_pedido(om) -> schemas.MaterialPedidoOut:
+    return schemas.MaterialPedidoOut(
+        ot_material_id=om.id,
+        material_id=om.material_id,
+        codigo_mp=om.material.codigo_mp,
+        unidad=om.material.unidad,
+        cantidad_requerida=float(om.cantidad_requerida) if om.cantidad_requerida else None,
+        total_entregado=total_entregado_pedido(om),
+        total_devuelto=total_devuelto_pedido(om),
+    )
+
+
+@router_pedidos.patch("/{ot_material_id}", response_model=schemas.MaterialPedidoOut)
+def editar_pedido(ot_material_id: int, data: schemas.EditarMaterialPedidoIn, db: Session = Depends(get_db)):
+    """Corrige el material o la cantidad de un pedido ya asignado a un
+    proceso — rechazado si ya tiene entregas/devoluciones/materia prima
+    registrada (ver ordenes_controller.actualizar_pedido)."""
+    ot_material = ordenes_controller.actualizar_pedido(db, ot_material_id, data.material_id, data.cantidad_requerida)
+    return _serializar_material_pedido(ot_material)
+
+
+@router_pedidos.delete("/{ot_material_id}", status_code=status.HTTP_204_NO_CONTENT)
+def eliminar_pedido(ot_material_id: int, db: Session = Depends(get_db)):
+    ordenes_controller.eliminar_pedido(db, ot_material_id)

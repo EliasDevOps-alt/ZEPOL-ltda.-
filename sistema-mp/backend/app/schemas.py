@@ -279,6 +279,25 @@ class OtBusquedaOut(BaseModel):
     excel: Optional[OtExcelOut] = None
 
 
+class DiferenciaExcelOut(BaseModel):
+    """Un campo comercial donde el Excel OC-MP y la base de datos ya no
+    coinciden — para mostrar antes de aplicar nada."""
+
+    campo: str
+    etiqueta: str
+    valor_sistema: Optional[str] = None
+    valor_excel: Optional[str] = None
+
+
+class ComparacionExcelOut(BaseModel):
+    """Resultado de comparar una OT que ya está en la base de datos contra su
+    fila en el Excel OC-MP — para revisar antes de traer esos cambios."""
+
+    encontrado_en_excel: bool
+    diferencias_comerciales: List[DiferenciaExcelOut] = []
+    materiales_nuevos: List[MaterialExcelOut] = []
+
+
 class OtImportadaOut(BaseModel):
     """Resultado de importar una OT desde el Excel OC-MP: la OT ya creada
     (con sus campos comerciales) y los materiales que quedaron pendientes de
@@ -307,6 +326,17 @@ class MoverPedidoOut(BaseModel):
     ot_material_id: int
     proceso: str
     maquina: str
+
+
+class EditarMaterialPedidoIn(BaseModel):
+    """Corrige el material y/o la cantidad de un pendiente o de un pedido ya
+    asignado — ambos campos opcionales, se cambia solo lo que venga. Se
+    rechaza si el pedido/pendiente ya tiene algún movimiento real (entregas,
+    devoluciones, materia prima, ingresos) — ver
+    ordenes_controller._bloquear_si_*_tiene_movimientos."""
+
+    material_id: Optional[int] = None
+    cantidad_requerida: Optional[float] = None
 
 
 class EntregaCreate(BaseModel):
