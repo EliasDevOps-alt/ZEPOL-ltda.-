@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import schemas, security
-from ..controllers import entregas_controller
+from ..controllers import entregas_controller, sid_controller
 from ..controllers.pedidos_controller import materiales_entregados_pedido, total_entregado_pedido
 from ..database import get_db
 from ..models import Entrega, OtMaterial, Usuario
@@ -35,6 +35,8 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         material_entregado_id=entrega.material_id,
         codigo_mp_entregado=entrega.material.codigo_mp,
         descripcion_entregado=entrega.material.descripcion,
+        usa_bobinas=entrega.material.usa_bobinas,
+        sid_completado=entrega.sid_completado,
         observacion=entrega.observacion,
         pedido_creado=pedido_creado,
     )
@@ -59,6 +61,26 @@ def registrar_entrega(
 def listar_entregas(numero_ot: Optional[str] = None, db: Session = Depends(get_db)):
     entregas = entregas_controller.listar_entregas_por_ot(db, numero_ot)
     return [_serializar(e) for e in entregas]
+
+
+@router.post(
+    "/{entrega_id}/sid/completado",
+    response_model=schemas.EntregaOut,
+    dependencies=[Depends(security.requiere_modulo("registro_sid"))],
+)
+def marcar_sid_completado(entrega_id: int, db: Session = Depends(get_db)):
+    entrega = sid_controller.marcar_entrega_sid(db, entrega_id, True)
+    return _serializar(entrega)
+
+
+@router.post(
+    "/{entrega_id}/sid/pendiente",
+    response_model=schemas.EntregaOut,
+    dependencies=[Depends(security.requiere_modulo("registro_sid"))],
+)
+def marcar_sid_pendiente(entrega_id: int, db: Session = Depends(get_db)):
+    entrega = sid_controller.marcar_entrega_sid(db, entrega_id, False)
+    return _serializar(entrega)
 
 
 @router.get("/materiales-entregados/{ot_material_id}", response_model=List[schemas.BalanceMaterialOut])

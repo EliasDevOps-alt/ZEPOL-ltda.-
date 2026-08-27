@@ -17,7 +17,7 @@ from ..models import (
     OtProceso,
     Usuario,
 )
-from . import ordenes_controller
+from . import ordenes_controller, sid_controller
 
 
 def _validar_materia_prima(data: schemas.EntregaCreate) -> None:
@@ -84,6 +84,11 @@ def registrar_entrega(db: Session, usuario: Usuario, data: schemas.EntregaCreate
     )
     entrega.bobinas = [EntregaBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(entrega)
+    db.flush()
+    # Esta entrega recién creada nunca tiene su SID registrado todavía, así
+    # que el pedido vuelve a quedar pendiente aunque las anteriores ya
+    # estuvieran completas.
+    sid_controller.recalcular_estado_entrega(db, pedido)
     db.commit()
     db.refresh(entrega)
     return entrega, pedido_creado

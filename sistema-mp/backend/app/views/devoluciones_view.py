@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
 from .. import schemas, security
-from ..controllers import devoluciones_controller
+from ..controllers import devoluciones_controller, sid_controller
 from ..controllers.pedidos_controller import total_devuelto_pedido, total_ingresado_pendiente
 from ..database import get_db
 from ..models import Devolucion, Usuario
@@ -30,6 +30,8 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
             if devolucion.ot_material is not None
             else total_ingresado_pendiente(devolucion.ot_material_pendiente)
         ),
+        usa_bobinas=devolucion.material.usa_bobinas,
+        sid_completado=devolucion.sid_completado,
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
     )
 
@@ -46,6 +48,26 @@ def registrar_devolucion(
     usuario: Usuario = Depends(security.get_current_usuario),
 ):
     devolucion = devoluciones_controller.registrar_devolucion(db, usuario, data)
+    return _serializar(devolucion)
+
+
+@router.post(
+    "/{devolucion_id}/sid/completado",
+    response_model=schemas.DevolucionOut,
+    dependencies=[Depends(security.requiere_modulo("registro_sid"))],
+)
+def marcar_sid_completado(devolucion_id: int, db: Session = Depends(get_db)):
+    devolucion = sid_controller.marcar_devolucion_sid(db, devolucion_id, True)
+    return _serializar(devolucion)
+
+
+@router.post(
+    "/{devolucion_id}/sid/pendiente",
+    response_model=schemas.DevolucionOut,
+    dependencies=[Depends(security.requiere_modulo("registro_sid"))],
+)
+def marcar_sid_pendiente(devolucion_id: int, db: Session = Depends(get_db)):
+    devolucion = sid_controller.marcar_devolucion_sid(db, devolucion_id, False)
     return _serializar(devolucion)
 
 

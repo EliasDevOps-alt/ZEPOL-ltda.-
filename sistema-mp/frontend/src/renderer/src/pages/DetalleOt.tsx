@@ -454,7 +454,17 @@ export function DetalleOt() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label>OT</Label>
-                <Input value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="2121" />
+                <Input
+                  value={numeroOt}
+                  onChange={(e) => setNumeroOt(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault()
+                      if (numeroOt && !cargar.isPending) cargar.mutate()
+                    }
+                  }}
+                  placeholder="2121"
+                />
               </div>
               <div className="flex items-end">
                 <Button

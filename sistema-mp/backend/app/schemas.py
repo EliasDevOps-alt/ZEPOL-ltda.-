@@ -91,16 +91,6 @@ class EstadoSidOut(BaseModel):
     nombre: str
 
 
-class EstadoSidUpdateOut(BaseModel):
-    ot_material_id: int
-    estado_sid: str
-
-
-class SidDevolucionUpdateOut(BaseModel):
-    ot_material_id: int
-    sid_devolucion_completado: bool
-
-
 class MaquinaAdminOut(BaseModel):
     id: int
     nombre: str
@@ -373,6 +363,8 @@ class EntregaOut(BaseModel):
     material_entregado_id: int
     codigo_mp_entregado: str
     descripcion_entregado: Optional[str]
+    usa_bobinas: bool
+    sid_completado: bool
     observacion: Optional[str] = None
     # ot_material_id/proceso/maquina/codigo_mp de arriba son los del pedido
     # donde REALMENTE quedó la entrega, que con como_materia_prima no es el
@@ -425,6 +417,8 @@ class DevolucionOut(BaseModel):
     bobinas: List[float]
     total_devuelto: float
     total_devuelto_pedido: float
+    usa_bobinas: bool
+    sid_completado: bool
     es_ingreso_produccion: bool
 
 

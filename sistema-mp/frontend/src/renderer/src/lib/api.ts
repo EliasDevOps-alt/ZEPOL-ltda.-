@@ -7,7 +7,6 @@ import type {
   Entrega,
   EntregaCreate,
   EstadoSid,
-  EstadoSidUpdate,
   Maquina,
   MaquinaAdmin,
   MaquinaCreate,
@@ -27,7 +26,6 @@ import type {
   Proceso,
   PromoverPendienteIn,
   PromoverPendienteOut,
-  SidDevolucionUpdate,
   Usuario,
   UsuarioAdmin,
   UsuarioCreate,
@@ -261,30 +259,20 @@ export function actualizarPasswordExcel(baseUrl: string, token: string, password
   })
 }
 
-export function marcarSidCompletado(baseUrl: string, token: string, otMaterialId: number) {
-  return request<EstadoSidUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid/completado`, {
-    method: 'POST',
-    token
-  })
+// El SID se tramita día por día, así que el check vive en cada movimiento
+// (entrega/devolución puntual), no en el pedido — ver RegistroSid.tsx.
+export function marcarSidEntregaCompletado(baseUrl: string, token: string, entregaId: number) {
+  return request<Entrega>(baseUrl, `/entregas/${entregaId}/sid/completado`, { method: 'POST', token })
 }
 
-export function marcarSidPendiente(baseUrl: string, token: string, otMaterialId: number) {
-  return request<EstadoSidUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid/pendiente`, {
-    method: 'POST',
-    token
-  })
+export function marcarSidEntregaPendiente(baseUrl: string, token: string, entregaId: number) {
+  return request<Entrega>(baseUrl, `/entregas/${entregaId}/sid/pendiente`, { method: 'POST', token })
 }
 
-export function marcarSidDevolucionCompletado(baseUrl: string, token: string, otMaterialId: number) {
-  return request<SidDevolucionUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid-devolucion/completado`, {
-    method: 'POST',
-    token
-  })
+export function marcarSidDevolucionCompletado(baseUrl: string, token: string, devolucionId: number) {
+  return request<Devolucion>(baseUrl, `/devoluciones/${devolucionId}/sid/completado`, { method: 'POST', token })
 }
 
-export function marcarSidDevolucionPendiente(baseUrl: string, token: string, otMaterialId: number) {
-  return request<SidDevolucionUpdate>(baseUrl, `/ot-materiales/${otMaterialId}/sid-devolucion/pendiente`, {
-    method: 'POST',
-    token
-  })
+export function marcarSidDevolucionPendiente(baseUrl: string, token: string, devolucionId: number) {
+  return request<Devolucion>(baseUrl, `/devoluciones/${devolucionId}/sid/pendiente`, { method: 'POST', token })
 }

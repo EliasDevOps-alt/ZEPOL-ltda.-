@@ -10,6 +10,7 @@ export interface BobinasPedido {
 export function CampoCantidad({
   unidad,
   usaBobinas = true,
+  requerido,
   datos,
   onChange
 }: {
@@ -17,15 +18,23 @@ export function CampoCantidad({
   // Propiedad del material (Material.usa_bobinas), no se adivina por el
   // texto de la unidad — ej. ZIPPER es "mts" pero NO usa bobinas.
   usaBobinas?: boolean
+  // Si se indica, se muestra junto a la etiqueta — algunos llamadores tienen
+  // una cantidad que puede quedar vacía (ej. el pedido cuya materia prima ya
+  // cubre la entrega), y sin esta aclaración no queda claro si hace falta.
+  requerido?: boolean
   datos: BobinasPedido
   onChange: (datos: BobinasPedido) => void
 }) {
   const total = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+  const sufijo = requerido === undefined ? '' : requerido ? ' (obligatorio)' : ' (opcional)'
 
   if (!usaBobinas) {
     return (
       <div className="flex flex-col gap-1.5">
-        <Label>Cantidad {unidad ? `(${unidad})` : ''}</Label>
+        <Label>
+          Cantidad {unidad ? `(${unidad})` : ''}
+          {sufijo}
+        </Label>
         <Input
           type="number"
           step="0.01"
@@ -41,7 +50,7 @@ export function CampoCantidad({
     <>
       <div className="flex items-end gap-2">
         <div className="flex flex-1 flex-col gap-1.5">
-          <Label>Cantidad de bobinas</Label>
+          <Label>Cantidad de bobinas{sufijo}</Label>
           <Input
             type="number"
             min={1}

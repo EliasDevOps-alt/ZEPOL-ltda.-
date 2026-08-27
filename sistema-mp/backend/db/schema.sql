@@ -225,6 +225,12 @@ CREATE TABLE entregas (
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
     observacion    TEXT,     -- nota opcional del operador, ej. motivo de una sustitución
+    -- SID de ESTE movimiento puntual, no del pedido: el ingeniero tramita el
+    -- SID día por día, así que cada entrega necesita su propio check. El
+    -- agregado ot_materiales.estado_sid_id se recalcula automáticamente a
+    -- partir de estos (ver sid_controller.recalcular_estado_entrega) — nunca
+    -- se marca completado si hay una entrega nueva sin registrar.
+    sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
     creado_en      TIMESTAMP NOT NULL DEFAULT now()
 );
 
@@ -269,6 +275,9 @@ CREATE TABLE devoluciones (
     es_ingreso_produccion BOOLEAN NOT NULL DEFAULT FALSE,
     fecha          DATE      NOT NULL,
     hora           TIME      NOT NULL DEFAULT current_time,
+    -- SID de ESTE movimiento puntual — ver entregas.sid_completado. El
+    -- agregado ot_materiales.sid_devolucion_completado se recalcula solo.
+    sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
 
     CHECK ((ot_material_id IS NOT NULL) <> (ot_material_pendiente_id IS NOT NULL))

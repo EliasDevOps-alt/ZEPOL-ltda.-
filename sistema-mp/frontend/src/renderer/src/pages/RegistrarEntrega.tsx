@@ -81,7 +81,8 @@ function EntregaDelPedido({
   materiales,
   materialOptions,
   unidadPedido,
-  usaBobinasPedido
+  usaBobinasPedido,
+  requerido
 }: {
   datos: EntradaMaterial
   onChange: (datos: EntradaMaterial) => void
@@ -89,6 +90,9 @@ function EntregaDelPedido({
   materialOptions: { value: string; label: string }[]
   unidadPedido: string
   usaBobinasPedido: boolean
+  // Solo hace falta esta cantidad si no se va a cargar materia prima en su
+  // lugar — ver requiereAsignacion/validarSeleccion.
+  requerido?: boolean
 }) {
   const [cambiarMaterial, setCambiarMaterial] = useState(false)
   const material = materiales.find((m) => String(m.id) === datos.materialId)
@@ -109,7 +113,13 @@ function EntregaDelPedido({
           />
         </div>
       )}
-      <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={datos} onChange={(d) => onChange({ ...datos, ...d })} />
+      <CampoCantidad
+        unidad={unidad}
+        usaBobinas={usaBobinas}
+        requerido={requerido}
+        datos={datos}
+        onChange={(d) => onChange({ ...datos, ...d })}
+      />
       <Input
         className="mt-2"
         placeholder={
@@ -524,7 +534,7 @@ function PendienteCard({
 
       <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso (opcional)</Label>
+          <Label className="text-xs">Proceso {requiereAsignacion(seleccion) ? '(obligatorio)' : '(opcional)'}</Label>
           <Select value={form.procesoId} onValueChange={(v) => setForm({ ...form, procesoId: v, maquinaId: '' })}>
             <SelectTrigger>
               <SelectValue placeholder="Selecciona" />
@@ -539,7 +549,7 @@ function PendienteCard({
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina</Label>
+          <Label className="text-xs">Máquina {requiereAsignacion(seleccion) ? '(obligatorio)' : '(opcional)'}</Label>
           <Select
             value={form.maquinaId}
             onValueChange={(v) => setForm({ ...form, maquinaId: v })}
@@ -573,6 +583,7 @@ function PendienteCard({
         materialOptions={materialOptions}
         unidadPedido={materialPedido?.unidad ?? ''}
         usaBobinasPedido={materialPedido?.usa_bobinas ?? true}
+        requerido={!seleccion.materiasPrimas.some(tieneCantidad)}
       />
 
       <MateriasPrimas
@@ -765,6 +776,7 @@ function PedidoEntregaCard({
         materialOptions={materialOptions}
         unidadPedido={pedido.unidad}
         usaBobinasPedido={pedido.usa_bobinas}
+        requerido={!seleccion.materiasPrimas.some(tieneCantidad)}
       />
 
       <MateriasPrimas
@@ -834,6 +846,45 @@ export function RegistrarEntrega() {
   const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
+  // Listado de OT recientes a las que todavía les falta alguna entrega, para
+  // no obligar a escribir el número si no se lo sabe de memoria. Solo se
+  // muestra antes de buscar una OT puntual, para no competir con esa vista.
+  const otsRecientes = useQuery({
+    queryKey: ['ordenes-trabajo-recientes'],
+    queryFn: () => api.listarOrdenes(apiBaseUrl, token),
+    enabled: !otBuscada
+  })
+  const consumoTodo = useQuery({
+    queryKey: ['consumo-todo'],
+    queryFn: () => api.consultarConsumo(apiBaseUrl, token),
+    enabled: !otBuscada
+  })
+
+  const otsConEntregaPendiente = useMemo(() => {
+    // Una OT necesita entrega si tiene algún pedido sin completar, o si
+    // todavía no tiene ningún pedido (recién creada, sus materiales siguen
+    // como pendientes sin proceso/máquina asignado — ver Crear OT).
+    const conPedidos = new Set<string>()
+    const conPendiente = new Set<string>()
+    for (const p of consumoTodo.data ?? []) {
+      if (p.es_tinta) continue
+      conPedidos.add(p.numero_ot)
+      if (p.estado_entrega === 'PENDIENTE' || p.estado_entrega === 'PARCIAL') conPendiente.add(p.numero_ot)
+    }
+    return { conPedidos, conPendiente }
+  }, [consumoTodo.data])
+
+  const otsPendientesRecientes = useMemo(() => {
+    if (!otsRecientes.data) return []
+    return otsRecientes.data
+      .filter(
+        (ot) =>
+          otsConEntregaPendiente.conPendiente.has(ot.numero_ot) ||
+          !otsConEntregaPendiente.conPedidos.has(ot.numero_ot)
+      )
+      .slice(0, 15)
+  }, [otsRecientes.data, otsConEntregaPendiente])
+
   const materialOptions = useMemo(
     () =>
       (materiales.data ?? []).map((m) => ({
@@ -902,6 +953,13 @@ export function RegistrarEntrega() {
     setConfirmaciones([])
     setSeleccion({})
     setOtBuscada(numeroOt)
+  }
+
+  function seleccionarOtRecomendada(numero: string) {
+    setNumeroOt(numero)
+    setConfirmaciones([])
+    setSeleccion({})
+    setOtBuscada(numero)
   }
 
   function toggleSeleccion(pedido: Consumo) {
@@ -1077,6 +1135,35 @@ export function RegistrarEntrega() {
           )}
         </CardContent>
       </Card>
+
+      {!otBuscada && otsPendientesRecientes.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader>
+            <CardTitle>OT recientes con entregas pendientes</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-2">
+            {otsPendientesRecientes.map((ot) => (
+              <button
+                key={ot.id}
+                type="button"
+                onClick={() => seleccionarOtRecomendada(ot.numero_ot)}
+                className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-left text-sm transition-colors hover:bg-muted"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">OT {ot.numero_ot}</p>
+                  <p className="truncate text-muted-foreground">
+                    {ot.cliente ?? 'Sin cliente'}
+                    {ot.diseno ? ` · ${ot.diseno}` : ''}
+                  </p>
+                </div>
+                <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
+                  {new Date(ot.fecha_creacion).toLocaleDateString('es-BO')}
+                </span>
+              </button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {pendientesVisibles && pendientesVisibles.length > 0 && (
         <Card className="mb-6">

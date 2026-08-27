@@ -294,6 +294,8 @@ export interface Entrega {
   material_entregado_id: number
   codigo_mp_entregado: string
   descripcion_entregado: string | null
+  usa_bobinas: boolean
+  sid_completado: boolean
   observacion: string | null
   // ot_material_id/proceso/codigo_mp de arriba son los del pedido donde
   // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
@@ -348,6 +350,8 @@ export interface Devolucion {
   bobinas: number[]
   total_devuelto: number
   total_devuelto_pedido: number
+  usa_bobinas: boolean
+  sid_completado: boolean
   es_ingreso_produccion: boolean
 }
 
@@ -389,12 +393,3 @@ export interface Consumo {
   material_sustituido: boolean
 }
 
-export interface EstadoSidUpdate {
-  ot_material_id: number
-  estado_sid: string
-}
-
-export interface SidDevolucionUpdate {
-  ot_material_id: number
-  sid_devolucion_completado: boolean
-}

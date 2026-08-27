@@ -298,6 +298,10 @@ class Entrega(Base):
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
     observacion: Mapped[Optional[str]] = mapped_column(Text)
+    # SID de ESTE movimiento puntual, no del pedido — el ingeniero tramita el
+    # SID día por día, así que cada entrega/devolución necesita su propio
+    # check (ver sid_controller.recalcular_estado_entrega).
+    sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_material: Mapped["OtMaterial"] = relationship(back_populates="entregas")
@@ -354,6 +358,8 @@ class Devolucion(Base):
     es_ingreso_produccion: Mapped[bool] = mapped_column(Boolean, default=False)
     fecha: Mapped[date] = mapped_column(Date)
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
+    # SID de ESTE movimiento puntual — ver Entrega.sid_completado.
+    sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_material: Mapped[Optional["OtMaterial"]] = relationship(back_populates="devoluciones")

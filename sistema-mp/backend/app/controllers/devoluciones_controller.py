@@ -19,6 +19,7 @@ from ..models import (
     OtProceso,
     Usuario,
 )
+from . import sid_controller
 
 
 def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.DevolucionCreate) -> Devolucion:
@@ -64,6 +65,13 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
     )
     devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(devolucion)
+    db.flush()
+    # Esta devolución recién creada nunca tiene su SID registrado todavía,
+    # así que el pedido vuelve a quedar pendiente aunque las anteriores ya
+    # estuvieran completas. No aplica al ingreso sin pedido (pendiente):
+    # sid_devolucion_completado solo existe una vez que hay un OtMaterial.
+    if ot_material is not None:
+        sid_controller.recalcular_sid_devolucion(db, ot_material)
     db.commit()
     db.refresh(devolucion)
     return devolucion

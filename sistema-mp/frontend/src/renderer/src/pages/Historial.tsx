@@ -249,10 +249,12 @@ export function Historial() {
                                   </div>
                                   <p className="text-muted-foreground">{e.usuario}</p>
                                   {e.observacion && <p className="text-muted-foreground">Nota: {e.observacion}</p>}
-                                  <p className="mt-1 text-muted-foreground">
-                                    {e.bobinas.length} {e.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
-                                    {e.bobinas.map((b) => `${b} ${e.unidad}`).join(', ')}
-                                  </p>
+                                  {e.usa_bobinas && (
+                                    <p className="mt-1 text-muted-foreground">
+                                      {e.bobinas.length} {e.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+                                      {e.bobinas.map((b) => `${b} ${e.unidad}`).join(', ')}
+                                    </p>
+                                  )}
                                 </div>
                               ))}
                               {susEntregas.length === 0 && (
@@ -292,10 +294,12 @@ export function Historial() {
                                     </span>
                                   </div>
                                   <p className="text-muted-foreground">{d.usuario}</p>
-                                  <p className="mt-1 text-muted-foreground">
-                                    {d.bobinas.length} {d.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
-                                    {d.bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
-                                  </p>
+                                  {d.usa_bobinas && (
+                                    <p className="mt-1 text-muted-foreground">
+                                      {d.bobinas.length} {d.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
+                                      {d.bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
+                                    </p>
+                                  )}
                                 </div>
                               ))}
                               {susDevoluciones.length === 0 && (

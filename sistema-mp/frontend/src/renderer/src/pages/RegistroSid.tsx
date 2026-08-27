@@ -26,6 +26,10 @@ const FILTROS: { valor: Filtro; etiqueta: string }[] = [
   { valor: 'todos', etiqueta: 'Todos' }
 ]
 
+// Completo = TODOS los movimientos de ese tipo ya tienen su check marcado
+// (lo mantiene al día el backend: ver sid_controller.recalcular_estado_entrega/
+// recalcular_sid_devolucion). Un movimiento nuevo sin registrar reabre esto
+// solo, sin que nadie tenga que "desmarcar" nada a mano.
 function estaCompletado(pedido: Consumo, pestana: Pestana): boolean {
   return pestana === 'entregados' ? pedido.estado_sid === 'COMPLETADO' : pedido.sid_devolucion_completado
 }
@@ -46,8 +50,10 @@ export function RegistroSid() {
     queryFn: () => api.consultarConsumo(apiBaseUrl, token)
   })
 
-  // Detalle de bobinas por pedido — una sola consulta para todo el listado
-  // (no una por fila), igual que en Historial de OT.
+  // Detalle de entregas/devoluciones por pedido — una sola consulta para todo
+  // el listado (no una por fila), igual que en Historial de OT. El SID se
+  // tramita día por día, así que cada movimiento aparece con su propia fecha
+  // y su propio check en vez de un único total agregado.
   const entregas = useQuery({
     queryKey: ['entregas-todas'],
     queryFn: () => api.listarEntregas(apiBaseUrl, token)
@@ -75,35 +81,34 @@ export function RegistroSid() {
     return mapa
   }, [devoluciones.data])
 
-  const invalidar = () => {
-    setError(null)
-    queryClient.invalidateQueries({ queryKey: ['consumo-sid'] })
-  }
   const alFallar = (err: unknown) =>
     setError(err instanceof ApiError ? err.message : 'No se pudo actualizar el estado SID')
 
-  const cambiarEstadoEntrega = useMutation({
+  const marcarEntregaSid = useMutation({
     mutationFn: ({ id, completado }: { id: number; completado: boolean }) =>
-      completado ? api.marcarSidCompletado(apiBaseUrl, token, id) : api.marcarSidPendiente(apiBaseUrl, token, id),
-    onSuccess: invalidar,
+      completado
+        ? api.marcarSidEntregaCompletado(apiBaseUrl, token, id)
+        : api.marcarSidEntregaPendiente(apiBaseUrl, token, id),
+    onSuccess: () => {
+      setError(null)
+      queryClient.invalidateQueries({ queryKey: ['consumo-sid'] })
+      queryClient.invalidateQueries({ queryKey: ['entregas-todas'] })
+    },
     onError: alFallar
   })
 
-  const cambiarEstadoDevolucion = useMutation({
+  const marcarDevolucionSid = useMutation({
     mutationFn: ({ id, completado }: { id: number; completado: boolean }) =>
       completado
         ? api.marcarSidDevolucionCompletado(apiBaseUrl, token, id)
         : api.marcarSidDevolucionPendiente(apiBaseUrl, token, id),
-    onSuccess: invalidar,
+    onSuccess: () => {
+      setError(null)
+      queryClient.invalidateQueries({ queryKey: ['consumo-sid'] })
+      queryClient.invalidateQueries({ queryKey: ['devoluciones-todas'] })
+    },
     onError: alFallar
   })
-
-  const cambiando = cambiarEstadoEntrega.isPending || cambiarEstadoDevolucion.isPending
-
-  function onCambiarEstado(id: number, completado: boolean) {
-    if (pestana === 'entregados') cambiarEstadoEntrega.mutate({ id, completado })
-    else cambiarEstadoDevolucion.mutate({ id, completado })
-  }
 
   // Los cargos de tinta nunca se entregan/devuelven en planta (ver Registrar
   // Entrega/Devolución), así que tampoco cuentan aquí.
@@ -176,8 +181,8 @@ export function RegistroSid() {
       <h1 className="mb-2 text-2xl font-semibold">Registro SID</h1>
       <p className="mb-6 text-sm text-muted-foreground">
         Listado por OT para llevar el registro del SID: copia cada dato con el ícono junto a él, y marca el check
-        de cada material cuando termines de registrarlo. La OT pasa a "Completado" recién cuando todos sus
-        materiales tienen el check marcado.
+        de cada registro (fecha) cuando termines de tramitarlo. Un registro nuevo que todavía no tenga check vuelve
+        a aparecer como pendiente, aunque los anteriores ya estén completos.
       </p>
 
       <div className="mb-4 flex gap-2">
@@ -233,10 +238,10 @@ export function RegistroSid() {
             pedidos={grupo.pedidos}
             completo={grupo.completo}
             pestana={pestana}
-            onCambiarEstado={onCambiarEstado}
-            cambiando={cambiando}
             entregasPorPedido={entregasPorPedido}
             devolucionesPorPedido={devolucionesPorPedido}
+            marcarEntregaSid={marcarEntregaSid}
+            marcarDevolucionSid={marcarDevolucionSid}
           />
         ))}
       </div>
@@ -244,24 +249,26 @@ export function RegistroSid() {
   )
 }
 
+type MutacionSid = ReturnType<typeof useMutation<Entrega | Devolucion, unknown, { id: number; completado: boolean }>>
+
 function GrupoOt({
   numeroOt,
   pedidos,
   completo,
   pestana,
-  onCambiarEstado,
-  cambiando,
   entregasPorPedido,
-  devolucionesPorPedido
+  devolucionesPorPedido,
+  marcarEntregaSid,
+  marcarDevolucionSid
 }: {
   numeroOt: string
   pedidos: Consumo[]
   completo: boolean
   pestana: Pestana
-  onCambiarEstado: (id: number, completado: boolean) => void
-  cambiando: boolean
   entregasPorPedido: Map<number, Entrega[]>
   devolucionesPorPedido: Map<number, Devolucion[]>
+  marcarEntregaSid: MutacionSid
+  marcarDevolucionSid: MutacionSid
 }) {
   return (
     <Card>
@@ -284,10 +291,10 @@ function GrupoOt({
               key={p.ot_material_id}
               pedido={p}
               pestana={pestana}
-              onCambiarEstado={(completado) => onCambiarEstado(p.ot_material_id, completado)}
-              cambiando={cambiando}
               susEntregas={entregasPorPedido.get(p.ot_material_id) ?? []}
               susDevoluciones={devolucionesPorPedido.get(p.ot_material_id) ?? []}
+              marcarEntregaSid={marcarEntregaSid}
+              marcarDevolucionSid={marcarDevolucionSid}
             />
           ))}
         </div>
@@ -299,63 +306,51 @@ function GrupoOt({
 function FilaMaterial({
   pedido,
   pestana,
-  onCambiarEstado,
-  cambiando,
   susEntregas,
-  susDevoluciones
+  susDevoluciones,
+  marcarEntregaSid,
+  marcarDevolucionSid
 }: {
   pedido: Consumo
   pestana: Pestana
-  onCambiarEstado: (completado: boolean) => void
-  cambiando: boolean
   susEntregas: Entrega[]
   susDevoluciones: Devolucion[]
+  marcarEntregaSid: MutacionSid
+  marcarDevolucionSid: MutacionSid
 }) {
   const completado = estaCompletado(pedido, pestana)
 
-  // Agrupa las entregas/devoluciones de este pedido por el material que
-  // realmente salió/volvió — normalmente un solo grupo, más de uno si hubo
-  // una sustitución parcial (parte del material original, parte del
-  // alternativo). Cada entrega/devolución es de un solo material, así que
-  // agrupar por código ya separa las bobinas correctamente por material.
-  const gruposEntregados = useMemo(() => {
-    const mapa = new Map<string, number[]>()
-    for (const e of susEntregas) {
-      mapa.set(e.codigo_mp_entregado, [...(mapa.get(e.codigo_mp_entregado) ?? []), ...e.bobinas])
-    }
-    return mapa
-  }, [susEntregas])
-
-  const gruposDevueltos = useMemo(() => {
-    const mapa = new Map<string, number[]>()
-    for (const d of susDevoluciones) {
-      mapa.set(d.codigo_mp, [...(mapa.get(d.codigo_mp) ?? []), ...d.bobinas])
-    }
-    return mapa
-  }, [susDevoluciones])
-
-  const gruposReales = pestana === 'entregados' ? gruposEntregados : gruposDevueltos
+  const entregasOrdenadas = useMemo(
+    () => [...susEntregas].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id),
+    [susEntregas]
+  )
+  const devolucionesOrdenadas = useMemo(
+    () => [...susDevoluciones].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id),
+    [susDevoluciones]
+  )
 
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0">
-      <label className="flex items-center gap-2 text-sm font-medium">
-        <input
-          type="checkbox"
-          checked={completado}
-          disabled={cambiando}
-          onChange={(e) => onCambiarEstado(e.target.checked)}
-        />
-        SID {pestana === 'entregados' ? 'de entrega' : 'de devolución'} registrado
-      </label>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium">SID {pestana === 'entregados' ? 'de entrega' : 'de devolución'}</span>
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-xs font-medium',
+            completado ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+          )}
+        >
+          {completado ? 'Completo' : 'Pendiente'}
+        </span>
+      </div>
 
-      <div className="grid grid-cols-1 gap-3 pl-6 text-sm sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div>
           <p className="text-xs text-muted-foreground">Cliente</p>
           <CeldaCopiable texto={pedido.cliente ?? ''} />
         </div>
         <div>
           <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            Material {pedido.material_sustituido ? '(pedido)' : ''}
+            Material
             {pedido.es_materia_prima && (
               <span className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
                 materia prima de {pedido.insumo_de_codigo_mp}
@@ -370,29 +365,6 @@ function FilaMaterial({
           </p>
           <CeldaCopiable texto={pedido.codigo_mp} />
         </div>
-        {pedido.material_sustituido && (
-          <div className="sm:col-span-2 rounded-md border border-warning/30 bg-warning/5 p-2">
-            <p className="mb-1 text-xs text-muted-foreground">
-              {pestana === 'entregados' ? 'Realmente entregado' : 'Realmente devuelto'} (hubo sustitución)
-            </p>
-            <div className="flex flex-col gap-2">
-              {[...gruposReales.entries()].map(([codigo, bobinas]) => (
-                <div key={codigo}>
-                  <div className="flex items-center justify-between gap-2">
-                    <CeldaCopiable texto={codigo} />
-                    <span className="text-xs text-muted-foreground">
-                      {bobinas.reduce((a, b) => a + b, 0).toFixed(2)} {pedido.unidad}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {bobinas.length} {bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
-                    {bobinas.map((b) => `${b} ${pedido.unidad}`).join(', ')}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
         <div className="sm:col-span-2">
           <p className="text-xs text-muted-foreground">Descripción</p>
           <CeldaCopiable texto={pedido.descripcion ?? ''} />
@@ -412,6 +384,112 @@ function FilaMaterial({
           </div>
         )}
       </div>
+
+      <div className="flex flex-col gap-2">
+        <p className="text-xs font-medium text-muted-foreground">Registros por fecha</p>
+        {pestana === 'entregados'
+          ? entregasOrdenadas.map((e) => (
+              <MovimientoRow
+                key={e.id}
+                fecha={e.fecha}
+                etiqueta={
+                  e.codigo_mp_entregado !== pedido.codigo_mp ? (
+                    <span className="text-warning">
+                      {e.codigo_mp_entregado} (pedido: {pedido.codigo_mp})
+                    </span>
+                  ) : null
+                }
+                cantidad={e.total_entregado}
+                unidad={pedido.unidad}
+                usaBobinas={e.usa_bobinas}
+                bobinas={e.bobinas}
+                usuario={e.usuario}
+                completado={e.sid_completado}
+                cambiando={marcarEntregaSid.isPending && marcarEntregaSid.variables?.id === e.id}
+                onCambiar={(nuevo) => marcarEntregaSid.mutate({ id: e.id, completado: nuevo })}
+              />
+            ))
+          : devolucionesOrdenadas.map((d) => (
+              <MovimientoRow
+                key={d.id}
+                fecha={d.fecha}
+                etiqueta={
+                  d.es_ingreso_produccion ? (
+                    <span className="text-warning">Ingreso a almacén</span>
+                  ) : d.codigo_mp !== pedido.codigo_mp ? (
+                    <span className="text-warning">
+                      {d.codigo_mp} (pedido: {pedido.codigo_mp})
+                    </span>
+                  ) : null
+                }
+                cantidad={d.total_devuelto}
+                unidad={pedido.unidad}
+                usaBobinas={d.usa_bobinas}
+                bobinas={d.bobinas}
+                usuario={d.usuario}
+                completado={d.sid_completado}
+                cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
+                onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
+              />
+            ))}
+        {(pestana === 'entregados' ? entregasOrdenadas : devolucionesOrdenadas).length === 0 && (
+          <p className="text-xs text-muted-foreground">Sin registros.</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function MovimientoRow({
+  fecha,
+  etiqueta,
+  cantidad,
+  unidad,
+  usaBobinas,
+  bobinas,
+  usuario,
+  completado,
+  cambiando,
+  onCambiar
+}: {
+  fecha: string
+  etiqueta: React.ReactNode
+  cantidad: number
+  unidad: string
+  usaBobinas: boolean
+  bobinas: number[]
+  usuario: string
+  completado: boolean
+  cambiando: boolean
+  onCambiar: (completado: boolean) => void
+}) {
+  return (
+    <div className="rounded-md border border-border p-2 text-xs">
+      <label className="flex items-start justify-between gap-2">
+        <span className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={completado}
+            disabled={cambiando}
+            onChange={(e) => onCambiar(e.target.checked)}
+          />
+          <span>
+            <span className="font-medium">{fecha}</span>
+            {etiqueta && <span> · {etiqueta}</span>}
+            <br />
+            <span className="text-muted-foreground">{usuario}</span>
+          </span>
+        </span>
+        <span className="font-medium">
+          {cantidad} {unidad}
+        </span>
+      </label>
+      {usaBobinas && (
+        <p className="mt-1 pl-6 text-muted-foreground">
+          {bobinas.length} {bobinas.length === 1 ? 'bobina' : 'bobinas'}: {bobinas.map((b) => `${b} ${unidad}`).join(', ')}
+        </p>
+      )}
     </div>
   )
 }
