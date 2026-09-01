@@ -207,6 +207,15 @@ export interface ConfiguracionExcel {
   tiene_password: boolean
 }
 
+// Una fila de "oc mp" cuyo número de OT todavía no está en la base de datos
+// — ver "Buscar OT nuevas en el Excel" en Todas las OT. Solo lo mínimo para
+// identificarla en pantalla; importarla trae el resto (importarOtDesdeExcel).
+export interface OtExcelNueva {
+  numero_ot: string
+  cliente: string | null
+  descripcion_producto: string | null
+}
+
 export interface OtBusqueda {
   origen: 'bd' | 'excel' | 'no_encontrada'
   bd: OtDetalleOut | null

@@ -318,6 +318,16 @@ def buscar_con_fallback(db: Session, numero_ot: str) -> Dict[str, Any]:
     return {"origen": "no_encontrada", "bd": None, "excel": None}
 
 
+def listar_ots_nuevas_en_excel(db: Session) -> List[Dict[str, Any]]:
+    """OT que tienen fila en 'oc mp' pero todavía no están en la base de
+    datos — para el botón "Buscar OT nuevas en el Excel" de Todas las OT.
+    Cada una se importa después una por una con guardar_desde_excel, no de
+    una sola vez: mismo criterio que comparar_con_excel/aplicar_excel, se
+    revisa antes de traer."""
+    numeros_en_bd = set(db.scalars(select(OrdenTrabajo.numero_ot)).all())
+    return [ot for ot in excel_oc_mp.listar_ots_excel(db) if ot["numero_ot"] not in numeros_en_bd]
+
+
 def guardar_desde_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
     """Crea la OT en la base de datos a partir del Excel OC-MP: cliente y
     datos comerciales van directo a la OT; sus materiales pedidos quedan

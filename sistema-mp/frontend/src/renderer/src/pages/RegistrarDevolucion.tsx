@@ -15,7 +15,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import type { Consumo, Devolucion, Material, OtMaterialPendiente } from '@renderer/lib/types'
+import type { Consumo, Devolucion, Entrega, Material, OtMaterialPendiente } from '@renderer/lib/types'
 
 function hoyISO(): string {
   return new Date().toISOString().slice(0, 10)
@@ -165,6 +165,13 @@ function PedidoDevolucionCard({
 
   const materiales = esIngreso ? [] : (balance.data ?? [])
 
+  // Lo que hay para devolver es lo que REALMENTE salió de almacén, no lo que
+  // pedía la OT — si hubo una sustitución total (un solo material entregado,
+  // distinto del pedido), el título de la tarjeta tiene que decir ESE
+  // material: mostrar "BOPLH20620" arriba mientras todo lo de abajo (saldo,
+  // cantidad) es de "BOPLH20760" confundía y no tenía sentido.
+  const materialPrincipal = materiales.length === 1 ? materiales[0].codigo_mp : pedido.codigo_mp
+
   // Cuando solo se entregó un material, no tiene sentido preguntar cuál se
   // devuelve — se corrige solo, en cada entrada, aunque el pedido tenga su
   // propio material distinto (sustitución total). Con más de un material
@@ -200,7 +207,12 @@ function PedidoDevolucionCard({
   return (
     <div className={cn('rounded-md border p-4', esIngreso ? 'border-warning/40 bg-warning/5' : 'border-border')}>
       <div className="mb-3 flex items-center justify-between">
-        <p className="text-sm font-medium">{pedido.codigo_mp}</p>
+        <p className="text-sm font-medium">
+          {materialPrincipal}
+          {materialPrincipal !== pedido.codigo_mp && (
+            <span className="ml-1.5 text-xs font-normal text-warning">(pedido: {pedido.codigo_mp})</span>
+          )}
+        </p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
           <X className="h-4 w-4" />
         </button>
@@ -347,6 +359,27 @@ export function RegistrarDevolucion() {
   // en planta — se registran en Crear OT, pero no aparecen aquí.
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
 
+  // Solo para mostrar QUÉ material se entregó realmente cuando hubo una
+  // sustitución (Consumo.material_sustituido no dice cuál) — el pedido pide
+  // BOPLH20620 pero lo que hay para devolver es lo que de verdad salió de
+  // almacén, ej. BOPLH20760. Mismo patrón que RegistrarEntrega.tsx.
+  const entregas = useQuery({
+    queryKey: ['entregas', otBuscada],
+    queryFn: () => api.listarEntregas(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada
+  })
+
+  function materialesSustituidosDe(entregasDeLaOt: Entrega[] | undefined, pedido: Consumo): string[] {
+    return [
+      ...new Set(
+        (entregasDeLaOt ?? [])
+          .filter((e) => e.ot_material_id === pedido.ot_material_id)
+          .map((e) => e.codigo_mp_entregado)
+          .filter((codigo) => codigo !== pedido.codigo_mp)
+      )
+    ]
+  }
+
   // Un material al que hubo que fabricarle materia prima puede seguir sin
   // proceso asignado, así que no tiene pedido y no sale en /consumo. Igual
   // producción lo entrega y hay que poder registrar su ingreso — ver
@@ -374,6 +407,14 @@ export function RegistrarDevolucion() {
   const consumoTodo = useQuery({
     queryKey: ['consumo-todo'],
     queryFn: () => api.consultarConsumo(apiBaseUrl, token),
+    enabled: !otBuscada
+  })
+
+  // Igual que "entregas" de arriba, pero de todas las OT — para poder mostrar
+  // qué material se entregó realmente en la lista cruzada de abajo.
+  const entregasTodas = useQuery({
+    queryKey: ['entregas-todas'],
+    queryFn: () => api.listarEntregas(apiBaseUrl, token),
     enabled: !otBuscada
   })
 
@@ -618,7 +659,9 @@ export function RegistrarDevolucion() {
                   </span>
                 </button>
               ))}
-              {pedidosVisibles.map((pedido) => (
+              {pedidosVisibles.map((pedido) => {
+                const materialesSustituidos = materialesSustituidosDe(entregas.data, pedido)
+                return (
                 <button
                   key={pedido.ot_material_id}
                   type="button"
@@ -643,10 +686,10 @@ export function RegistrarDevolucion() {
                         materia prima de {pedido.insumo_de_codigo_mp}
                       </span>
                     )}
-                    {pedido.material_sustituido && (
+                    {materialesSustituidos.length > 0 && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                         <ArrowRightLeft className="h-3 w-3" />
-                        hubo sustitución
+                        se entregó {materialesSustituidos.join(', ')}
                       </span>
                     )}
                   </span>
@@ -660,7 +703,8 @@ export function RegistrarDevolucion() {
                     · {pedido.estado_entrega}
                   </span>
                 </button>
-              ))}
+                )
+              })}
             </div>
           )}
         </CardContent>
@@ -672,25 +716,41 @@ export function RegistrarDevolucion() {
             <CardTitle>Materiales pendientes de devolver</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-2">
-            {materialesPendientesDevolver.map((p) => (
-              <button
-                key={p.ot_material_id}
-                type="button"
-                onClick={() => seleccionarOtRecomendada(p.numero_ot)}
-                className="flex flex-col rounded-md border border-border p-3 text-left text-sm transition-colors hover:bg-muted"
-              >
-                <span className="font-medium">
-                  {p.codigo_mp} <span className="font-normal text-muted-foreground">— OT {p.numero_ot}</span>
-                </span>
-                <span className="text-muted-foreground">
-                  {p.cliente ?? 'Sin cliente'}
-                  {p.diseno ? ` · ${p.diseno}` : ''} · {p.proceso} · {p.maquina}
-                </span>
-                <span className="text-muted-foreground">
-                  Disponible para devolver: {(p.total_entregado - p.total_devuelto).toFixed(2)} {p.unidad}
-                </span>
-              </button>
-            ))}
+            {materialesPendientesDevolver.map((p) => {
+              // Lo que hay para devolver es lo que REALMENTE salió de
+              // almacén, no necesariamente lo que pedía la OT — si hubo una
+              // sustitución mostramos el material entregado como principal
+              // (ver PedidoDevolucionCard, que ya selecciona ese mismo
+              // material para registrar la devolución).
+              const materialesSustituidos = materialesSustituidosDe(entregasTodas.data, p)
+              const materialPrincipal = materialesSustituidos.length === 1 ? materialesSustituidos[0] : p.codigo_mp
+              return (
+                <button
+                  key={p.ot_material_id}
+                  type="button"
+                  onClick={() => seleccionarOtRecomendada(p.numero_ot)}
+                  className="flex flex-col rounded-md border border-border p-3 text-left text-sm transition-colors hover:bg-muted"
+                >
+                  <span className="font-medium">
+                    {materialPrincipal}
+                    {materialesSustituidos.length === 1 && (
+                      <span className="font-normal text-warning"> (pedido: {p.codigo_mp})</span>
+                    )}
+                    {materialesSustituidos.length > 1 && (
+                      <span className="font-normal text-warning"> (se entregó: {materialesSustituidos.join(', ')})</span>
+                    )}{' '}
+                    <span className="font-normal text-muted-foreground">— OT {p.numero_ot}</span>
+                  </span>
+                  <span className="text-muted-foreground">
+                    {p.cliente ?? 'Sin cliente'}
+                    {p.diseno ? ` · ${p.diseno}` : ''} · {p.proceso} · {p.maquina}
+                  </span>
+                  <span className="text-muted-foreground">
+                    Disponible para devolver: {(p.total_entregado - p.total_devuelto).toFixed(2)} {p.unidad}
+                  </span>
+                </button>
+              )
+            })}
           </CardContent>
         </Card>
       )}

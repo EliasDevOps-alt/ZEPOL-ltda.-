@@ -143,22 +143,26 @@ function FilaEntrega({
           </p>
         )}
         {error && <p className="mt-1 text-destructive">{error}</p>}
-        <div className="mt-2 flex gap-1">
-          <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
-            <Pencil className="h-3 w-3" />
-            Corregir
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={eliminar.isPending}
-            onClick={handleEliminar}
-          >
-            <Trash2 className="h-3 w-3" />
-            {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
-          </Button>
-        </div>
+        {entrega.sid_completado ? (
+          <p className="mt-2 text-muted-foreground">SID ya registrado — no se puede corregir.</p>
+        ) : (
+          <div className="mt-2 flex gap-1">
+            <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
+              <Pencil className="h-3 w-3" />
+              Corregir
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={eliminar.isPending}
+              onClick={handleEliminar}
+            >
+              <Trash2 className="h-3 w-3" />
+              {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }
@@ -317,22 +321,26 @@ function FilaDevolucion({
           </p>
         )}
         {error && <p className="mt-1 text-destructive">{error}</p>}
-        <div className="mt-2 flex gap-1">
-          <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
-            <Pencil className="h-3 w-3" />
-            Corregir
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            disabled={eliminar.isPending}
-            onClick={handleEliminar}
-          >
-            <Trash2 className="h-3 w-3" />
-            {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
-          </Button>
-        </div>
+        {devolucion.sid_completado ? (
+          <p className="mt-2 text-muted-foreground">SID ya registrado — no se puede corregir.</p>
+        ) : (
+          <div className="mt-2 flex gap-1">
+            <Button type="button" variant="outline" size="sm" onClick={() => setEditando(true)}>
+              <Pencil className="h-3 w-3" />
+              Corregir
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              size="sm"
+              disabled={eliminar.isPending}
+              onClick={handleEliminar}
+            >
+              <Trash2 className="h-3 w-3" />
+              {eliminar.isPending ? 'Eliminando...' : 'Eliminar'}
+            </Button>
+          </div>
+        )}
       </div>
     )
   }

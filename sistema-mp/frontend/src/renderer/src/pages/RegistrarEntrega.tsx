@@ -79,6 +79,28 @@ function seleccionVacia(pedido: { usa_bobinas: boolean; proceso_id?: number; maq
   }
 }
 
+/** Igual que seleccionVacia, pero si el pedido ya tiene entregas previas
+ * arranca con el material/proceso/máquina de la ÚLTIMA — ya se entregó
+ * BOPLH20760 en Impresión/FS-1500 en vez de BOPLH20620 del pedido, así que
+ * la próxima entrega de ese mismo pedido probablemente sigue siendo así, no
+ * hace falta repetir "¿Se entregó un material distinto?"/"¿otro
+ * proceso/máquina?" cada vez. Sigue siendo editable: si esta tanda vuelve a
+ * ser distinta, se corrige igual que cualquier otra. */
+function seleccionVaciaContinuando(
+  pedido: { usa_bobinas: boolean; material_id: number; proceso_id: number; maquina_id: number },
+  entregasDelPedido: Entrega[] | undefined
+): SeleccionPedido {
+  const ultima = entregasDelPedido?.at(-1)
+  if (!ultima) return seleccionVacia(pedido)
+  return {
+    entrega: {
+      ...entregaVacia(pedido.usa_bobinas, String(ultima.proceso_id), String(ultima.maquina_id)),
+      materialId: ultima.material_entregado_id !== pedido.material_id ? String(ultima.material_entregado_id) : ''
+    },
+    materiasPrimas: []
+  }
+}
+
 function tieneCantidad(datos: BobinasPedido): boolean {
   return datos.bobinas.length > 0 && datos.bobinas.some((b) => Number(b) > 0)
 }
@@ -1225,7 +1247,7 @@ export function RegistrarEntrega() {
       if (copia[pedido.ot_material_id]) {
         delete copia[pedido.ot_material_id]
       } else {
-        copia[pedido.ot_material_id] = seleccionVacia(pedido)
+        copia[pedido.ot_material_id] = seleccionVaciaContinuando(pedido, entregasPorPedido.get(pedido.ot_material_id))
       }
       return copia
     })

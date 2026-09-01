@@ -85,6 +85,17 @@ class ExcelEscrituraError(Exception):
     configurada, etc.)."""
 
 
+class ExcelLecturaError(Exception):
+    """No se pudo leer 'oc mp' — ruta sin configurar, archivo movido/borrado,
+    contraseña incorrecta, o el archivo está corrupto. Solo la usa
+    listar_ots_excel: leer_oc_mp (búsqueda de una OT puntual) deliberadamente
+    NO distingue esto de "esa OT no está en el Excel" — ahí un None es el
+    resultado normal la mayoría de las veces. listar_ots_excel es una acción
+    explícita ("Buscar OT nuevas en el Excel") donde silenciar el error se ve
+    como "no hay nada nuevo" cuando en realidad el archivo no se pudo abrir,
+    que es justo el bug que motivó esto — ver conversación del 2026-09-01."""
+
+
 def obtener_ruta_configurada(db: Session) -> Optional[str]:
     fila = db.get(Configuracion, CLAVE_RUTA_EXCEL)
     return fila.valor if fila and fila.valor else None
@@ -140,17 +151,43 @@ def _coincide_ot(valor_celda: Any, objetivo: str) -> bool:
     return str(valor_celda).strip() == objetivo
 
 
+def _numero_ot_texto(v: Any) -> Optional[str]:
+    """Igual criterio que _coincide_ot pero para extraer el número en vez de
+    compararlo — Excel a veces guarda el número de OT como numérico, y sin
+    esto un int 55555 se lee "55555.0" en vez de "55555"."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        try:
+            return str(int(v))
+        except (TypeError, ValueError):
+            return None
+    texto = str(v).strip()
+    return texto or None
+
+
 def _abrir_hoja(ruta: str, password: Optional[str]) -> Optional[Any]:
     """Desencripta (si aplica) y abre la hoja 'oc mp' en modo solo-lectura.
     Nunca escribe nada a disco."""
     try:
         with open(ruta, "rb") as f:
+            # OfficeFile(f) espía el encabezado del archivo para reconocer el
+            # formato (OLE cifrado vs. zip sin cifrar) y con eso deja a f
+            # posicionado más allá del inicio — is_encrypted() no lo devuelve
+            # a 0. En el camino cifrado no importa (decrypt() lee del inicio
+            # por su cuenta), pero en el NO cifrado, f.read() sin este seek
+            # devuelve el archivo de la mitad para adelante: una copia
+            # truncada que ni openpyxl ni Excel pueden abrir después. Bug real
+            # que rompió una copia de prueba ya desencriptada (ver
+            # conversación del 2026-09-01) — el archivo real nunca lo sufre
+            # porque siempre está cifrado, pero cualquier copia sin cifrar sí.
             office_file = msoffcrypto.OfficeFile(f)
             buffer = io.BytesIO()
             if office_file.is_encrypted():
                 office_file.load_key(password=password)
                 office_file.decrypt(buffer)
             else:
+                f.seek(0)
                 buffer.write(f.read())
     except Exception:
         logger.exception("No se pudo abrir/desencriptar el Excel OC-MP en %s", ruta)
@@ -218,6 +255,45 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
         }
 
     return None
+
+
+def listar_ots_excel(db: Session) -> List[Dict[str, Any]]:
+    """Todos los números de OT que tienen fila en 'oc mp', con lo mínimo para
+    identificarlas en pantalla (cliente, descripción) — no trae materiales ni
+    el resto de los datos comerciales. Se usa para detectar qué OT del Excel
+    todavía no están en la base de datos (ver
+    ordenes_controller.listar_ots_nuevas_en_excel), no para importarlas: eso
+    sigue siendo leer_oc_mp + guardar_desde_excel, uno por uno. Lectura
+    solo-lectura de openpyxl, igual que leer_oc_mp — no abre Excel de verdad."""
+    ruta = obtener_ruta_configurada(db)
+    if not ruta:
+        raise ExcelLecturaError("No hay ruta configurada para el Excel OC-MP")
+
+    ws = _abrir_hoja(ruta, obtener_password_configurada(db))
+    if ws is None:
+        raise ExcelLecturaError(
+            "No se pudo abrir el Excel OC-MP (revisa que el archivo exista, la contraseña, o que no esté dañado)"
+        )
+
+    vistos: set[str] = set()
+    resultado: List[Dict[str, Any]] = []
+    for row in ws.iter_rows(min_row=FILA_DATOS_INICIO, values_only=True):
+        numero_ot = _numero_ot_texto(_valor(row, COL_OT))
+        # Una OT puede repetirse en varias filas si tuvo más de 6 materiales
+        # (ver escribir_oc_mp) — cada número solo cuenta una vez acá. "0" es
+        # ruido: una fila con formato pero sin OT real cargada todavía se lee
+        # como celda numérica 0 en vez de vacía — ningún número de OT real es "0".
+        if not numero_ot or numero_ot == "0" or numero_ot in vistos:
+            continue
+        vistos.add(numero_ot)
+        resultado.append(
+            {
+                "numero_ot": numero_ot,
+                "cliente": _texto(_valor(row, COL_CLIENTE)),
+                "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
+            }
+        )
+    return resultado
 
 
 def validar_archivo(ruta: str, password: Optional[str]) -> None:

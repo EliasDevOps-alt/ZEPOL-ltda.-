@@ -12,6 +12,20 @@ import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
+function ultimoDiaDelMes(mesISO: string): string {
+  const [anio, mes] = mesISO.split('-').map(Number)
+  return new Date(anio, mes, 0).toISOString().slice(0, 10)
+}
+
+function hoyISO(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function mesActualISO(): string {
+  return hoyISO().slice(0, 7)
+}
+
+type ModoFecha = 'dia' | 'mes'
 type Pestana = 'entregados' | 'devueltos'
 type Filtro = 'pendientes' | 'completados' | 'todos'
 
@@ -43,7 +57,22 @@ export function RegistroSid() {
   const [pestana, setPestana] = useState<Pestana>('entregados')
   const [q, setQ] = useState('')
   const [filtro, setFiltro] = useState<Filtro>('pendientes')
+  const [modoFecha, setModoFecha] = useState<ModoFecha>('dia')
+  // Arranca en "hoy", igual que Todas las OT — evita mostrar todo el
+  // historial apenas se entra a la pantalla.
+  const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
+
+  const { desde, hasta } = useMemo(() => {
+    if (!fecha) return { desde: '', hasta: '' }
+    if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
+    return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
+  }, [modoFecha, fecha])
+
+  function cambiarModoFecha(modo: ModoFecha) {
+    setModoFecha(modo)
+    setFecha(modo === 'dia' ? hoyISO() : mesActualISO())
+  }
 
   const pedidos = useQuery({
     queryKey: ['consumo-sid'],
@@ -63,18 +92,31 @@ export function RegistroSid() {
     queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token)
   })
 
+  // El filtro de día/mes acota los MOVIMIENTOS (por su propia fecha), no la
+  // fecha de creación de la OT — acá lo que importa es cuándo pasó cada
+  // entrega/devolución, para poder revisar "lo de hoy" o "lo de este mes"
+  // sin que el resto del historial estorbe.
+  const entregasEnRango = useMemo(
+    () => (entregas.data ?? []).filter((e) => !desde || (e.fecha >= desde && e.fecha <= hasta)),
+    [entregas.data, desde, hasta]
+  )
+  const devolucionesEnRango = useMemo(
+    () => (devoluciones.data ?? []).filter((d) => !desde || (d.fecha >= desde && d.fecha <= hasta)),
+    [devoluciones.data, desde, hasta]
+  )
+
   const entregasPorPedido = useMemo(() => {
     const mapa = new Map<number, Entrega[]>()
-    for (const e of entregas.data ?? []) mapa.set(e.ot_material_id, [...(mapa.get(e.ot_material_id) ?? []), e])
+    for (const e of entregasEnRango) mapa.set(e.ot_material_id, [...(mapa.get(e.ot_material_id) ?? []), e])
     return mapa
-  }, [entregas.data])
+  }, [entregasEnRango])
 
   // Un ingreso a almacén puede no tener pedido todavía (el material se fabricó
   // pero aún no salió hacia ningún proceso); esos no tienen SID que tramitar
   // hasta que se les asigne uno.
   const devolucionesPorPedido = useMemo(() => {
     const mapa = new Map<number, Devolucion[]>()
-    for (const d of devoluciones.data ?? []) {
+    for (const d of devolucionesEnRango) {
       if (d.ot_material_id == null) continue
       mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
     }
@@ -151,8 +193,19 @@ export function RegistroSid() {
     if (needle) lista = lista.filter((p) => p.numero_ot.toLowerCase().includes(needle))
     if (filtro === 'completados') lista = lista.filter((p) => estaCompletado(p, pestana))
     if (filtro === 'pendientes') lista = lista.filter((p) => !estaCompletado(p, pestana))
+    // El filtro de fecha decide qué se MUESTRA (hay al menos un movimiento
+    // en el rango) — a propósito no toca visiblesEnPestana/totalPorOt, que
+    // siguen viendo todo el historial: si tocaran el badge "Completado"
+    // pasaría a depender de qué día estás mirando, y no tiene que ser así.
+    if (desde) {
+      lista = lista.filter((p) => {
+        const movimientos =
+          pestana === 'entregados' ? entregasPorPedido.get(p.ot_material_id) : devolucionesPorPedido.get(p.ot_material_id)
+        return (movimientos?.length ?? 0) > 0
+      })
+    }
     return lista
-  }, [visiblesEnPestana, q, filtro, pestana])
+  }, [visiblesEnPestana, q, filtro, pestana, desde, entregasPorPedido, devolucionesPorPedido])
 
   // Una OT = una tarjeta, con todos sus materiales adentro (nunca se repite
   // el número de OT como si fueran OT distintas). "Completado" a nivel de OT
@@ -199,22 +252,73 @@ export function RegistroSid() {
       </div>
 
       <Card className="mb-6">
-        <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:items-end sm:justify-between">
-          <div className="flex flex-1 flex-col gap-1.5">
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por número de OT..." />
+        <CardContent className="flex flex-col gap-4 pt-6">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div className="flex flex-1 flex-col gap-1.5">
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por número de OT..." />
+            </div>
+            <div className="flex gap-2">
+              {FILTROS.map((f) => (
+                <Button
+                  key={f.valor}
+                  type="button"
+                  variant={filtro === f.valor ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setFiltro(f.valor)}
+                >
+                  {f.etiqueta}
+                </Button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-2">
-            {FILTROS.map((f) => (
-              <Button
-                key={f.valor}
+
+          <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+            <div className="inline-flex rounded-full bg-muted p-1">
+              <button
                 type="button"
-                variant={filtro === f.valor ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setFiltro(f.valor)}
+                onClick={() => cambiarModoFecha('dia')}
+                className={cn(
+                  'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                  modoFecha === 'dia'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
               >
-                {f.etiqueta}
-              </Button>
-            ))}
+                Día
+              </button>
+              <button
+                type="button"
+                onClick={() => cambiarModoFecha('mes')}
+                className={cn(
+                  'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                  modoFecha === 'mes'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Mes
+              </button>
+            </div>
+
+            <Input
+              type={modoFecha === 'dia' ? 'date' : 'month'}
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              className="w-auto"
+            />
+
+            {(q || fecha) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setQ('')
+                  setFecha('')
+                }}
+                className="text-sm text-muted-foreground hover:text-foreground hover:underline"
+              >
+                Limpiar filtros
+              </button>
+            )}
           </div>
         </CardContent>
       </Card>

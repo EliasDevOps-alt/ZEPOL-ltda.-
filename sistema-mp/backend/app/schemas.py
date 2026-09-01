@@ -257,6 +257,16 @@ class OtExcelOut(CamposComercialesOt):
     total: Optional[float] = None
 
 
+class OtExcelNuevaOut(BaseModel):
+    """Una fila de 'oc mp' cuyo número de OT todavía no está en la base de
+    datos — para el botón "Buscar OT nuevas en el Excel" de Todas las OT.
+    Solo lo mínimo para identificarla en pantalla; importarla trae el resto."""
+
+    numero_ot: str
+    cliente: Optional[str] = None
+    descripcion_producto: Optional[str] = None
+
+
 class ConfiguracionExcelOut(BaseModel):
     ruta: Optional[str] = None
     tiene_password: bool = False

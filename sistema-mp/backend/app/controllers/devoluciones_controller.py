@@ -104,14 +104,24 @@ def listar_devoluciones_por_ot(db: Session, numero_ot: Optional[str] = None) -> 
     return db.scalars(stmt).all()
 
 
+def _bloquear_si_devolucion_tiene_sid(devolucion: Devolucion) -> None:
+    # Ver la nota equivalente en entregas_controller._bloquear_si_entrega_tiene_sid.
+    if devolucion.sid_completado:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Esta devolución ya tiene su SID registrado — desmarcalo en Registro SID antes de corregirla",
+        )
+
+
 # Ver la nota equivalente en entregas_controller.editar_entrega: esto se
-# permite siempre (no se bloquea por tener movimiento real) porque de eso se
-# trata — corregir un movimiento real mal cargado. editado_por_id/editado_en
-# dejan rastro de que pasó, mostrado en la propia ficha (ver DevolucionOut).
+# permite mientras no tenga su SID registrado — corregir un movimiento real
+# mal cargado. editado_por_id/editado_en dejan rastro de que pasó, mostrado
+# en la propia ficha (ver DevolucionOut).
 def editar_devolucion(db: Session, usuario: Usuario, devolucion_id: int, data: schemas.DevolucionUpdate) -> Devolucion:
     devolucion = db.get(Devolucion, devolucion_id)
     if devolucion is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
+    _bloquear_si_devolucion_tiene_sid(devolucion)
 
     ot_material = devolucion.ot_material
 
@@ -143,6 +153,7 @@ def eliminar_devolucion(db: Session, usuario: Usuario, devolucion_id: int) -> No
     devolucion = db.get(Devolucion, devolucion_id)
     if devolucion is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
+    _bloquear_si_devolucion_tiene_sid(devolucion)
 
     ot_material = devolucion.ot_material
 

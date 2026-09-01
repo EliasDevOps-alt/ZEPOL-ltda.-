@@ -130,17 +130,31 @@ def listar_entregas_por_ot(db: Session, numero_ot: Optional[str] = None) -> List
     return db.scalars(stmt).all()
 
 
+def _bloquear_si_entrega_tiene_sid(entrega: Entrega) -> None:
+    # El SID de esta entrega puntual (Registro SID) es un trámite externo —
+    # una vez que alguien lo marcó como registrado, corregir o borrar la
+    # entrega dejaría ese trámite desalineado con lo que quedó en el sistema.
+    # Para volver a corregirla hace falta primero desmarcar el SID desde
+    # Registro SID (sid_controller.marcar_entrega_sid).
+    if entrega.sid_completado:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Esta entrega ya tiene su SID registrado — desmarcalo en Registro SID antes de corregirla",
+        )
+
+
 # Corregir/borrar una entrega ya registrada — a diferencia del resto del
 # sistema (donde un pedido con movimiento real queda bloqueado, ver
-# ordenes_controller.actualizar_pedido), esto SÍ se permite siempre: el
-# personal de planta no siempre tipea bien a la primera y no hay otra forma
-# de arreglar una cantidad o fecha mal cargada una vez guardada. Lo que
-# deja rastro de que pasó es editado_por_id/editado_en, que se muestran en
-# la propia ficha de la entrega (ver EntregaOut).
+# ordenes_controller.actualizar_pedido), esto SÍ se permite mientras no tenga
+# su SID registrado: el personal de planta no siempre tipea bien a la primera
+# y no hay otra forma de arreglar una cantidad o fecha mal cargada una vez
+# guardada. Lo que deja rastro de que pasó es editado_por_id/editado_en, que
+# se muestran en la propia ficha de la entrega (ver EntregaOut).
 def editar_entrega(db: Session, usuario: Usuario, entrega_id: int, data: schemas.EntregaUpdate) -> Entrega:
     entrega = db.get(Entrega, entrega_id)
     if entrega is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
+    _bloquear_si_entrega_tiene_sid(entrega)
 
     pedido = entrega.ot_material
 
@@ -177,6 +191,7 @@ def eliminar_entrega(db: Session, usuario: Usuario, entrega_id: int) -> None:
     entrega = db.get(Entrega, entrega_id)
     if entrega is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
+    _bloquear_si_entrega_tiene_sid(entrega)
 
     pedido = entrega.ot_material
 

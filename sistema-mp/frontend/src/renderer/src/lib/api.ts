@@ -26,6 +26,7 @@ import type {
   OtBusqueda,
   OtDetalleCreate,
   OtDetalleOut,
+  OtExcelNueva,
   OtImportada,
   OtMaterialPendiente,
   Proceso,
@@ -183,6 +184,13 @@ export function listarOrdenes(
   if (opts.hasta) params.set('hasta', opts.hasta)
   const qs = params.toString()
   return request<OrdenTrabajo[]>(baseUrl, `/ordenes-trabajo${qs ? `?${qs}` : ''}`, { token })
+}
+
+// OT que tienen fila en "oc mp" pero todavía no están en la base de datos —
+// para el botón "Buscar OT nuevas en el Excel" de Todas las OT. Cada una se
+// trae después una por una con importarOtDesdeExcel, no de una vez.
+export function listarOtsNuevasEnExcel(baseUrl: string, token: string) {
+  return request<OtExcelNueva[]>(baseUrl, '/ordenes-trabajo/nuevas-en-excel', { token })
 }
 
 export function guardarDetalleOt(baseUrl: string, token: string, data: OtDetalleCreate) {

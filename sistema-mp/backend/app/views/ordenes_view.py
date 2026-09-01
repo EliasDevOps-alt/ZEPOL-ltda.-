@@ -13,6 +13,7 @@ from ..controllers.ordenes_controller import CAMPOS_COMERCIALES
 from ..controllers.pedidos_controller import total_devuelto_pedido, total_entregado_pedido
 from ..database import get_db
 from ..models import OrdenTrabajo, OtMaterialPendiente
+from ..services.excel_oc_mp import ExcelLecturaError
 
 router = APIRouter(prefix="/ordenes-trabajo", tags=["ordenes-trabajo"], dependencies=[Depends(security.get_current_usuario)])
 router_pendientes = APIRouter(
@@ -93,6 +94,14 @@ def listar_ordenes(
     db: Session = Depends(get_db),
 ):
     return ordenes_controller.listar_ordenes(db, q, desde, hasta)
+
+
+@router.get("/nuevas-en-excel", response_model=List[schemas.OtExcelNuevaOut])
+def listar_ots_nuevas_en_excel(db: Session = Depends(get_db)):
+    try:
+        return ordenes_controller.listar_ots_nuevas_en_excel(db)
+    except ExcelLecturaError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
 @router.post(
