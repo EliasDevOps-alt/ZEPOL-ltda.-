@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Instaladores publicados para el auto-actualizador (electron-updater) -
+# binarios grandes, se copian a mano al servidor, no se versionan en git.
+sistema-mp/backend/updates/

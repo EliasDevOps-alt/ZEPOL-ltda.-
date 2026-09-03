@@ -1,6 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { autoUpdater } from 'electron-updater'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
@@ -41,6 +42,50 @@ function createWindow(): void {
   }
 }
 
+const UNA_HORA_MS = 60 * 60 * 1000
+
+function revisarActualizaciones(): void {
+  // El servidor sirve /updates desde la misma URL del backend que la app ya
+  // tiene configurada - así no hace falta hardcodear la IP del servidor en
+  // el build, y cada estación revisa contra el servidor al que ya apunta.
+  const { apiBaseUrl } = readConfig()
+  autoUpdater.setFeedURL({ provider: 'generic', url: `${apiBaseUrl.replace(/\/$/, '')}/updates/` })
+  autoUpdater.checkForUpdates().catch((err) => {
+    console.error('No se pudo revisar actualizaciones:', err)
+  })
+}
+
+function iniciarAutoUpdate(): void {
+  // En dev (npm run dev) no hay build empaquetado ni updates que buscar.
+  if (!app.isPackaged) return
+
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+
+  autoUpdater.on('update-downloaded', () => {
+    dialog
+      .showMessageBox({
+        type: 'info',
+        title: 'Actualización disponible',
+        message: 'Hay una nueva versión de ZEPOL Control MP lista para instalar.',
+        detail: 'Guarda cualquier cambio pendiente. La app se cerrará y reabrirá ya actualizada.',
+        buttons: ['Actualizar ahora', 'Más tarde'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      .then((resultado) => {
+        if (resultado.response === 0) autoUpdater.quitAndInstall()
+      })
+  })
+
+  autoUpdater.on('error', (err) => {
+    console.error('Error de auto-actualización:', err)
+  })
+
+  revisarActualizaciones()
+  setInterval(revisarActualizaciones, UNA_HORA_MS)
+}
+
 app.whenReady().then(() => {
   ipcMain.handle('config:get', () => readConfig())
   ipcMain.handle('config:set', (_event, config: AppConfig) => {
@@ -58,6 +103,7 @@ app.whenReady().then(() => {
   })
 
   createWindow()
+  iniciarAutoUpdate()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

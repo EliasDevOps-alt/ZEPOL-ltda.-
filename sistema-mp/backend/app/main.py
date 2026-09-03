@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from .views import (
     auth_view,
@@ -41,6 +45,16 @@ app.include_router(ordenes_view.router_pendientes_crear_ot)
 app.include_router(ordenes_view.router_pedidos)
 app.include_router(configuracion_view.router)
 app.include_router(usuarios_view.router)
+
+# Sirve los instaladores publicados para el auto-actualizador de la app de
+# escritorio (electron-updater) - las 5 estaciones apuntan aquí para
+# detectar y descargar nuevas versiones, sin depender de internet/GitHub ya
+# que esto es un despliegue solo de LAN. La carpeta vive fuera del repo
+# (se llena a mano con `npm run dist` + copiar el resultado); se crea sola
+# si no existe para que el arranque no falle en una instalación nueva.
+UPDATES_DIR = Path(os.environ.get("UPDATES_DIR", Path(__file__).resolve().parent.parent / "updates"))
+UPDATES_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/updates", StaticFiles(directory=str(UPDATES_DIR)), name="updates")
 
 
 @app.get("/health")
