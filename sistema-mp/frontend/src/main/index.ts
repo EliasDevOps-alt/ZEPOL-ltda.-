@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
+import log from 'electron-log/main'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
@@ -58,6 +59,13 @@ function revisarActualizaciones(): void {
 function iniciarAutoUpdate(): void {
   // En dev (npm run dev) no hay build empaquetado ni updates que buscar.
   if (!app.isPackaged) return
+
+  // Sin esto no hay forma de ver qué pasó: la app empaquetada no tiene
+  // consola, y electron-updater no explica nada en la UI si algo falla.
+  // Log en disco, %APPDATA%/<app>/logs/main.log.
+  log.initialize()
+  log.transports.file.level = 'info'
+  autoUpdater.logger = log
 
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
