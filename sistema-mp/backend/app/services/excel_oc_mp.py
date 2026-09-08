@@ -47,6 +47,15 @@ COL_FACTURA_CLISES = 34
 COL_PRECIO_CLISE_USD = 35
 COL_PRECIO_TOTAL_PEDIDO_USD = 36
 
+# Última columna del bloque de datos de 'oc mp'.
+COL_ULTIMA = COL_PRECIO_TOTAL_PEDIDO_USD
+
+# Las dos columnas de fórmulas precargadas (ver el comentario de
+# CAMPOS_A_COLUMNAS abajo). Están rellenadas cientos de filas más allá del
+# último dato real, así que para decidir si una fila está libre hay que
+# ignorarlas: si no, TODAS las filas del final parecen ocupadas.
+COLS_CALCULADAS = frozenset({COL_TOTAL, COL_PRECIO_TOTAL_PEDIDO_USD})
+
 # Mapeo campo comercial -> columna, usado solo al escribir (ver
 # escribir_oc_mp). COL_TOTAL y COL_PRECIO_TOTAL_PEDIDO_USD quedan afuera a
 # propósito: en la plantilla real esas dos columnas son fórmulas
@@ -334,25 +343,67 @@ def _con_reintentos(fn: Any, intentos: int = 12, espera: float = 2.0) -> Any:
             time.sleep(espera)
 
 
-def _primera_fila_vacia(ws: Any) -> int:
-    """Primera fila desde FILA_DATOS_INICIO cuya columna OT está vacía. Lee
-    el rango completo en una sola llamada COM (batch) en vez de celda por
+def _fila_tiene_datos(valores_fila: Any) -> bool:
+    """True si la fila tiene algo cargado en alguna columna que no sea de las
+    calculadas. Mirar COLS_CALCULADAS daría 'ocupada' siempre, porque esas
+    fórmulas están precargadas mucho más abajo del último dato real."""
+    for i, v in enumerate(valores_fila):
+        if (i + 1) in COLS_CALCULADAS:
+            continue
+        if v not in (None, ""):
+            return True
+    return False
+
+
+def _primera_fila_libre(ws: Any) -> int:
+    """Fila siguiente a la ÚLTIMA que tenga datos reales.
+
+    Ojo con la diferencia, porque acá hubo pérdida de datos en producción:
+    la versión anterior devolvía el PRIMER hueco (la primera fila cuya celda
+    de OT estaba vacía), no el final. En una planilla que edita a mano toda
+    el área, basta con que alguien borre el número de OT de una fila, inserte
+    una fila o reordene la hoja para que quede un hueco en el medio — y
+    escribir ahí pisaba una OT cargada. Pasó con la OT 220289.
+
+    Como los campos vacíos de la OT nueva no se escriben, la fila pisada
+    quedaba encima mezclada con restos de la anterior, que es por lo que el
+    síntoma se ve como dos OT 'solapadas' y no como una fila reemplazada.
+
+    Se busca la última fila con datos (ignorando las columnas calculadas) en
+    vez de la última con OT, para que una fila dañada —con datos pero sin
+    número de OT— tampoco se use como destino.
+
+    Lee el rango completo en una sola llamada COM (batch) en vez de celda por
     celda — con ~2000+ filas ya usadas, iterar con Cells() una por una es
     lento de verdad (cada llamada es un round-trip COM aparte)."""
-    rango = ws.Range(ws.Cells(FILA_DATOS_INICIO, COL_OT), ws.Cells(FILA_BUSQUEDA_MAX, COL_OT))
-    valores = rango.Value  # tupla de tuplas de 1 elemento, una por fila
-    for i, (v,) in enumerate(valores):
-        if v in (None, ""):
-            return FILA_DATOS_INICIO + i
-    raise ExcelEscrituraError(
-        f"No se encontró una fila vacía en '{HOJA}' entre las filas {FILA_DATOS_INICIO} y {FILA_BUSQUEDA_MAX}"
-    )
+    rango = ws.Range(ws.Cells(FILA_DATOS_INICIO, 1), ws.Cells(FILA_BUSQUEDA_MAX, COL_ULTIMA))
+    valores = rango.Value  # tupla de tuplas, una por fila
+    ultima_con_datos = None
+    for i, fila_valores in enumerate(valores):
+        if _fila_tiene_datos(fila_valores):
+            ultima_con_datos = FILA_DATOS_INICIO + i
+    fila = FILA_DATOS_INICIO if ultima_con_datos is None else ultima_con_datos + 1
+    if fila > FILA_BUSQUEDA_MAX:
+        raise ExcelEscrituraError(
+            f"'{HOJA}' llegó al límite de búsqueda (fila {FILA_BUSQUEDA_MAX}) y no queda fila libre"
+        )
+    return fila
+
+
+def _fila_ocupada(ws: Any, fila: int) -> bool:
+    """Red de seguridad antes de escribir una fila nueva: relee esa única fila
+    y avisa si tiene algo cargado. Nunca debería dar True viniendo de
+    _primera_fila_libre — es justamente para que un error de cálculo de fila
+    falle con un mensaje claro en vez de destruir una OT en silencio."""
+    rango = ws.Range(ws.Cells(fila, 1), ws.Cells(fila, COL_ULTIMA))
+    valores = rango.Value
+    return _fila_tiene_datos(valores[0])
 
 
 def _buscar_fila_por_ot(ws: Any, numero_ot: str) -> Optional[int]:
     """Fila donde ya está esta OT en 'oc mp', si existe — para actualizarla
     en vez de agregar una fila duplicada. Mismo batch-read de
-    _primera_fila_vacia, por la misma razón de performance (una sola llamada
+    _primera_fila_libre, por la misma razón de performance (una sola llamada
     COM para todo el rango en vez de una por celda)."""
     rango = ws.Range(ws.Cells(FILA_DATOS_INICIO, COL_OT), ws.Cells(FILA_BUSQUEDA_MAX, COL_OT))
     valores = rango.Value
@@ -449,7 +500,21 @@ def escribir_oc_mp(
                     raise ExcelEscrituraError(f"No se encontró la hoja '{HOJA}': {exc}") from exc
 
                 fila_existente = _con_reintentos(lambda: _buscar_fila_por_ot(ws, numero_ot))
-                fila = fila_existente if fila_existente is not None else _con_reintentos(lambda: _primera_fila_vacia(ws))
+                if fila_existente is not None:
+                    fila = fila_existente
+                else:
+                    fila = _con_reintentos(lambda: _primera_fila_libre(ws))
+                    # Segunda barrera, a propósito redundante con
+                    # _primera_fila_libre: agregar una OT nueva jamás puede
+                    # escribir sobre una fila que ya tiene algo. Antes esto no
+                    # existía y un cálculo de fila equivocado se llevó puesta
+                    # una OT cargada sin que nadie se enterara hasta después.
+                    if _con_reintentos(lambda: _fila_ocupada(ws, fila)):
+                        raise ExcelEscrituraError(
+                            f"Se canceló la escritura: la fila {fila} de '{HOJA}' ya tiene datos "
+                            f"y se habría sobrescrito una OT existente. Revisá si hay filas con "
+                            f"el número de OT en blanco en la planilla."
+                        )
 
                 def _escribir_celdas() -> None:
                     ws.Cells(fila, COL_OT).Value = numero_ot
