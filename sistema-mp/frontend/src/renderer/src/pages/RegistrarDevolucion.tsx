@@ -15,11 +15,8 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
+import { hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, OtMaterialPendiente } from '@renderer/lib/types'
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 interface EntradaDevolucion extends BobinasPedido {
   // Material que realmente se está devolviendo — un pedido puede tener

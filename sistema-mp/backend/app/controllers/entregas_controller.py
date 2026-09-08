@@ -178,7 +178,11 @@ def editar_entrega(db: Session, usuario: Usuario, entrega_id: int, data: schemas
         entrega.bobinas = [EntregaBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
 
     entrega.editado_por_id = usuario.id
-    entrega.editado_en = datetime.utcnow()
+    # Hora local, no UTC: creado_en/hora los pone Postgres con now()/current_time
+    # y el servidor corre en America/La_Paz. Guardar UTC acá dejaba editado_en
+    # 4 horas adelantado, así que una corrección hecha después de las 20:00 se
+    # mostraba en Historial con la fecha del día siguiente.
+    entrega.editado_en = datetime.now()
 
     db.flush()
     sid_controller.recalcular_estado_entrega(db, pedido)

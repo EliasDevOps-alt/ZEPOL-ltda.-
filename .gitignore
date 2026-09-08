@@ -14,8 +14,17 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+# Anclados a la raíz con "/" a propósito. Sin la barra inicial, "lib/" hace
+# match en CUALQUIER nivel del árbol y se traga
+# sistema-mp/frontend/src/renderer/src/lib/ — que es código fuente real
+# (api.ts, AuthContext.tsx, fechas.ts...). Los archivos que ya estaban
+# trackeados seguían apareciendo, así que el problema era invisible: solo
+# los ARCHIVOS NUEVOS de esa carpeta quedaban ignorados en silencio, se
+# commiteaban "bien" y el build recién fallaba en el servidor al clonar.
+# Estas dos reglas vienen de la plantilla de Python y ahí siempre
+# significaron la salida de setuptools en la raíz del proyecto.
+/lib/
+/lib64/
 parts/
 sdist/
 var/

@@ -17,11 +17,8 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
+import { hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Entrega, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
 
 interface EntradaMaterial extends BobinasPedido {
   // '' = se entrega el material del pedido tal cual (el caso normal).

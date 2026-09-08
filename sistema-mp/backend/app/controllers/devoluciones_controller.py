@@ -139,7 +139,8 @@ def editar_devolucion(db: Session, usuario: Usuario, devolucion_id: int, data: s
         devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
 
     devolucion.editado_por_id = usuario.id
-    devolucion.editado_en = datetime.utcnow()
+    # Hora local, no UTC — ver la nota en entregas_controller.editar_entrega.
+    devolucion.editado_en = datetime.now()
 
     db.flush()
     if ot_material is not None:

@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogTitle } from '@renderer/components/ui/dial
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import { cn } from '@renderer/lib/utils'
+import { hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import type { OtExcelNueva } from '@renderer/lib/types'
@@ -21,19 +22,6 @@ function useDebounced(valor: string, ms: number): string {
     return () => clearTimeout(id)
   }, [valor, ms])
   return debounced
-}
-
-function ultimoDiaDelMes(mesISO: string): string {
-  const [anio, mes] = mesISO.split('-').map(Number)
-  return new Date(anio, mes, 0).toISOString().slice(0, 10)
-}
-
-function hoyISO(): string {
-  return new Date().toISOString().slice(0, 10)
-}
-
-function mesActualISO(): string {
-  return hoyISO().slice(0, 7)
 }
 
 type ModoFecha = 'dia' | 'mes'
