@@ -212,7 +212,18 @@ def _abrir_hoja(ruta: str, password: Optional[str]) -> Optional[Any]:
 
 def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
     """Busca numero_ot en la hoja 'oc mp' y devuelve sus datos, o None si no
-    se encuentra la OT o el archivo no está accesible."""
+    se encuentra la OT o el archivo no está accesible.
+
+    Una OT puede repetirse en más de una fila si el cliente cargó más de 6
+    materiales a mano en el Excel — escribir_oc_mp rechaza eso desde acá,
+    pero nada impide que el cliente escriba una segunda fila con el mismo
+    número de OT directamente en la hoja. Antes esto se cortaba en la
+    primera fila encontrada, así que los materiales de la fila extra
+    quedaban invisibles tanto al importar como al comparar (una OT con más
+    de 6 materiales siempre parecía "sin cambios" aunque le faltara alguno)
+    — por eso ahora sigue recorriendo el resto de la hoja y suma los
+    materiales de cada fila que coincida; los datos comerciales se toman de
+    la primera fila encontrada, que es la que realmente los tiene."""
     ruta = obtener_ruta_configurada(db)
     if not ruta:
         logger.warning("No hay ruta configurada para el Excel OC-MP")
@@ -223,47 +234,51 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
         return None
 
     objetivo = numero_ot.strip()
+    resultado: Optional[Dict[str, Any]] = None
     for row in ws.iter_rows(min_row=FILA_DATOS_INICIO, values_only=True):
         if not _coincide_ot(_valor(row, COL_OT), objetivo):
             continue
 
-        materiales: List[Dict[str, Any]] = []
+        materiales_fila: List[Dict[str, Any]] = []
         for col_codigo, col_cantidad in COLS_MATERIALES:
             codigo = _texto(_valor(row, col_codigo))
             if codigo:
-                materiales.append(
+                materiales_fila.append(
                     {"codigo_mp": codigo, "cantidad_requerida": _numero(_valor(row, col_cantidad))}
                 )
 
-        return {
-            "numero_ot": objetivo,
-            "fecha_seguimiento_mp": _fecha(_valor(row, COL_FECHA_SEGUIMIENTO)),
-            "alm": _texto(_valor(row, COL_ALM)),
-            "so": _texto(_valor(row, COL_SO)),
-            "materiales": materiales,
-            "total": _numero(_valor(row, COL_TOTAL)),
-            "status_entrega_mp": _texto(_valor(row, COL_STATUS_ENTREGA_MP)),
-            "tipo_trabajo": _texto(_valor(row, COL_TIPO_TRABAJO)),
-            "indicador": _texto(_valor(row, COL_INDICADOR)),
-            "cliente": _texto(_valor(row, COL_CLIENTE)),
-            "vendedor": _texto(_valor(row, COL_VENDEDOR)),
-            "ciudad": _texto(_valor(row, COL_CIUDAD)),
-            "fecha_pedido": _fecha(_valor(row, COL_FECHA_PEDIDO)),
-            "fecha_entrega": _fecha(_valor(row, COL_FECHA_ENTREGA)),
-            "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
-            "codigo_producto": _texto(_valor(row, COL_CODIGO_PRODUCTO)),
-            "total_ot": _numero(_valor(row, COL_TOTAL_OT)),
-            "entrega_mes": _numero(_valor(row, COL_ENTREGA_MES)),
-            "medida": _texto(_valor(row, COL_MEDIDA)),
-            "equivalencia_kg": _numero(_valor(row, COL_EQUIVALENCIA_KG)),
-            "pu_usd": _numero(_valor(row, COL_PU_USD)),
-            "pt_usd": _numero(_valor(row, COL_PT_USD)),
-            "factura_clises": _texto(_valor(row, COL_FACTURA_CLISES)),
-            "precio_clise_usd": _numero(_valor(row, COL_PRECIO_CLISE_USD)),
-            "precio_total_pedido_usd": _numero(_valor(row, COL_PRECIO_TOTAL_PEDIDO_USD)),
-        }
+        if resultado is None:
+            resultado = {
+                "numero_ot": objetivo,
+                "fecha_seguimiento_mp": _fecha(_valor(row, COL_FECHA_SEGUIMIENTO)),
+                "alm": _texto(_valor(row, COL_ALM)),
+                "so": _texto(_valor(row, COL_SO)),
+                "materiales": materiales_fila,
+                "total": _numero(_valor(row, COL_TOTAL)),
+                "status_entrega_mp": _texto(_valor(row, COL_STATUS_ENTREGA_MP)),
+                "tipo_trabajo": _texto(_valor(row, COL_TIPO_TRABAJO)),
+                "indicador": _texto(_valor(row, COL_INDICADOR)),
+                "cliente": _texto(_valor(row, COL_CLIENTE)),
+                "vendedor": _texto(_valor(row, COL_VENDEDOR)),
+                "ciudad": _texto(_valor(row, COL_CIUDAD)),
+                "fecha_pedido": _fecha(_valor(row, COL_FECHA_PEDIDO)),
+                "fecha_entrega": _fecha(_valor(row, COL_FECHA_ENTREGA)),
+                "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
+                "codigo_producto": _texto(_valor(row, COL_CODIGO_PRODUCTO)),
+                "total_ot": _numero(_valor(row, COL_TOTAL_OT)),
+                "entrega_mes": _numero(_valor(row, COL_ENTREGA_MES)),
+                "medida": _texto(_valor(row, COL_MEDIDA)),
+                "equivalencia_kg": _numero(_valor(row, COL_EQUIVALENCIA_KG)),
+                "pu_usd": _numero(_valor(row, COL_PU_USD)),
+                "pt_usd": _numero(_valor(row, COL_PT_USD)),
+                "factura_clises": _texto(_valor(row, COL_FACTURA_CLISES)),
+                "precio_clise_usd": _numero(_valor(row, COL_PRECIO_CLISE_USD)),
+                "precio_total_pedido_usd": _numero(_valor(row, COL_PRECIO_TOTAL_PEDIDO_USD)),
+            }
+        else:
+            resultado["materiales"].extend(materiales_fila)
 
-    return None
+    return resultado
 
 
 def listar_ots_excel(db: Session) -> List[Dict[str, Any]]:
