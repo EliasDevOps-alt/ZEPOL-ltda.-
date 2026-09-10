@@ -329,6 +329,7 @@ export interface Entrega {
   unidad: string
   usuario: string
   fecha: string
+  hora: string
   bobinas: number[]
   total_entregado: number
   cantidad_requerida: number | null
@@ -407,6 +408,7 @@ export interface Devolucion {
   codigo_mp: string
   usuario: string
   fecha: string
+  hora: string
   bobinas: number[]
   total_devuelto: number
   total_devuelto_pedido: number

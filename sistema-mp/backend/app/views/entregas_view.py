@@ -34,6 +34,7 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         unidad=ot_material.material.unidad,
         usuario=entrega.usuario.inicial,
         fecha=entrega.fecha,
+        hora=entrega.hora,
         bobinas=[float(b.cantidad) for b in sorted(entrega.bobinas, key=lambda b: b.numero)],
         total_entregado=sum(float(b.cantidad) for b in entrega.bobinas),
         cantidad_requerida=float(ot_material.cantidad_requerida) if ot_material.cantidad_requerida else None,

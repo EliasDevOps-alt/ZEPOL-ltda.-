@@ -26,7 +26,7 @@ def listar_ordenes(
     q: Optional[str],
     desde: Optional[date] = None,
     hasta: Optional[date] = None,
-    limite: int = 200,
+    limite: int = 2000,
 ) -> List[OrdenTrabajo]:
     stmt = select(OrdenTrabajo)
     if q:

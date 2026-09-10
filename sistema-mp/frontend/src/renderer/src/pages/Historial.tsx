@@ -14,6 +14,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
+import { formatearFechaHora, formatearFechaHoraCompleta } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, Proceso } from '@renderer/lib/types'
 
 const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
@@ -112,7 +113,7 @@ function FilaEntrega({
       <div className="rounded-md border border-border p-2 text-xs">
         <div className="flex justify-between">
           <span>
-            {entrega.fecha} · {entrega.codigo_mp_entregado}
+            {formatearFechaHora(entrega.fecha, entrega.hora)} · {entrega.codigo_mp_entregado}
             {entrega.codigo_mp_entregado !== entrega.codigo_mp ? (
               <span className="text-warning"> (pedido: {entrega.codigo_mp})</span>
             ) : (
@@ -139,7 +140,7 @@ function FilaEntrega({
         )}
         {entrega.editado_por && (
           <p className="mt-1 text-primary">
-            Editado por {entrega.editado_por} el {new Date(entrega.editado_en!).toLocaleDateString('es-BO')}
+            Editado por {entrega.editado_por} el {formatearFechaHoraCompleta(entrega.editado_en!)}
           </p>
         )}
         {error && <p className="mt-1 text-destructive">{error}</p>}
@@ -301,7 +302,7 @@ function FilaDevolucion({
       <div className="rounded-md border border-border p-2 text-xs">
         <div className="flex justify-between">
           <span>
-            {devolucion.fecha} · {devolucion.codigo_mp}
+            {formatearFechaHora(devolucion.fecha, devolucion.hora)} · {devolucion.codigo_mp}
             {devolucion.es_ingreso_produccion && <span className="text-warning"> (ingreso a almacén)</span>}
           </span>
           <span className="font-medium">
@@ -317,7 +318,7 @@ function FilaDevolucion({
         )}
         {devolucion.editado_por && (
           <p className="mt-1 text-primary">
-            Editado por {devolucion.editado_por} el {new Date(devolucion.editado_en!).toLocaleDateString('es-BO')}
+            Editado por {devolucion.editado_por} el {formatearFechaHoraCompleta(devolucion.editado_en!)}
           </p>
         )}
         {error && <p className="mt-1 text-destructive">{error}</p>}
@@ -498,7 +499,7 @@ export function Historial() {
                   </p>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {new Date(ot.fecha_creacion).toLocaleDateString('es-BO')}
+                  {formatearFechaHoraCompleta(ot.fecha_creacion)}
                 </p>
               </div>
 

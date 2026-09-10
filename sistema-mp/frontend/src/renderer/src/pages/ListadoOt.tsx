@@ -10,10 +10,41 @@ import { Dialog, DialogContent, DialogTitle } from '@renderer/components/ui/dial
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import { cn } from '@renderer/lib/utils'
-import { hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
+import { formatearFechaHoraCompleta, hoyISO, mesActualISO, soloFechaLocal, ultimoDiaDelMes } from '@renderer/lib/fechas'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import type { OtExcelNueva } from '@renderer/lib/types'
+import type { OrdenTrabajo, OtExcelNueva } from '@renderer/lib/types'
+
+/** Más reciente primero, y dentro de cada día la OT de número más alto
+ * primero — no por orden de inserción (una migración/carga masiva puede
+ * insertar cientos de OT el mismo día en cualquier orden). numero_ot es un
+ * string; se compara como número cuando se puede (el caso normal, ej.
+ * "220289") y si no como texto (ej. "0001" mezclado con formatos raros). */
+function compararNumeroOtDesc(a: string, b: string): number {
+  const na = Number(a)
+  const nb = Number(b)
+  if (!Number.isNaN(na) && !Number.isNaN(nb)) return nb - na
+  return b.localeCompare(a)
+}
+
+/** Agrupa por día local (usando fecha_creacion) preservando el orden
+ * descendente que ya trae el backend, y ordena cada grupo por numero_ot. */
+function agruparPorDia(ordenes: OrdenTrabajo[]): { fecha: string; ots: OrdenTrabajo[] }[] {
+  const grupos: { fecha: string; ots: OrdenTrabajo[] }[] = []
+  for (const ot of ordenes) {
+    const fecha = soloFechaLocal(ot.fecha_creacion)
+    const ultimo = grupos[grupos.length - 1]
+    if (ultimo && ultimo.fecha === fecha) {
+      ultimo.ots.push(ot)
+    } else {
+      grupos.push({ fecha, ots: [ot] })
+    }
+  }
+  for (const grupo of grupos) {
+    grupo.ots.sort((a, b) => compararNumeroOtDesc(a.numero_ot, b.numero_ot))
+  }
+  return grupos
+}
 
 function useDebounced(valor: string, ms: number): string {
   const [debounced, setDebounced] = useState(valor)
@@ -261,6 +292,8 @@ export function ListadoOt() {
       })
   })
 
+  const grupos = useMemo(() => agruparPorDia(ordenes.data ?? []), [ordenes.data])
+
   const hayFiltros = q || fecha
 
   function limpiarFiltros() {
@@ -359,32 +392,45 @@ export function ListadoOt() {
         </p>
       )}
 
-      <div className="flex flex-col gap-2">
-        {ordenes.data?.map((ot) => (
-          <Link
-            key={ot.id}
-            to={`/crear-ot?ot=${encodeURIComponent(ot.numero_ot)}`}
-            className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4 text-sm transition-colors hover:bg-muted"
-          >
-            <div className="min-w-0">
-              <p className="font-medium">OT {ot.numero_ot}</p>
-              <p className="truncate text-muted-foreground">
-                {ot.cliente ?? 'Sin cliente'}
-                {ot.diseno ? ` · ${ot.diseno}` : ''}
-              </p>
+      <div className="flex flex-col gap-6">
+        {grupos.map((grupo) => (
+          <div key={grupo.fecha}>
+            <p className="mb-2 text-xs font-medium text-muted-foreground">
+              {new Date(`${grupo.fecha}T00:00:00`).toLocaleDateString('es-BO', {
+                day: 'numeric',
+                month: 'numeric',
+                year: 'numeric'
+              })}
+            </p>
+            <div className="flex flex-col gap-2">
+              {grupo.ots.map((ot) => (
+                <Link
+                  key={ot.id}
+                  to={`/crear-ot?ot=${encodeURIComponent(ot.numero_ot)}`}
+                  className="flex items-center justify-between gap-3 rounded-md border border-border bg-card p-4 text-sm transition-colors hover:bg-muted"
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium">OT {ot.numero_ot}</p>
+                    <p className="truncate text-muted-foreground">
+                      {ot.cliente ?? 'Sin cliente'}
+                      {ot.diseno ? ` · ${ot.diseno}` : ''}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-3">
+                    {!ot.sincronizado_excel && (
+                      <span className="flex items-center gap-1 whitespace-nowrap rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                        <FileSpreadsheet className="h-3 w-3" />
+                        Excel pendiente
+                      </span>
+                    )}
+                    <span className="whitespace-nowrap text-xs text-muted-foreground">
+                      {formatearFechaHoraCompleta(ot.fecha_creacion)}
+                    </span>
+                  </div>
+                </Link>
+              ))}
             </div>
-            <div className="flex shrink-0 items-center gap-3">
-              {!ot.sincronizado_excel && (
-                <span className="flex items-center gap-1 whitespace-nowrap rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
-                  <FileSpreadsheet className="h-3 w-3" />
-                  Excel pendiente
-                </span>
-              )}
-              <span className="whitespace-nowrap text-xs text-muted-foreground">
-                {new Date(ot.fecha_creacion).toLocaleDateString('es-BO')}
-              </span>
-            </div>
-          </Link>
+          </div>
         ))}
       </div>
     </div>

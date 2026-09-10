@@ -10,7 +10,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
+import { formatearFechaHora, hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
 type ModoFecha = 'dia' | 'mes'
@@ -483,7 +483,7 @@ function FilaMaterial({
           ? entregasOrdenadas.map((e) => (
               <MovimientoRow
                 key={e.id}
-                fecha={e.fecha}
+                fecha={formatearFechaHora(e.fecha, e.hora)}
                 etiqueta={
                   e.codigo_mp_entregado !== pedido.codigo_mp ? (
                     <span className="text-warning">
@@ -504,7 +504,7 @@ function FilaMaterial({
           : devolucionesOrdenadas.map((d) => (
               <MovimientoRow
                 key={d.id}
-                fecha={d.fecha}
+                fecha={formatearFechaHora(d.fecha, d.hora)}
                 etiqueta={
                   d.es_ingreso_produccion ? (
                     <span className="text-warning">Ingreso a almacén</span>

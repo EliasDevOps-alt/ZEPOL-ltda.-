@@ -21,6 +21,14 @@ export function hoyISO(): string {
   return aISO(new Date())
 }
 
+/** Fecha local (YYYY-MM-DD) de un timestamp completo tipo fecha_creacion —
+ * para agrupar por día en pantalla. new Date(datetime) ya interpreta un
+ * datetime con 'T' y sin offset como hora local (a diferencia de un string
+ * de solo fecha, ver la nota de arriba), así que acá sí es seguro. */
+export function soloFechaLocal(datetime: string): string {
+  return aISO(new Date(datetime))
+}
+
 export function mesActualISO(): string {
   return hoyISO().slice(0, 7)
 }
@@ -30,4 +38,23 @@ export function mesActualISO(): string {
 export function ultimoDiaDelMes(mesISO: string): string {
   const [anio, mes] = mesISO.split('-').map(Number)
   return aISO(new Date(anio, mes, 0))
+}
+
+/** 'YYYY-MM-DD' (fecha del movimiento) + 'HH:MM:SS' (su hora de registro) a
+ * 'DD/MM/YYYY HH:MM'. Se arma con split, nunca con `new Date(fechaISO)`: un
+ * string de solo fecha se interpreta como medianoche UTC, y en UTC-4 eso
+ * muestra el día anterior — mismo tipo de bug que el de toISOString de
+ * arriba, en la dirección contraria. */
+export function formatearFechaHora(fechaISO: string, horaISO: string): string {
+  const [anio, mes, dia] = fechaISO.split('-')
+  return `${dia}/${mes}/${anio} ${horaISO.slice(0, 5)}`
+}
+
+/** Timestamp completo (fecha_creacion, editado_en, creado_en) a
+ * 'DD/MM/YYYY HH:MM'. Estos sí llevan 'T' y sin offset, así que
+ * `new Date(...)` los interpreta en hora local del navegador — que es la
+ * correcta, a diferencia del caso de arriba. */
+export function formatearFechaHoraCompleta(datetime: string): string {
+  const d = new Date(datetime)
+  return `${d.toLocaleDateString('es-BO')} ${d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}`
 }

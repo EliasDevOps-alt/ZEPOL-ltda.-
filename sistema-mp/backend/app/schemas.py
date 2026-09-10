@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -411,6 +411,7 @@ class EntregaOut(BaseModel):
     unidad: str
     usuario: str
     fecha: date
+    hora: time
     bobinas: List[float]
     total_entregado: float
     cantidad_requerida: Optional[float]
@@ -475,6 +476,7 @@ class DevolucionOut(BaseModel):
     codigo_mp: str
     usuario: str
     fecha: date
+    hora: time
     bobinas: List[float]
     total_devuelto: float
     total_devuelto_pedido: float

@@ -17,7 +17,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { hoyISO } from '@renderer/lib/fechas'
+import { formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Entrega, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
 
 interface EntradaMaterial extends BobinasPedido {
@@ -1440,7 +1440,7 @@ export function RegistrarEntrega() {
                   </p>
                 </div>
                 <span className="shrink-0 whitespace-nowrap text-xs text-muted-foreground">
-                  {new Date(ot.fecha_creacion).toLocaleDateString('es-BO')}
+                  {formatearFechaHoraCompleta(ot.fecha_creacion)}
                 </span>
               </button>
             ))}
