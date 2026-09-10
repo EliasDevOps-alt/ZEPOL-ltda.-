@@ -201,5 +201,10 @@ def eliminar_entrega(db: Session, usuario: Usuario, entrega_id: int) -> None:
 
     db.delete(entrega)
     db.flush()
-    sid_controller.recalcular_estado_entrega(db, pedido)
+    # Si esta era la última entrega/devolución del pedido, vuelve a ser
+    # pendiente en vez de quedar "asignado" a un proceso con 0kg para
+    # siempre — ver ordenes_controller.revertir_a_pendiente_si_vacio. Si
+    # revirtió, el pedido ya no existe: no tiene sentido recalcularle el SID.
+    if not ordenes_controller.revertir_a_pendiente_si_vacio(db, pedido):
+        sid_controller.recalcular_estado_entrega(db, pedido)
     db.commit()

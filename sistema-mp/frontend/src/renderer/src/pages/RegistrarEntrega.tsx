@@ -584,7 +584,15 @@ function PendienteCard({
   const mutation = useMutation({
     mutationFn: async () => {
       // Sin proceso elegido el pendiente sigue siendo pendiente y la materia
-      // prima se le cuelga igual — ver requiereAsignacion.
+      // prima se le cuelga igual — ver requiereAsignacion. La materia prima
+      // no promueve el pendiente, así que si acá es la primera vez que se
+      // indica a qué material del catálogo corresponde, hay que guardarlo
+      // aparte — si no, se pierde apenas se cambia de pantalla y la próxima
+      // vez vuelve a preguntar (ver ordenes_controller.actualizar_pendiente,
+      // que ya permite esto aunque el pendiente tenga materia prima cargada).
+      if (!asignar && form.materialId && pendiente.material_id == null) {
+        await api.editarPendiente(apiBaseUrl, token, pendiente.id, { material_id: Number(form.materialId) })
+      }
       const destino = asignar
         ? {
             ot_material_id: (

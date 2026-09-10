@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import {
   AlertTriangle,
@@ -202,13 +202,25 @@ function FilaPendienteExistente({
   )
   const [error, setError] = useState<string | null>(null)
 
-  const bloqueado = pendiente.materias_primas.length > 0 || pendiente.total_ingresado > 0
+  const tieneMovimientos = pendiente.materias_primas.length > 0 || pendiente.total_ingresado > 0
+  // Resolver por primera vez a qué material del catálogo corresponde este
+  // código de Excel no contradice la materia prima/el ingreso ya cargados
+  // (esos apuntan a sus propios materiales) — así que sigue permitido aunque
+  // haya movimiento. Lo que sí queda bloqueado ahí es cambiar la cantidad o
+  // reasignar un material que ya estaba resuelto (ver
+  // ordenes_controller.actualizar_pendiente).
+  const sinResolver = pendiente.material_id == null
+  // Ya resuelto y con movimiento real: no se puede tocar nada desde acá.
+  const bloqueado = tieneMovimientos && !sinResolver
+  // Sin resolver pero con movimiento real: se puede indicar a qué material
+  // corresponde, pero no tocar la cantidad (ver el comentario de arriba).
+  const soloResolverMaterial = tieneMovimientos && sinResolver
 
   const editar = useMutation({
     mutationFn: () =>
       api.editarPendiente(apiBaseUrl, token, pendiente.id, {
         material_id: materialId ? Number(materialId) : undefined,
-        cantidad_requerida: cantidad ? Number(cantidad) : undefined
+        cantidad_requerida: soloResolverMaterial || !cantidad ? undefined : Number(cantidad)
       }),
     onSuccess: () => {
       setEditando(false)
@@ -239,13 +251,19 @@ function FilaPendienteExistente({
           placeholder="Buscar código MP..."
           emptyText="Sin materiales activos que coincidan"
         />
-        <Input
-          type="number"
-          step="0.01"
-          value={cantidad}
-          onChange={(e) => setCantidad(e.target.value)}
-          placeholder="Cantidad"
-        />
+        {soloResolverMaterial ? (
+          <p className="text-xs text-muted-foreground">
+            Ya tiene materia prima cargada — la cantidad ya no se puede cambiar desde acá.
+          </p>
+        ) : (
+          <Input
+            type="number"
+            step="0.01"
+            value={cantidad}
+            onChange={(e) => setCantidad(e.target.value)}
+            placeholder="Cantidad"
+          />
+        )}
         {error && <p className="text-xs text-destructive">{error}</p>}
         <div className="flex gap-2">
           <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
@@ -282,14 +300,16 @@ function FilaPendienteExistente({
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>
-          <button
-            type="button"
-            disabled={eliminar.isPending}
-            onClick={handleEliminar}
-            className="p-1 text-muted-foreground hover:text-destructive"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
+          {!tieneMovimientos && (
+            <button
+              type="button"
+              disabled={eliminar.isPending}
+              onClick={handleEliminar}
+              className="p-1 text-muted-foreground hover:text-destructive"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
         </span>
       )}
     </li>
@@ -301,6 +321,7 @@ export function DetalleOt() {
   const { sesion } = useAuth()
   const token = sesion!.token
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const [numeroOt, setNumeroOt] = useState('')
   const [cliente, setCliente] = useState('')
@@ -374,6 +395,28 @@ export function DetalleOt() {
       setError(err instanceof ApiError ? err.message : 'No se pudo cargar la OT')
     }
   })
+
+  // Borra la OT completa — el backend rechaza esto si algún movimiento ya
+  // tiene el SID registrado (ver ordenes_controller.eliminar_ot).
+  const eliminarOtCompleta = useMutation({
+    mutationFn: () => api.eliminarOt(apiBaseUrl, token, numeroOt),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ordenes-trabajo'] })
+      navigate('/crear-ot/listado')
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar la OT')
+  })
+
+  function handleEliminarOt() {
+    if (
+      !confirm(
+        `¿Eliminar la OT ${numeroOt} por completo? Esto borra sus pedidos, entregas y devoluciones. Esta acción no se puede deshacer.`
+      )
+    )
+      return
+    setError(null)
+    eliminarOtCompleta.mutate()
+  }
 
   // Deep-link desde el listado de OT (/crear-ot?ot=2121): precarga el número
   // y dispara la búsqueda sola, sin que el usuario tenga que escribirlo de
@@ -480,13 +523,28 @@ export function DetalleOt() {
         <h1 className="text-2xl font-semibold">
           {origenCargado === 'bd' ? `Editando OT ${numeroOt}` : 'Crear OT'}
         </h1>
-        <Link
-          to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
-          className="flex items-center gap-1.5 text-sm text-primary hover:underline"
-        >
-          <History className="h-4 w-4" />
-          Ver historial
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            to={numeroOt ? `/entrega/historial?ot=${encodeURIComponent(numeroOt)}` : '/entrega/historial'}
+            className="flex items-center gap-1.5 text-sm text-primary hover:underline"
+          >
+            <History className="h-4 w-4" />
+            Ver historial
+          </Link>
+          {origenCargado === 'bd' && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={eliminarOtCompleta.isPending}
+              onClick={handleEliminarOt}
+              className="border-destructive/40 text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              {eliminarOtCompleta.isPending ? 'Eliminando...' : 'Eliminar OT'}
+            </Button>
+          )}
+        </div>
       </div>
 
       <p className="mb-6 text-sm text-muted-foreground">
@@ -631,6 +689,8 @@ export function DetalleOt() {
                 <li key={m.ot_material_id}>
                   {m.codigo_mp} — {p.proceso} / {p.maquina}
                   {conCantidadYUnidad(m.cantidad_requerida, m.unidad)}
+                  {' — entregado: '}
+                  {m.total_entregado} {m.unidad}
                 </li>
               ))
             )}

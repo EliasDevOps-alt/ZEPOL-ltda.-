@@ -205,6 +205,12 @@ export function buscarOtConFallback(baseUrl: string, token: string, numeroOt: st
   return request<OtBusqueda>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/buscar`, { token })
 }
 
+// Borra la OT completa (procesos, pedidos, pendientes, entregas y
+// devoluciones) — se rechaza si algún movimiento ya tiene el SID registrado.
+export function eliminarOt(baseUrl: string, token: string, numeroOt: string) {
+  return request<void>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}`, { method: 'DELETE', token })
+}
+
 export function importarOtDesdeExcel(baseUrl: string, token: string, numeroOt: string) {
   return request<OtImportada>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/importar-excel`, {
     method: 'POST',

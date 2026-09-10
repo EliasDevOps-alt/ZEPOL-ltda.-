@@ -123,6 +123,15 @@ def obtener_detalle(numero_ot: str, db: Session = Depends(get_db)):
     return _serializar_detalle(ot)
 
 
+@router.delete(
+    "/{numero_ot}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
+def eliminar_ot(numero_ot: str, db: Session = Depends(get_db)):
+    ordenes_controller.eliminar_ot(db, numero_ot)
+
+
 @router.get("/{numero_ot}/buscar", response_model=schemas.OtBusquedaOut)
 def buscar_con_fallback(numero_ot: str, db: Session = Depends(get_db)):
     resultado = ordenes_controller.buscar_con_fallback(db, numero_ot)

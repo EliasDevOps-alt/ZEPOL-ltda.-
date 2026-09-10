@@ -20,7 +20,7 @@ from ..models import (
     OtProceso,
     Usuario,
 )
-from . import sid_controller
+from . import ordenes_controller, sid_controller
 
 
 def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.DevolucionCreate) -> Devolucion:
@@ -160,6 +160,8 @@ def eliminar_devolucion(db: Session, usuario: Usuario, devolucion_id: int) -> No
 
     db.delete(devolucion)
     db.flush()
-    if ot_material is not None:
+    # Ver la nota equivalente en entregas_controller.eliminar_entrega: si esta
+    # era la última entrega/devolución del pedido, vuelve a ser pendiente.
+    if ot_material is not None and not ordenes_controller.revertir_a_pendiente_si_vacio(db, ot_material):
         sid_controller.recalcular_sid_devolucion(db, ot_material)
     db.commit()

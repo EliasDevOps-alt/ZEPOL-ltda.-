@@ -304,6 +304,66 @@ def obtener_detalle(db: Session, numero_ot: str) -> Optional[OrdenTrabajo]:
     return db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
 
 
+def _tiene_sid_registrado(ot: OrdenTrabajo) -> bool:
+    """True si algún movimiento (entrega o devolución) de esta OT ya tiene su
+    SID marcado — el SID es un trámite externo frente al ingeniero, así que
+    una vez reportado no puede desaparecer por debajo sin que él se entere."""
+    for ot_proceso in ot.procesos:
+        for ot_material in ot_proceso.materiales:
+            if any(e.sid_completado for e in ot_material.entregas):
+                return True
+            if any(d.sid_completado for d in ot_material.devoluciones):
+                return True
+    for pendiente in ot.pendientes:
+        if any(d.sid_completado for d in pendiente.ingresos):
+            return True
+    return False
+
+
+def eliminar_ot(db: Session, numero_ot: str) -> None:
+    """Borra la OT completa (procesos, pedidos, pendientes, entregas y
+    devoluciones) — solo si ningún movimiento tiene ya su SID registrado. Para
+    corregir una OT cargada por error (número equivocado, duplicada) antes de
+    que tenga algo irreversible encima; no toca el Excel OC-MP, que sigue
+    siendo del cliente."""
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    if _tiene_sid_registrado(ot):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Esta OT ya tiene movimientos con el SID registrado — no se puede eliminar",
+        )
+
+    materiales = [om for otp in ot.procesos for om in otp.materiales]
+    for ot_material in materiales:
+        for entrega in list(ot_material.entregas):
+            db.delete(entrega)
+        for devolucion in list(ot_material.devoluciones):
+            db.delete(devolucion)
+    db.flush()
+
+    # La materia prima (insumo_de_id no nulo) se borra antes que el pedido
+    # que completa, para no chocar con la FK autorreferenciada de ot_materiales.
+    con_padre = [om for om in materiales if om.insumo_de_id is not None]
+    sin_padre = [om for om in materiales if om.insumo_de_id is None]
+    for ot_material in con_padre + sin_padre:
+        db.delete(ot_material)
+    db.flush()
+
+    for ot_proceso in list(ot.procesos):
+        db.delete(ot_proceso)
+
+    for pendiente in list(ot.pendientes):
+        for ingreso in list(pendiente.ingresos):
+            db.delete(ingreso)
+        db.delete(pendiente)
+
+    db.delete(ot)
+    db.commit()
+
+
 def buscar_con_fallback(db: Session, numero_ot: str) -> Dict[str, Any]:
     """Busca la OT primero en la base de datos; si no está ahí, cae al Excel
     OC-MP. El frontend usa 'origen' para avisar de dónde salió el dato."""
@@ -403,14 +463,31 @@ def actualizar_pendiente(
     tipeo en el Excel (código equivocado, cantidad mal puesta) que hoy no
     hay forma de arreglar salvo entrando a la base a mano."""
     pendiente = _obtener_pendiente(db, pendiente_id)
-    _bloquear_si_pendiente_tiene_movimientos(pendiente)
+
+    cambia_cantidad = cantidad_requerida is not None and cantidad_requerida != pendiente.cantidad_requerida
+    cambia_material_ya_resuelto = (
+        material_id is not None and pendiente.material_id is not None and material_id != pendiente.material_id
+    )
+    # Resolver por primera vez a qué material del catálogo corresponde un
+    # código de Excel sin match (material_id todavía None) NO contradice la
+    # materia prima o el ingreso ya registrados para este pendiente — esos
+    # movimientos apuntan a SUS PROPIOS materiales (ver
+    # crear_pedido_materia_prima_de_pendiente), no al de este pendiente. Solo
+    # bloquear si se intenta cambiar la cantidad o reasignar un material que
+    # ya estaba resuelto, que sí podría contradecir lo que ya se movió.
+    if cambia_cantidad or cambia_material_ya_resuelto:
+        _bloquear_si_pendiente_tiene_movimientos(pendiente)
 
     if material_id is not None:
         material = db.get(Material, material_id)
         if material is None:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
         pendiente.material_id = material.id
-        pendiente.codigo_mp = material.codigo_mp
+        # codigo_mp se deja intacto a propósito (no se pisa con el del
+        # material resuelto): es el código tal como está en el Excel, y
+        # sirve para saber de qué pedido de Excel viene este material una vez
+        # resuelto (ver PendienteIngresoCard en el frontend) y para que
+        # comparar_con_excel siga reconociéndolo al re-leer la hoja.
     if cantidad_requerida is not None:
         pendiente.cantidad_requerida = cantidad_requerida
 
@@ -517,6 +594,49 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
     db.commit()
     db.refresh(ot_material)
     return ot_material
+
+
+def revertir_a_pendiente_si_vacio(db: Session, ot_material: OtMaterial) -> bool:
+    """Espejo de promover_pendiente: si al borrar una entrega o una
+    devolución un pedido se queda sin ningún movimiento real (ni entregas ni
+    devoluciones), vuelve a ser un pendiente sin proceso ni máquina — como si
+    nunca se le hubiera entregado nada, en vez de quedar "asignado" a un
+    proceso para siempre con 0kg. Devuelve True si revirtió (el llamador no
+    debe seguir usando ot_material después de esto, ya no existe).
+
+    No aplica a un pedido de materia prima (insumo_de_id no nulo): nunca fue
+    un pendiente, no hay a qué volver. Si el pedido tenía su propia materia
+    prima cargada, esas filas vuelven a colgar del pendiente nuevo — mismo
+    repunte que hace promover_pendiente, al revés."""
+    if ot_material.entregas or ot_material.devoluciones:
+        return False
+    if ot_material.insumo_de_id is not None:
+        return False
+
+    ot_proceso = ot_material.ot_proceso
+
+    pendiente = OtMaterialPendiente(
+        ot_id=ot_proceso.ot_id,
+        codigo_mp=ot_material.material.codigo_mp,
+        material_id=ot_material.material_id,
+        cantidad_requerida=ot_material.cantidad_requerida,
+    )
+    db.add(pendiente)
+    db.flush()
+
+    for insumo in list(ot_material.insumos):
+        insumo.insumo_de_pendiente_id = pendiente.id
+        insumo.insumo_de_id = None
+
+    db.delete(ot_material)
+    db.flush()
+
+    # Si el proceso se queda sin ningún otro pedido, tampoco tiene sentido
+    # dejarlo — mismo criterio que mover_pedido.
+    if not ot_proceso.materiales:
+        db.delete(ot_proceso)
+
+    return True
 
 
 def crear_pedido_materia_prima_de_pendiente(

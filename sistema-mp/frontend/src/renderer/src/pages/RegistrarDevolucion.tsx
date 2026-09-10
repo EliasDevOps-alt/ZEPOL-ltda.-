@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { ArrowRightLeft, Beaker, CheckCircle2, Search, X } from 'lucide-react'
+import { ArrowRightLeft, Beaker, CheckCircle2, FileSpreadsheet, Plus, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -74,27 +74,63 @@ function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
  * cuando el material sale hacia producción, en Registrar Entrega. Lo único que
  * hace falta registrar es cuánto entró — y se puede registrar varias veces,
  * porque producción puede entregar en tandas (hoy 2 bobinas, mañana 1). */
+function ingresoVacio(): EntradaIngreso {
+  return { materialId: '', cantidadBobinas: '', bobinas: [] }
+}
+
+/** Lo que fabrica producción puede salir dividido en más de un material en
+ * una sola tanda (ej. de 100kg que entran a extrusión, 80kg salen como
+ * LDPE-3 y 20kg como una variante fuera de especificación) — antes había que
+ * registrar cada uno por separado (todo el submit, buscar la OT de nuevo,
+ * volver a seleccionar el pendiente), lo cual era tedioso para algo que pasa
+ * en el mismo momento. Ahora es una lista repetible como la de materia prima
+ * en Registrar Entrega: "+ Agregar otro material" agrega una fila más, y se
+ * manda un POST /devoluciones por fila en un solo submit. */
 function PendienteIngresoCard({
   pendiente,
   materiales,
   materialOptions,
-  datos,
+  entradas,
   onChange,
   onQuitar
 }: {
   pendiente: OtMaterialPendiente
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
-  datos: EntradaIngreso
-  onChange: (datos: EntradaIngreso) => void
+  entradas: EntradaIngreso[]
+  onChange: (entradas: EntradaIngreso[]) => void
   onQuitar: () => void
 }) {
-  const material = materiales.find((m) => String(m.id) === datos.materialId)
+  // Si el pendiente ya se resolvió a un material del catálogo (ver el
+  // Combobox "¿A qué material corresponde?" más abajo), mostrar ESE código
+  // como identidad principal — el código de Excel puede no significar nada
+  // para quien lo lee (ej. "LDPE45840" cuando el material real es "LDPE-3").
+  // Se conserva igual al lado, con ícono, para poder rastrear de qué pedido
+  // de Excel viene.
+  const materialResuelto = pendiente.material_id != null ? materiales.find((m) => m.id === pendiente.material_id) : undefined
+
+  function actualizar(indice: number, cambios: Partial<EntradaIngreso>) {
+    onChange(entradas.map((e, i) => (i === indice ? { ...e, ...cambios } : e)))
+  }
+  function agregar() {
+    onChange([...entradas, ingresoVacio()])
+  }
+  function quitar(indice: number) {
+    onChange(entradas.filter((_, i) => i !== indice))
+  }
 
   return (
     <div className="rounded-md border border-warning/40 bg-warning/5 p-4">
       <div className="mb-1 flex items-center justify-between">
-        <p className="text-sm font-medium">{pendiente.codigo_mp}</p>
+        <p className="flex items-center gap-1.5 text-sm font-medium">
+          {materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp}
+          {materialResuelto && (
+            <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+              <FileSpreadsheet className="h-3 w-3" />
+              {pendiente.codigo_mp}
+            </span>
+          )}
+        </p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
           <X className="h-4 w-4" />
         </button>
@@ -102,31 +138,63 @@ function PendienteIngresoCard({
       <p className="mb-3 text-xs text-muted-foreground">
         <span className="font-medium text-warning">Producción lo está entregando.</span> Entra a almacén, no es un
         sobrante — no descuenta del consumo.
-        {pendiente.total_ingresado > 0 &&
-          ` Ya entraron ${pendiente.total_ingresado} ${material?.unidad ?? ''} en entregas anteriores.`}
+        {pendiente.total_ingresado > 0 && ` Ya entraron ${pendiente.total_ingresado} en entregas anteriores.`}
       </p>
 
-      {pendiente.material_id == null && (
-        <div className="mb-3 flex flex-col gap-1.5">
-          <Label className="text-xs">¿A qué material del catálogo corresponde?</Label>
-          <Combobox
-            value={datos.materialId}
-            onChange={(v) => onChange({ ...datos, materialId: v })}
-            options={materialOptions}
-            placeholder="Buscar código MP..."
-            emptyText="Sin materiales activos que coincidan"
-          />
-        </div>
-      )}
+      {entradas.map((entrada, indice) => {
+        const material = materiales.find((m) => String(m.id) === entrada.materialId)
+        // Sin resolver, cada fila necesita su propio match — puede que la
+        // primera sea LDPE-3 y la segunda una variante que tampoco está en
+        // el Excel. Ya resuelto, con una sola fila no hace falta preguntar
+        // (se asume el material del pendiente); con más de una sí, para
+        // distinguir cuál es cuál.
+        const necesitaCombobox = pendiente.material_id == null || entradas.length > 1
+        return (
+          <div key={indice} className={indice > 0 ? 'mt-3 border-t border-warning/30 pt-3' : ''}>
+            {necesitaCombobox && (
+              <div className="mb-2 flex items-end gap-2">
+                <div className="flex flex-1 flex-col gap-1.5">
+                  <Label className="text-xs">
+                    {pendiente.material_id == null
+                      ? '¿A qué material del catálogo corresponde?'
+                      : 'Esta tanda entró como'}
+                  </Label>
+                  <Combobox
+                    value={entrada.materialId}
+                    onChange={(v) => actualizar(indice, { materialId: v })}
+                    options={materialOptions}
+                    placeholder="Buscar código MP..."
+                    emptyText="Sin materiales activos que coincidan"
+                  />
+                </div>
+                {indice > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => quitar(indice)}
+                    className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
+                    aria-label="Quitar este material"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+            )}
+            <CampoCantidad
+              unidad={material?.unidad ?? ''}
+              usaBobinas={material?.usa_bobinas ?? true}
+              datos={entrada}
+              onChange={(d) => actualizar(indice, d)}
+            />
+          </div>
+        )
+      })}
 
-      <CampoCantidad
-        unidad={material?.unidad ?? ''}
-        usaBobinas={material?.usa_bobinas ?? true}
-        datos={datos}
-        onChange={(d) => onChange({ ...datos, ...d })}
-      />
+      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={agregar}>
+        <Plus className="h-3.5 w-3.5" />
+        Agregar otro material
+      </Button>
 
-      <p className="mt-1.5 text-xs text-muted-foreground">
+      <p className="mt-2 text-xs text-muted-foreground">
         Cuando salga hacia producción, en Registrar Entrega elegís el proceso y la máquina.
       </p>
     </div>
@@ -341,7 +409,7 @@ export function RegistrarDevolucion() {
   // Los materiales que entrega producción se eligen de la misma lista que los
   // pedidos, pero son otra cosa (no tienen pedido todavía), así que llevan su
   // propia selección, indexada por id de pendiente.
-  const [ingresos, setIngresos] = useState<Record<number, EntradaIngreso>>({})
+  const [ingresos, setIngresos] = useState<Record<number, EntradaIngreso[]>>({})
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
   const [confirmaciones, setConfirmaciones] = useState<Devolucion[]>([])
@@ -461,25 +529,28 @@ export function RegistrarDevolucion() {
           }
         }
       }
-      const ingresosFallidos = new Map<number, EntradaIngreso>()
-      for (const [pendienteIdStr, datos] of Object.entries(ingresos)) {
+      const ingresosFallidos = new Map<number, EntradaIngreso[]>()
+      for (const [pendienteIdStr, entradasIngreso] of Object.entries(ingresos)) {
         const pendienteId = Number(pendienteIdStr)
         const pendiente = pendientes.data?.find((p) => p.id === pendienteId)
-        try {
-          exitos.push(
-            await api.registrarDevolucion(apiBaseUrl, token, {
-              pendiente_id: pendienteId,
-              material_id: Number(datos.materialId),
-              fecha,
-              bobinas: datos.bobinas.map(Number),
-              es_ingreso_produccion: true
-            })
-          )
-        } catch (err) {
-          mensajesFallidos.push(
-            `${pendiente?.codigo_mp ?? `#${pendienteId}`} (${err instanceof ApiError ? err.message : 'error de conexión'})`
-          )
-          ingresosFallidos.set(pendienteId, datos)
+        for (const datos of entradasIngreso) {
+          try {
+            exitos.push(
+              await api.registrarDevolucion(apiBaseUrl, token, {
+                pendiente_id: pendienteId,
+                material_id: Number(datos.materialId),
+                fecha,
+                bobinas: datos.bobinas.map(Number),
+                es_ingreso_produccion: true
+              })
+            )
+          } catch (err) {
+            mensajesFallidos.push(
+              `${pendiente?.codigo_mp ?? `#${pendienteId}`} (${err instanceof ApiError ? err.message : 'error de conexión'})`
+            )
+            const previo = ingresosFallidos.get(pendienteId)
+            ingresosFallidos.set(pendienteId, [...(previo ?? []), datos])
+          }
         }
       }
 
@@ -494,8 +565,8 @@ export function RegistrarDevolucion() {
         return restante
       })
       setIngresos(() => {
-        const restante: Record<number, EntradaIngreso> = {}
-        for (const [pendienteId, datos] of ingresosFallidos) restante[pendienteId] = datos
+        const restante: Record<number, EntradaIngreso[]> = {}
+        for (const [pendienteId, entradasIngreso] of ingresosFallidos) restante[pendienteId] = entradasIngreso
         return restante
       })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
@@ -527,11 +598,13 @@ export function RegistrarDevolucion() {
       if (copia[pendiente.id]) {
         delete copia[pendiente.id]
       } else {
-        copia[pendiente.id] = {
-          cantidadBobinas: '',
-          bobinas: [],
-          materialId: pendiente.material_id != null ? String(pendiente.material_id) : ''
-        }
+        copia[pendiente.id] = [
+          {
+            cantidadBobinas: '',
+            bobinas: [],
+            materialId: pendiente.material_id != null ? String(pendiente.material_id) : ''
+          }
+        ]
       }
       return copia
     })
@@ -564,14 +637,16 @@ export function RegistrarDevolucion() {
         return
       }
     }
-    for (const [, datos] of ingresosSeleccionados) {
-      if (!datos.materialId) {
-        setError('Indica a qué material del catálogo corresponde lo que entrega producción')
-        return
-      }
-      if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
-        setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
-        return
+    for (const [, entradasIngreso] of ingresosSeleccionados) {
+      for (const datos of entradasIngreso) {
+        if (!datos.materialId) {
+          setError('Indica a qué material del catálogo corresponde lo que entrega producción')
+          return
+        }
+        if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+          setError('Cada material seleccionado necesita una cantidad válida mayor a 0')
+          return
+        }
       }
     }
     setError(null)
@@ -632,7 +707,16 @@ export function RegistrarDevolucion() {
                   que los pedidos: se registran en tandas (hoy dos bobinas,
                   mañana una) y tener que buscarlos en otra sección hacía
                   parecer que ya estaban cerrados. */}
-              {pendientesConMateriaPrima.map((pendiente) => (
+              {pendientesConMateriaPrima.map((pendiente) => {
+                // Igual que en PendienteIngresoCard: si el pendiente ya se
+                // resolvió a un material del catálogo, mostrar ESE código
+                // como identidad principal — el código de Excel puede no
+                // significar nada para quien lo lee.
+                const materialResuelto =
+                  pendiente.material_id != null
+                    ? (materiales.data ?? []).find((m) => m.id === pendiente.material_id)
+                    : undefined
+                return (
                 <button
                   key={`pendiente-${pendiente.id}`}
                   type="button"
@@ -643,7 +727,13 @@ export function RegistrarDevolucion() {
                   )}
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium">
-                    {pendiente.codigo_mp}
+                    {materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp}
+                    {materialResuelto && (
+                      <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+                        <FileSpreadsheet className="h-3 w-3" />
+                        {pendiente.codigo_mp}
+                      </span>
+                    )}
                     <span className="inline-flex items-center gap-1 rounded-full bg-warning/20 px-2 py-0.5 text-xs font-medium text-warning">
                       <Beaker className="h-3 w-3" />
                       lo entrega producción
@@ -655,7 +745,8 @@ export function RegistrarDevolucion() {
                     {pendiente.materias_primas.join(', ')} · Sin proceso asignado todavía
                   </span>
                 </button>
-              ))}
+                )
+              })}
               {pedidosVisibles.map((pedido) => {
                 const materialesSustituidos = materialesSustituidosDe(entregas.data, pedido)
                 return (
@@ -784,8 +875,8 @@ export function RegistrarDevolucion() {
                     pendiente={pendiente}
                     materiales={materiales.data ?? []}
                     materialOptions={materialOptions}
-                    datos={ingresos[pendiente.id]}
-                    onChange={(datos) => setIngresos((prev) => ({ ...prev, [pendiente.id]: datos }))}
+                    entradas={ingresos[pendiente.id]}
+                    onChange={(entradas) => setIngresos((prev) => ({ ...prev, [pendiente.id]: entradas }))}
                     onQuitar={() => toggleIngreso(pendiente)}
                   />
                 ))}
