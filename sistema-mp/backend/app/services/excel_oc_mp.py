@@ -277,6 +277,20 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
             }
         else:
             resultado["materiales"].extend(materiales_fila)
+            # Dos filas con el mismo número de OT no siempre son la misma
+            # pieza partida por falta de espacio (ver el docstring) — a veces
+            # son dos productos distintos del mismo cliente que comparten
+            # número de OT (ej. 220268: bobinas de Trigo y de Lenteja, mismo
+            # cliente/vendedor/fecha, pero descripción y código de producto
+            # propios). Los campos de plata (total, precio unitario, etc.)
+            # vienen repetidos idénticos en ambas filas — es el total de la
+            # OT entera, no de cada producto — así que esos se dejan como
+            # están, de la primera fila. Descripción y código sí difieren
+            # fila por fila, así que se concatenan para no perder ninguno.
+            for campo, col in (("descripcion_producto", COL_DESCRIPCION), ("codigo_producto", COL_CODIGO_PRODUCTO)):
+                valor = _texto(_valor(row, col))
+                if valor and valor != resultado[campo] and valor not in (resultado[campo] or "").split(" / "):
+                    resultado[campo] = f"{resultado[campo]} / {valor}" if resultado[campo] else valor
 
     return resultado
 
