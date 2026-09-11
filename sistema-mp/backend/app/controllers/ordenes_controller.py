@@ -469,6 +469,40 @@ def listar_pendientes(db: Session, numero_ot: str) -> List[OtMaterialPendiente]:
     ).all()
 
 
+def crear_pendiente_libre(
+    db: Session, numero_ot: str, material_id: int, cantidad_requerida: Optional[float]
+) -> OtMaterialPendiente:
+    """Crea (o reutiliza) un pendiente para un material que la OT nunca
+    listó — contraparte de crear_pedido_libre para Registrar Devolución: acá
+    no hace falta proceso ni máquina (almacén no tiene máquinas), así que
+    queda como pendiente, no como pedido, exactamente igual que uno
+    importado del Excel. Sirve para registrar el ingreso a almacén de un
+    material fabricado que nadie cargó de antemano en la OT, sin esperar a
+    que alguien la actualice."""
+    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+    material = db.get(Material, material_id)
+    if material is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+
+    pendiente = db.scalar(
+        select(OtMaterialPendiente).where(
+            OtMaterialPendiente.ot_id == ot.id, OtMaterialPendiente.material_id == material_id
+        )
+    )
+    if pendiente is not None:
+        return pendiente
+
+    pendiente = OtMaterialPendiente(
+        ot_id=ot.id, codigo_mp=material.codigo_mp, material_id=material_id, cantidad_requerida=cantidad_requerida
+    )
+    db.add(pendiente)
+    db.commit()
+    db.refresh(pendiente)
+    return pendiente
+
+
 def _obtener_pendiente(db: Session, pendiente_id: int) -> OtMaterialPendiente:
     pendiente = db.get(OtMaterialPendiente, pendiente_id)
     if pendiente is None:
@@ -736,6 +770,38 @@ def crear_pedido_materia_prima(
     return _crear_o_reutilizar_ot_material(
         db, ot_proceso, material_id, cantidad_entregada, insumo_de_id=pedido.id
     )
+
+
+def crear_pedido_libre(
+    db: Session,
+    numero_ot: str,
+    material_id: int,
+    proceso_id: int,
+    maquina_id: int,
+    cantidad_entregada: float,
+) -> Tuple[OtMaterial, bool]:
+    """Crea (o reutiliza) el pedido de un material que la OT nunca listó y que
+    el personal necesita entregar igual, sin esperar a que se actualice la
+    OT — a pedido explícito de planta: registrar entregas no puede depender
+    de que alguien haya cargado antes el material correcto (ver el caso real
+    de la OT 220289, donde una resolución equivocada dejó todo enredado).
+
+    A diferencia de crear_pedido_materia_prima, este pedido queda SUELTO —
+    sin insumo_de_id — porque acá no se sabe (ni hace falta saber) si es
+    materia prima de otro pedido; si más adelante se entiende que sí lo era,
+    se corrige aparte. Proceso y máquina son obligatorios igual que ahí: acá
+    sí importa dónde se consume.
+
+    No hace commit: se llama desde entregas_controller.registrar_entrega,
+    dentro de la misma transacción que registra la entrega."""
+    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+    if db.get(Material, material_id) is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+
+    ot_proceso = crear_o_reutilizar_ot_proceso(db, ot.id, proceso_id, maquina_id)
+    return _crear_o_reutilizar_ot_material(db, ot_proceso, material_id, cantidad_entregada)
 
 
 def mover_pedido(db: Session, ot_material_id: int, proceso_id: int, maquina_id: int) -> OtMaterial:

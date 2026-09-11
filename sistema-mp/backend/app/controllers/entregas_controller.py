@@ -22,20 +22,31 @@ from . import ordenes_controller, sid_controller
 
 
 def _validar_materia_prima(data: schemas.EntregaCreate) -> None:
+    """Comparte la validación como_materia_prima y numero_ot: en los dos
+    casos se crea un pedido nuevo, así que material/proceso/máquina son
+    obligatorios (no hay un pedido existente del que copiarlos)."""
     if data.material_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Indica qué materia prima se está entregando")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Indica qué material se está entregando")
     if data.proceso_id is None or data.maquina_id is None:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Indica el proceso y la máquina donde se consume esa materia prima"
+            status.HTTP_400_BAD_REQUEST, "Indica el proceso y la máquina donde se consume ese material"
         )
 
 
 def _resolver_pedido(db: Session, data: schemas.EntregaCreate) -> Tuple[OtMaterial, bool]:
     """Contra qué pedido queda realmente la entrega. Ver EntregaCreate para los
-    dos modos; devuelve además si ese pedido se acaba de crear."""
-    if (data.ot_material_id is None) == (data.pendiente_id is None):
+    tres modos; devuelve además si ese pedido se acaba de crear."""
+    modos = [data.ot_material_id is not None, data.pendiente_id is not None, data.numero_ot is not None]
+    if sum(modos) != 1:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Indica el pedido o el material pendiente, no los dos"
+            status.HTTP_400_BAD_REQUEST, "Indica el pedido, el material pendiente, o la OT — solo uno de los tres"
+        )
+
+    # Material que la OT no tiene cargado — pedido suelto, no materia prima.
+    if data.numero_ot is not None:
+        _validar_materia_prima(data)
+        return ordenes_controller.crear_pedido_libre(
+            db, data.numero_ot, data.material_id, data.proceso_id, data.maquina_id, sum(data.bobinas)
         )
 
     # Materia prima para un material que todavía no tiene proceso asignado.
@@ -74,10 +85,11 @@ def _resolver_ot_proceso_entrega(
     ver Entrega.ot_proceso_id. None si no se pidió nada, o si coincide con el
     del pedido: significa "se consumió donde vive el pedido", el caso normal.
 
-    Con como_materia_prima esto siempre da None sin necesidad de un caso
-    aparte: el pedido que llega acá ya es el que crear_pedido_materia_prima[_
-    de_pendiente] armó exactamente con ese proceso_id/maquina_id como hogar,
-    así que la comparación de abajo ya los encuentra iguales."""
+    Con como_materia_prima o numero_ot esto siempre da None sin necesidad de
+    un caso aparte: el pedido que llega acá ya es el que
+    crear_pedido_materia_prima[_de_pendiente]/crear_pedido_libre armó
+    exactamente con ese proceso_id/maquina_id como hogar, así que la
+    comparación de abajo ya los encuentra iguales."""
     if proceso_id is None or maquina_id is None:
         return None
     ot_proceso_pedido = pedido.ot_proceso

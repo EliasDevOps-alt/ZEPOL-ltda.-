@@ -302,10 +302,14 @@ export interface MaterialUpdate {
 //     la máquina donde se consume —que no tienen por qué ser los del pedido que
 //     completa— y la entrega va contra ese. Vale para cualquier proceso.
 export interface EntregaCreate {
-  // Uno de los dos, no ambos. pendiente_id solo vale con como_materia_prima:
-  // es materia prima para un material que todavía no tiene proceso asignado.
+  // Exactamente uno de los tres. pendiente_id solo vale con
+  // como_materia_prima: es materia prima para un material que todavía no
+  // tiene proceso asignado. numero_ot: el material ni siquiera está cargado
+  // en la OT — crea un pedido suelto (sin marcarlo como materia prima de
+  // nada), con proceso/máquina/material obligatorios.
   ot_material_id?: number
   pendiente_id?: number
+  numero_ot?: string
   fecha: string
   bobinas: number[]
   // Obligatorio con como_materia_prima (el material que sale de almacén).

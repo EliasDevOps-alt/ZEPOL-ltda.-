@@ -536,6 +536,163 @@ function requiereAsignacion(sel: SeleccionPedido): boolean {
   return tieneCantidad(sel.entrega)
 }
 
+/** El personal no siempre puede esperar a que alguien actualice la OT para
+ * entregar lo que de verdad está saliendo de almacén — a pedido explícito de
+ * planta, después de un caso real (OT 220289) donde una resolución
+ * equivocada del material dejó todo enredado. Crea un pedido nuevo y SUELTO
+ * (sin marcarlo como materia prima de nada — ver
+ * ordenes_controller.crear_pedido_libre) con el material, proceso y máquina
+ * que se indiquen acá, y entrega contra él en el mismo paso. Proceso y
+ * máquina son obligatorios: acá sí importa dónde se consume. */
+function EntregaLibreForm({
+  numeroOt,
+  fecha,
+  materiales,
+  materialOptions,
+  procesos,
+  onRegistrado
+}: {
+  numeroOt: string
+  fecha: string
+  materiales: Material[]
+  materialOptions: { value: string; label: string }[]
+  procesos: Proceso[]
+  onRegistrado: (entregas: Entrega[]) => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [abierto, setAbierto] = useState(false)
+  const [materialId, setMaterialId] = useState('')
+  const [procesoId, setProcesoId] = useState('')
+  const [maquinaId, setMaquinaId] = useState('')
+  const [datos, setDatos] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
+  const [error, setError] = useState<string | null>(null)
+
+  const material = materiales.find((m) => String(m.id) === materialId)
+
+  const maquinas = useQuery({
+    queryKey: ['maquinas', procesoId],
+    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
+    enabled: !!procesoId
+  })
+
+  const registrar = useMutation({
+    mutationFn: () =>
+      api.registrarEntrega(apiBaseUrl, token, {
+        numero_ot: numeroOt,
+        fecha,
+        bobinas: datos.bobinas.map(Number),
+        material_id: Number(materialId),
+        proceso_id: Number(procesoId),
+        maquina_id: Number(maquinaId)
+      }),
+    onSuccess: (entrega) => {
+      setAbierto(false)
+      setMaterialId('')
+      setProcesoId('')
+      setMaquinaId('')
+      setDatos({ cantidadBobinas: '', bobinas: [] })
+      setError(null)
+      onRegistrado([entrega])
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!materialId) {
+      setError('Elegí qué material se está entregando')
+      return
+    }
+    if (!procesoId || !maquinaId) {
+      setError('Elegí el proceso y la máquina donde se consume')
+      return
+    }
+    if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+      setError('Cargá una cantidad válida mayor a 0')
+      return
+    }
+    setError(null)
+    registrar.mutate()
+  }
+
+  if (!abierto) {
+    return (
+      <Button type="button" variant="outline" size="sm" className="mb-4" onClick={() => setAbierto(true)}>
+        <Plus className="h-3.5 w-3.5" />
+        Entregar un material que la OT no tiene
+      </Button>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-4 rounded-md border border-border bg-muted/30 p-4">
+      <p className="mb-2 text-xs text-muted-foreground">
+        Para un material que todavía no está cargado en esta OT — se crea un pedido nuevo, sin esperar a que se
+        actualice la OT.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Buscar código MP..."
+          emptyText="Sin materiales activos que coincidan"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <Select
+            value={procesoId}
+            onValueChange={(v) => {
+              setProcesoId(v)
+              setMaquinaId('')
+            }}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Proceso" />
+            </SelectTrigger>
+            <SelectContent>
+              {procesos.map((p) => (
+                <SelectItem key={p.id} value={String(p.id)}>
+                  {p.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
+            <SelectTrigger>
+              <SelectValue placeholder="Máquina" />
+            </SelectTrigger>
+            <SelectContent>
+              {maquinas.data?.map((m) => (
+                <SelectItem key={m.id} value={String(m.id)}>
+                  {m.nombre}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <CampoCantidad
+          unidad={material?.unidad ?? ''}
+          usaBobinas={material?.usa_bobinas ?? true}
+          datos={datos}
+          onChange={(d) => setDatos({ ...datos, ...d })}
+        />
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button type="submit" size="sm" disabled={registrar.isPending}>
+          {registrar.isPending ? 'Registrando...' : 'Registrar'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAbierto(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 interface PendienteForm {
   materialId: string
   procesoId: string
@@ -1374,6 +1531,19 @@ export function RegistrarEntrega() {
               {otDetalle.data.descripcion_producto && (
                 <p className="text-muted-foreground">{otDetalle.data.descripcion_producto}</p>
               )}
+            </div>
+          )}
+
+          {otBuscada && (
+            <div className="mt-4">
+              <EntregaLibreForm
+                numeroOt={otBuscada}
+                fecha={fecha}
+                materiales={materiales.data ?? []}
+                materialOptions={materialOptions}
+                procesos={procesos.data ?? []}
+                onRegistrado={alPromoverPendiente}
+              />
             </div>
           )}
 

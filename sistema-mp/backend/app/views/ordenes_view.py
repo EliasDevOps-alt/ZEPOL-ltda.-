@@ -189,6 +189,21 @@ def listar_pendientes(numero_ot: str, db: Session = Depends(get_db)):
 
 
 @router.post(
+    "/{numero_ot}/pendientes",
+    response_model=schemas.OtMaterialPendienteOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
+def crear_pendiente_libre(numero_ot: str, data: schemas.MaterialPedidoIn, db: Session = Depends(get_db)):
+    """Crea un pendiente para un material que la OT no tenía cargado — para
+    registrar el ingreso a almacén de algo fabricado sin esperar a que
+    alguien actualice la OT (ver ordenes_controller.crear_pedido_libre, su
+    contraparte del lado de Registrar Entrega)."""
+    pendiente = ordenes_controller.crear_pendiente_libre(db, numero_ot, data.material_id, data.cantidad_requerida)
+    return _serializar_pendiente(pendiente)
+
+
+@router.post(
     "/{numero_ot}/reintentar-excel",
     response_model=schemas.OtDetalleOut,
     dependencies=[Depends(security.requiere_modulo("crear_ot"))],

@@ -21,6 +21,7 @@ import type {
   Material,
   MaterialAdmin,
   MaterialCreate,
+  MaterialPedidoIn,
   MaterialPedidoOut,
   MaterialUpdate,
   OrdenTrabajo,
@@ -251,6 +252,17 @@ export function aplicarCambiosExcel(baseUrl: string, token: string, numeroOt: st
 export function listarPendientes(baseUrl: string, token: string, numeroOt: string) {
   return request<OtMaterialPendiente[]>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/pendientes`, {
     token
+  })
+}
+
+// Crea un pendiente para un material que la OT no tenía cargado — para
+// registrar el ingreso a almacén de algo fabricado sin esperar a que
+// alguien actualice la OT (contraparte de numero_ot en EntregaCreate).
+export function crearPendienteLibre(baseUrl: string, token: string, numeroOt: string, data: MaterialPedidoIn) {
+  return request<OtMaterialPendiente>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/pendientes`, {
+    method: 'POST',
+    token,
+    body: data
   })
 }
 

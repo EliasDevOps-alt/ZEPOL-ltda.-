@@ -363,7 +363,7 @@ class EditarMaterialPedidoIn(BaseModel):
 
 class EntregaCreate(BaseModel):
     """La entrega no siempre se registra contra el pedido que el operador
-    tiene en pantalla — hay dos modos, excluyentes entre sí:
+    tiene en pantalla — hay tres modos, excluyentes entre sí:
 
     1. Normal (ningún campo extra): se entrega contra ot_material_id, con
        material_id opcional si almacén dio una alternativa o un cambio de
@@ -375,29 +375,39 @@ class EntregaCreate(BaseModel):
        tienen por qué ser los del pedido que completa (ver
        ordenes_controller.crear_pedido_materia_prima) — y la entrega va contra
        ese pedido nuevo. Vale para cualquier proceso, no solo Extrusión.
+    3. numero_ot: el material que se está entregando ni siquiera está
+       cargado en la OT (no vino en el Excel, nadie lo agregó en Crear OT) y
+       el personal no puede esperar a que alguien la actualice para
+       registrar lo que de verdad está saliendo de almacén — ver
+       ordenes_controller.crear_pedido_libre. A diferencia de
+       como_materia_prima, el pedido que se crea queda SUELTO, sin marcarlo
+       como materia prima de nada.
 
     proceso_id/maquina_id cumplen doble función según el modo:
-    - Con como_materia_prima: obligatorios, son dónde se consume esa materia
-      prima (define el pedido nuevo que se crea).
-    - Sin como_materia_prima: opcionales. Dos entregas parciales del mismo
-      pedido pueden terminar corriendo en máquinas distintas (ej. una tanda
-      salió como ZIPPER PE en Confección/POUCH1 y la siguiente, con cambio a
-      ZIPPER PP, corre en POUCH2) sin que eso sea "mover el pedido entero" —
-      mover el pedido (MoverPedidoIn) arrastra TODAS sus entregas, esto solo
-      afecta la que se está registrando. None = se consume donde vive el
-      pedido, el caso normal (ver Entrega.ot_proceso_id).
+    - Con como_materia_prima o numero_ot: obligatorios, son dónde se
+      consume ese material (define el pedido nuevo que se crea en ambos
+      casos).
+    - Con ot_material_id (modo normal): opcionales. Dos entregas parciales
+      del mismo pedido pueden terminar corriendo en máquinas distintas (ej.
+      una tanda salió como ZIPPER PE en Confección/POUCH1 y la siguiente,
+      con cambio a ZIPPER PP, corre en POUCH2) sin que eso sea "mover el
+      pedido entero" — mover el pedido (MoverPedidoIn) arrastra TODAS sus
+      entregas, esto solo afecta la que se está registrando. None = se
+      consume donde vive el pedido, el caso normal (ver Entrega.ot_proceso_id).
     """
 
-    # Uno de los dos, no ambos. pendiente_id solo vale con como_materia_prima:
-    # es materia prima para un material que todavía no tiene proceso asignado
-    # (ver OtMaterial.insumo_de_pendiente_id).
+    # Exactamente uno de los tres. pendiente_id solo vale con
+    # como_materia_prima: es materia prima para un material que todavía no
+    # tiene proceso asignado (ver OtMaterial.insumo_de_pendiente_id).
     ot_material_id: Optional[int] = None
     pendiente_id: Optional[int] = None
+    numero_ot: Optional[str] = None
     fecha: date
     bobinas: List[float] = Field(min_length=1)
     # Material realmente entregado, si difiere del pedido (alternativa o
     # cambio de estructura). None = se entrega el material del pedido tal cual.
-    # Obligatorio con como_materia_prima (es el material que sale de almacén).
+    # Obligatorio con como_materia_prima o numero_ot (es el material que sale
+    # de almacén / que se está entregando).
     material_id: Optional[int] = None
     observacion: Optional[str] = None
     como_materia_prima: bool = False

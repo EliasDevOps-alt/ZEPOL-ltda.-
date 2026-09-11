@@ -201,6 +201,118 @@ function PendienteIngresoCard({
   )
 }
 
+/** Contraparte de EntregaLibreForm (Registrar Entrega) — un material
+ * fabricado que entra a almacén sin que nadie haya cargado antes en la OT
+ * que hacía falta. Crea (o reutiliza) un pendiente suelto y registra el
+ * ingreso contra él en el mismo paso. Sin proceso ni máquina a propósito —
+ * esto es producción → almacén, y almacén no tiene máquinas; eso se
+ * resuelve recién cuando el material sale hacia producción, en Registrar
+ * Entrega. */
+function IngresoLibreForm({
+  numeroOt,
+  fecha,
+  materiales,
+  materialOptions,
+  onRegistrado
+}: {
+  numeroOt: string
+  fecha: string
+  materiales: Material[]
+  materialOptions: { value: string; label: string }[]
+  onRegistrado: (devolucion: Devolucion) => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const [abierto, setAbierto] = useState(false)
+  const [materialId, setMaterialId] = useState('')
+  const [datos, setDatos] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
+  const [error, setError] = useState<string | null>(null)
+
+  const material = materiales.find((m) => String(m.id) === materialId)
+
+  const registrar = useMutation({
+    mutationFn: async () => {
+      const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+      const pendiente = await api.crearPendienteLibre(apiBaseUrl, token, numeroOt, {
+        material_id: Number(materialId),
+        cantidad_requerida: cantidadTotal
+      })
+      return api.registrarDevolucion(apiBaseUrl, token, {
+        pendiente_id: pendiente.id,
+        material_id: Number(materialId),
+        fecha,
+        bobinas: datos.bobinas.map(Number),
+        es_ingreso_produccion: true
+      })
+    },
+    onSuccess: (devolucion) => {
+      setAbierto(false)
+      setMaterialId('')
+      setDatos({ cantidadBobinas: '', bobinas: [] })
+      setError(null)
+      onRegistrado(devolucion)
+    },
+    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo registrar')
+  })
+
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (!materialId) {
+      setError('Elegí qué material está entrando a almacén')
+      return
+    }
+    if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+      setError('Cargá una cantidad válida mayor a 0')
+      return
+    }
+    setError(null)
+    registrar.mutate()
+  }
+
+  if (!abierto) {
+    return (
+      <Button type="button" variant="outline" size="sm" className="mb-4" onClick={() => setAbierto(true)}>
+        <Plus className="h-3.5 w-3.5" />
+        Registrar ingreso de un material que la OT no tiene
+      </Button>
+    )
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mb-4 rounded-md border border-warning/40 bg-warning/5 p-4">
+      <p className="mb-2 text-xs text-muted-foreground">
+        Para un material fabricado que todavía no está cargado en esta OT — entra a almacén, no es un sobrante.
+      </p>
+      <div className="flex flex-col gap-2">
+        <Combobox
+          value={materialId}
+          onChange={setMaterialId}
+          options={materialOptions}
+          placeholder="Buscar código MP..."
+          emptyText="Sin materiales activos que coincidan"
+        />
+        <CampoCantidad
+          unidad={material?.unidad ?? ''}
+          usaBobinas={material?.usa_bobinas ?? true}
+          datos={datos}
+          onChange={(d) => setDatos({ ...datos, ...d })}
+        />
+      </div>
+      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <Button type="submit" size="sm" disabled={registrar.isPending}>
+          {registrar.isPending ? 'Registrando...' : 'Registrar'}
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => setAbierto(false)}>
+          Cancelar
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 function PedidoDevolucionCard({
   pedido,
   seleccion,
@@ -591,6 +703,15 @@ export function RegistrarDevolucion() {
     setOtBuscada(numero)
   }
 
+  // Lo registrado desde IngresoLibreForm va al mismo cartel verde que el
+  // resto — sin eso no quedaba ninguna señal de que se guardó.
+  function alRegistrarIngresoLibre(devolucion: Devolucion) {
+    setConfirmaciones([devolucion])
+    setError(null)
+    queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
+    queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+  }
+
   function toggleIngreso(pendiente: OtMaterialPendiente) {
     setConfirmaciones([])
     setIngresos((prev) => {
@@ -692,6 +813,18 @@ export function RegistrarDevolucion() {
               Buscar
             </Button>
           </form>
+
+          {otBuscada && (
+            <div className="mt-4">
+              <IngresoLibreForm
+                numeroOt={otBuscada}
+                fecha={fecha}
+                materiales={materiales.data ?? []}
+                materialOptions={materialOptions}
+                onRegistrado={alRegistrarIngresoLibre}
+              />
+            </div>
+          )}
 
           {pedidos.isSuccess && pedidosVisibles?.length === 0 && pendientesConMateriaPrima.length === 0 && (
             <p className="mt-4 text-sm text-muted-foreground">No hay materiales entregados para esa OT.</p>
