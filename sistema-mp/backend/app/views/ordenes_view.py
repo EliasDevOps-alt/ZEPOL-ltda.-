@@ -104,6 +104,17 @@ def listar_ots_nuevas_en_excel(db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
+@router.get("/comparar-excel-todas", response_model=List[schemas.ComparacionMasivaItemOut])
+def comparar_todas_con_excel(db: Session = Depends(get_db)):
+    """Compara todas las OT ya cargadas contra el Excel OC-MP de una sola
+    pasada — botón manual, no corre solo, mismo criterio que
+    'nuevas-en-excel' (abrir el Excel de más no vale la pena)."""
+    try:
+        return ordenes_controller.comparar_todas_con_excel(db)
+    except ExcelLecturaError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
+
+
 @router.post(
     "/detalle",
     response_model=schemas.OtDetalleOut,

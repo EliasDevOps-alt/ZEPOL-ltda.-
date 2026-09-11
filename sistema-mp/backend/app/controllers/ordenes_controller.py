@@ -215,19 +215,11 @@ def _codigos_materiales_en_sistema(ot: OrdenTrabajo) -> set:
     return codigos
 
 
-def comparar_con_excel(db: Session, numero_ot: str) -> Dict[str, Any]:
-    """Compara una OT que ya está en la base de datos contra su fila del
-    Excel OC-MP — de solo lectura, no cambia nada. Pensado para el caso en
-    que el cliente sigue editando esa OT directamente en el Excel después de
-    que ya se importó al sistema (algo que hoy no se entera solo)."""
-    ot = obtener_detalle(db, numero_ot)
-    if ot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
-
-    datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
-    if datos_excel is None:
-        return {"encontrado_en_excel": False, "diferencias_comerciales": [], "materiales_nuevos": []}
-
+def _comparar_ot_con_datos_excel(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) -> Dict[str, Any]:
+    """Diferencias comerciales y materiales nuevos entre una OT y su fila ya
+    leída del Excel — compartido por comparar_con_excel (una OT puntual) y
+    comparar_todas_con_excel (todas de una, sin reabrir el Excel por cada
+    una)."""
     # Solo los campos que también se escriben hacia Excel (CAMPOS_A_COLUMNAS)
     # — total_ot/precio_total_pedido_usd son fórmulas allá y valores
     # calculados acá, comparar esos dos solo generaría ruido.
@@ -250,11 +242,43 @@ def comparar_con_excel(db: Session, numero_ot: str) -> Dict[str, Any]:
         m for m in datos_excel["materiales"] if m["codigo_mp"].strip().lower() not in codigos_existentes
     ]
 
-    return {
-        "encontrado_en_excel": True,
-        "diferencias_comerciales": diferencias,
-        "materiales_nuevos": materiales_nuevos,
-    }
+    return {"diferencias_comerciales": diferencias, "materiales_nuevos": materiales_nuevos}
+
+
+def comparar_con_excel(db: Session, numero_ot: str) -> Dict[str, Any]:
+    """Compara una OT que ya está en la base de datos contra su fila del
+    Excel OC-MP — de solo lectura, no cambia nada. Pensado para el caso en
+    que el cliente sigue editando esa OT directamente en el Excel después de
+    que ya se importó al sistema (algo que hoy no se entera solo)."""
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
+    if datos_excel is None:
+        return {"encontrado_en_excel": False, "diferencias_comerciales": [], "materiales_nuevos": []}
+
+    return {"encontrado_en_excel": True, **_comparar_ot_con_datos_excel(ot, datos_excel)}
+
+
+def comparar_todas_con_excel(db: Session) -> List[Dict[str, Any]]:
+    """Compara TODAS las OT que ya están en el sistema contra su fila del
+    Excel OC-MP, leyendo el archivo una sola vez (ver
+    excel_oc_mp.leer_todas_oc_mp) — para detectar de una sola pasada las OT
+    que el cliente siguió editando en Excel después de importarlas, sin
+    tener que revisarlas una por una con comparar_con_excel. De solo
+    lectura, igual que su versión de una sola OT; devuelve solo las que
+    tienen alguna diferencia real."""
+    todas_excel = excel_oc_mp.leer_todas_oc_mp(db)
+    resultado = []
+    for ot in db.scalars(select(OrdenTrabajo)).all():
+        datos_excel = todas_excel.get(ot.numero_ot)
+        if datos_excel is None:
+            continue
+        comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
+        if comparacion["diferencias_comerciales"] or comparacion["materiales_nuevos"]:
+            resultado.append({"numero_ot": ot.numero_ot, "cliente": ot.cliente, **comparacion})
+    return resultado
 
 
 def aplicar_cambios_excel(db: Session, numero_ot: str) -> OrdenTrabajo:

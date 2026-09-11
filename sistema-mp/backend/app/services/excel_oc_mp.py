@@ -210,9 +210,10 @@ def _abrir_hoja(ruta: str, password: Optional[str]) -> Optional[Any]:
         return None
 
 
-def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
-    """Busca numero_ot en la hoja 'oc mp' y devuelve sus datos, o None si no
-    se encuentra la OT o el archivo no está accesible.
+def _procesar_fila_oc_mp(row: tuple, resultado: Optional[Dict[str, Any]], numero_ot: str) -> Dict[str, Any]:
+    """Agrega una fila de 'oc mp' al resultado acumulado de su OT — separado
+    de leer_oc_mp/leer_todas_oc_mp para que ambas compartan exactamente la
+    misma lógica de fusión de filas repetidas.
 
     Una OT puede repetirse en más de una fila si el cliente cargó más de 6
     materiales a mano en el Excel — escribir_oc_mp rechaza eso desde acá,
@@ -221,9 +222,92 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
     primera fila encontrada, así que los materiales de la fila extra
     quedaban invisibles tanto al importar como al comparar (una OT con más
     de 6 materiales siempre parecía "sin cambios" aunque le faltara alguno)
-    — por eso ahora sigue recorriendo el resto de la hoja y suma los
-    materiales de cada fila que coincida; los datos comerciales se toman de
-    la primera fila encontrada, que es la que realmente los tiene."""
+    — por eso se recorre toda la hoja y se suman los materiales de cada fila
+    que coincida; los datos comerciales se toman de la primera fila
+    encontrada, que es la que realmente los tiene.
+
+    Dos filas con el mismo número de OT no siempre son la misma pieza
+    partida por falta de espacio — a veces son dos productos distintos del
+    mismo cliente que comparten número de OT (ej. 220268: bobinas de Trigo y
+    de Lenteja, mismo cliente/vendedor/fecha, pero descripción y código de
+    producto propios). Los campos de plata (total, precio unitario, etc.)
+    vienen repetidos idénticos en ambas filas — es el total de la OT entera,
+    no de cada producto — así que esos se dejan como están, de la primera
+    fila. Descripción y código sí difieren fila por fila, así que se
+    concatenan para no perder ninguno."""
+    materiales_fila: List[Dict[str, Any]] = []
+    for col_codigo, col_cantidad in COLS_MATERIALES:
+        codigo = _texto(_valor(row, col_codigo))
+        if codigo:
+            materiales_fila.append({"codigo_mp": codigo, "cantidad_requerida": _numero(_valor(row, col_cantidad))})
+
+    if resultado is None:
+        return {
+            "numero_ot": numero_ot,
+            "fecha_seguimiento_mp": _fecha(_valor(row, COL_FECHA_SEGUIMIENTO)),
+            "alm": _texto(_valor(row, COL_ALM)),
+            "so": _texto(_valor(row, COL_SO)),
+            "materiales": materiales_fila,
+            "total": _numero(_valor(row, COL_TOTAL)),
+            "status_entrega_mp": _texto(_valor(row, COL_STATUS_ENTREGA_MP)),
+            "tipo_trabajo": _texto(_valor(row, COL_TIPO_TRABAJO)),
+            "indicador": _texto(_valor(row, COL_INDICADOR)),
+            "cliente": _texto(_valor(row, COL_CLIENTE)),
+            "vendedor": _texto(_valor(row, COL_VENDEDOR)),
+            "ciudad": _texto(_valor(row, COL_CIUDAD)),
+            "fecha_pedido": _fecha(_valor(row, COL_FECHA_PEDIDO)),
+            "fecha_entrega": _fecha(_valor(row, COL_FECHA_ENTREGA)),
+            "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
+            "codigo_producto": _texto(_valor(row, COL_CODIGO_PRODUCTO)),
+            "total_ot": _numero(_valor(row, COL_TOTAL_OT)),
+            "entrega_mes": _numero(_valor(row, COL_ENTREGA_MES)),
+            "medida": _texto(_valor(row, COL_MEDIDA)),
+            "equivalencia_kg": _numero(_valor(row, COL_EQUIVALENCIA_KG)),
+            "pu_usd": _numero(_valor(row, COL_PU_USD)),
+            "pt_usd": _numero(_valor(row, COL_PT_USD)),
+            "factura_clises": _texto(_valor(row, COL_FACTURA_CLISES)),
+            "precio_clise_usd": _numero(_valor(row, COL_PRECIO_CLISE_USD)),
+            "precio_total_pedido_usd": _numero(_valor(row, COL_PRECIO_TOTAL_PEDIDO_USD)),
+        }
+
+    resultado["materiales"].extend(materiales_fila)
+    for campo, col in (("descripcion_producto", COL_DESCRIPCION), ("codigo_producto", COL_CODIGO_PRODUCTO)):
+        valor = _texto(_valor(row, col))
+        if valor and valor != resultado[campo] and valor not in (resultado[campo] or "").split(" / "):
+            resultado[campo] = f"{resultado[campo]} / {valor}" if resultado[campo] else valor
+    return resultado
+
+
+def leer_todas_oc_mp(db: Session) -> Dict[str, Dict[str, Any]]:
+    """Lee 'oc mp' entera en una sola pasada y devuelve un diccionario
+    numero_ot -> datos (misma fusión de filas repetidas que leer_oc_mp) para
+    poder comparar todas las OT del sistema contra el Excel sin reabrir el
+    archivo una vez por OT — pensado para comparar_todas_con_excel, que
+    necesita revisar cientos de OT de una sola vez."""
+    ruta = obtener_ruta_configurada(db)
+    if not ruta:
+        raise ExcelLecturaError("No hay ruta configurada para el Excel OC-MP")
+
+    ws = _abrir_hoja(ruta, obtener_password_configurada(db))
+    if ws is None:
+        raise ExcelLecturaError(
+            "No se pudo abrir el Excel OC-MP (revisa que el archivo exista, la contraseña, o que no esté dañado)"
+        )
+
+    por_ot: Dict[str, Dict[str, Any]] = {}
+    for row in ws.iter_rows(min_row=FILA_DATOS_INICIO, values_only=True):
+        numero_ot = _numero_ot_texto(_valor(row, COL_OT))
+        if not numero_ot or numero_ot == "0":
+            continue
+        por_ot[numero_ot] = _procesar_fila_oc_mp(row, por_ot.get(numero_ot), numero_ot)
+
+    return por_ot
+
+
+def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
+    """Busca numero_ot en la hoja 'oc mp' y devuelve sus datos, o None si no
+    se encuentra la OT o el archivo no está accesible. Ver el docstring de
+    _procesar_fila_oc_mp para cómo se fusionan las filas repetidas."""
     ruta = obtener_ruta_configurada(db)
     if not ruta:
         logger.warning("No hay ruta configurada para el Excel OC-MP")
@@ -238,59 +322,7 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
     for row in ws.iter_rows(min_row=FILA_DATOS_INICIO, values_only=True):
         if not _coincide_ot(_valor(row, COL_OT), objetivo):
             continue
-
-        materiales_fila: List[Dict[str, Any]] = []
-        for col_codigo, col_cantidad in COLS_MATERIALES:
-            codigo = _texto(_valor(row, col_codigo))
-            if codigo:
-                materiales_fila.append(
-                    {"codigo_mp": codigo, "cantidad_requerida": _numero(_valor(row, col_cantidad))}
-                )
-
-        if resultado is None:
-            resultado = {
-                "numero_ot": objetivo,
-                "fecha_seguimiento_mp": _fecha(_valor(row, COL_FECHA_SEGUIMIENTO)),
-                "alm": _texto(_valor(row, COL_ALM)),
-                "so": _texto(_valor(row, COL_SO)),
-                "materiales": materiales_fila,
-                "total": _numero(_valor(row, COL_TOTAL)),
-                "status_entrega_mp": _texto(_valor(row, COL_STATUS_ENTREGA_MP)),
-                "tipo_trabajo": _texto(_valor(row, COL_TIPO_TRABAJO)),
-                "indicador": _texto(_valor(row, COL_INDICADOR)),
-                "cliente": _texto(_valor(row, COL_CLIENTE)),
-                "vendedor": _texto(_valor(row, COL_VENDEDOR)),
-                "ciudad": _texto(_valor(row, COL_CIUDAD)),
-                "fecha_pedido": _fecha(_valor(row, COL_FECHA_PEDIDO)),
-                "fecha_entrega": _fecha(_valor(row, COL_FECHA_ENTREGA)),
-                "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
-                "codigo_producto": _texto(_valor(row, COL_CODIGO_PRODUCTO)),
-                "total_ot": _numero(_valor(row, COL_TOTAL_OT)),
-                "entrega_mes": _numero(_valor(row, COL_ENTREGA_MES)),
-                "medida": _texto(_valor(row, COL_MEDIDA)),
-                "equivalencia_kg": _numero(_valor(row, COL_EQUIVALENCIA_KG)),
-                "pu_usd": _numero(_valor(row, COL_PU_USD)),
-                "pt_usd": _numero(_valor(row, COL_PT_USD)),
-                "factura_clises": _texto(_valor(row, COL_FACTURA_CLISES)),
-                "precio_clise_usd": _numero(_valor(row, COL_PRECIO_CLISE_USD)),
-                "precio_total_pedido_usd": _numero(_valor(row, COL_PRECIO_TOTAL_PEDIDO_USD)),
-            }
-        else:
-            resultado["materiales"].extend(materiales_fila)
-            # Dos filas con el mismo número de OT no siempre son la misma
-            # pieza partida por falta de espacio (ver el docstring) — a veces
-            # son dos productos distintos del mismo cliente que comparten
-            # número de OT (ej. 220268: bobinas de Trigo y de Lenteja, mismo
-            # cliente/vendedor/fecha, pero descripción y código de producto
-            # propios). Los campos de plata (total, precio unitario, etc.)
-            # vienen repetidos idénticos en ambas filas — es el total de la
-            # OT entera, no de cada producto — así que esos se dejan como
-            # están, de la primera fila. Descripción y código sí difieren
-            # fila por fila, así que se concatenan para no perder ninguno.
-            for campo, col in (("descripcion_producto", COL_DESCRIPCION), ("codigo_producto", COL_CODIGO_PRODUCTO)):
-                valor = _texto(_valor(row, col))
-                if valor and valor != resultado[campo] and valor not in (resultado[campo] or "").split(" / "):
-                    resultado[campo] = f"{resultado[campo]} / {valor}" if resultado[campo] else valor
+        resultado = _procesar_fila_oc_mp(row, resultado, objetivo)
 
     return resultado
 

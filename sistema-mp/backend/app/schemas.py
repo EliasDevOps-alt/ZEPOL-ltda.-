@@ -308,6 +308,18 @@ class ComparacionExcelOut(BaseModel):
     materiales_nuevos: List[MaterialExcelOut] = []
 
 
+class ComparacionMasivaItemOut(BaseModel):
+    """Una OT (de las que ya están en el sistema) que resultó con diferencias
+    al compararla contra el Excel OC-MP — ver
+    ordenes_controller.comparar_todas_con_excel. Solo se listan las que
+    tienen algo distinto; encontrarla acá ya implica encontrado_en_excel."""
+
+    numero_ot: str
+    cliente: Optional[str] = None
+    diferencias_comerciales: List[DiferenciaExcelOut] = []
+    materiales_nuevos: List[MaterialExcelOut] = []
+
+
 class OtImportadaOut(BaseModel):
     """Resultado de importar una OT desde el Excel OC-MP: la OT ya creada
     (con sus campos comerciales) y los materiales que quedaron pendientes de

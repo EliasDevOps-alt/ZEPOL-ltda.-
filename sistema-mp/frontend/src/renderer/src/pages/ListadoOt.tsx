@@ -264,6 +264,99 @@ function NuevasEnExcelCard() {
   )
 }
 
+/** Compara TODAS las OT ya cargadas contra el Excel de una sola pasada — el
+ * cliente puede seguir editando cualquier OT directo en el Excel después de
+ * importarla, y hasta ahora la única forma de enterarse era entrar OT por
+ * OT a "Comparar con Excel". Botón manual, igual criterio que "Buscar OT
+ * nuevas en el Excel": abrir el archivo de más no vale la pena, así que no
+ * corre solo. Solo lista las que tienen diferencias reales; tocar una lleva
+ * a Crear OT para revisarla y aplicar los cambios ahí, sin duplicar esa
+ * lógica acá. */
+function ComparacionMasivaCard() {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+
+  const comparacion = useQuery({
+    queryKey: ['comparar-excel-todas'],
+    queryFn: () => api.compararTodasConExcel(apiBaseUrl, token),
+    enabled: false
+  })
+
+  return (
+    <Card className="mb-6">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+        <div>
+          <CardTitle className="text-base">OT distintas al Excel</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Revisa todas las OT ya cargadas contra su fila en "oc mp" de una sola vez.
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={comparacion.isFetching}
+          onClick={() => comparacion.refetch()}
+        >
+          {comparacion.isFetching ? 'Comparando...' : 'Comparar todas las OT'}
+        </Button>
+      </CardHeader>
+
+      {comparacion.isError && (
+        <CardContent className="pt-0 text-sm text-destructive">
+          No se pudo leer el Excel —{' '}
+          {comparacion.error instanceof ApiError ? comparacion.error.message : 'error de conexión'}
+        </CardContent>
+      )}
+
+      {comparacion.isSuccess && (
+        <CardContent className="pt-0">
+          {comparacion.data.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Sin diferencias — todas las OT del sistema coinciden con el Excel.
+            </p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs text-muted-foreground">
+                {comparacion.data.length} {comparacion.data.length === 1 ? 'OT distinta' : 'OT distintas'} al Excel.
+                Tocá una para revisar y aplicar los cambios.
+              </p>
+              <div className="flex max-h-80 flex-col gap-2 overflow-y-auto">
+                {comparacion.data.map((ot) => (
+                  <Link
+                    key={ot.numero_ot}
+                    to={`/crear-ot?ot=${encodeURIComponent(ot.numero_ot)}`}
+                    className="flex items-center justify-between gap-3 rounded-md border border-warning/30 bg-warning/5 p-3 text-sm transition-colors hover:bg-warning/10"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium">OT {ot.numero_ot}</p>
+                      <p className="truncate text-muted-foreground">
+                        {ot.cliente ?? 'Sin cliente'} ·{' '}
+                        {[
+                          ot.diferencias_comerciales.length > 0
+                            ? `${ot.diferencias_comerciales.length} dato${ot.diferencias_comerciales.length === 1 ? '' : 's'} distinto${ot.diferencias_comerciales.length === 1 ? '' : 's'}`
+                            : null,
+                          ot.materiales_nuevos.length > 0
+                            ? `${ot.materiales_nuevos.length} material${ot.materiales_nuevos.length === 1 ? '' : 'es'} nuevo${ot.materiales_nuevos.length === 1 ? '' : 's'}`
+                            : null
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </p>
+                    </div>
+                    <FileSpreadsheet className="h-4 w-4 shrink-0 text-warning" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      )}
+    </Card>
+  )
+}
+
 export function ListadoOt() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -377,6 +470,7 @@ export function ListadoOt() {
       </Card>
 
       <NuevasEnExcelCard />
+      <ComparacionMasivaCard />
 
       {ordenes.isError && (
         <div className="mb-4 rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">

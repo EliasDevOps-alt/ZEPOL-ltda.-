@@ -1,6 +1,7 @@
 import type {
   BalanceMaterial,
   ComparacionExcel,
+  ComparacionMasivaItem,
   ConfiguracionExcel,
   Consumo,
   Devolucion,
@@ -191,6 +192,13 @@ export function listarOrdenes(
 // trae después una por una con importarOtDesdeExcel, no de una vez.
 export function listarOtsNuevasEnExcel(baseUrl: string, token: string) {
   return request<OtExcelNueva[]>(baseUrl, '/ordenes-trabajo/nuevas-en-excel', { token })
+}
+
+// Compara TODAS las OT ya cargadas contra el Excel OC-MP de una sola pasada
+// — botón manual "Comparar todas las OT" de Todas las OT, para detectar
+// cambios hechos directo en Excel sin revisar OT por OT.
+export function compararTodasConExcel(baseUrl: string, token: string) {
+  return request<ComparacionMasivaItem[]>(baseUrl, '/ordenes-trabajo/comparar-excel-todas', { token })
 }
 
 export function guardarDetalleOt(baseUrl: string, token: string, data: OtDetalleCreate) {

@@ -237,6 +237,15 @@ export interface ComparacionExcel {
   materiales_nuevos: MaterialExcel[]
 }
 
+// Una OT (de las que ya están en el sistema) con diferencias reales al
+// compararla contra el Excel OC-MP, de la comparación masiva.
+export interface ComparacionMasivaItem {
+  numero_ot: string
+  cliente: string | null
+  diferencias_comerciales: DiferenciaExcel[]
+  materiales_nuevos: MaterialExcel[]
+}
+
 export interface MaquinaAdmin {
   id: number
   nombre: string
