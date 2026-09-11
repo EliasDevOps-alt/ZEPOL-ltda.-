@@ -235,6 +235,15 @@ class OtMaterial(Base):
     insumo_de_pendiente_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("ot_materiales_pendientes.id")
     )
+    # Código tal como estaba en el Excel cuando este pedido se promovió desde
+    # un pendiente sin match directo en el catálogo (ver
+    # OtMaterialPendiente.codigo_mp) — NULL si el pedido no vino de ahí
+    # (materia prima) o si el código de Excel ya coincidía con el del
+    # catálogo. Sin esto, comparar_con_excel/comparar_todas_con_excel vuelven
+    # a marcar el material como "nuevo" para siempre después de promovido,
+    # porque solo conocen el código YA resuelto del catálogo (ver
+    # ordenes_controller._codigos_materiales_en_sistema).
+    codigo_mp_excel: Mapped[Optional[str]] = mapped_column(String(50))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot_proceso: Mapped["OtProceso"] = relationship(

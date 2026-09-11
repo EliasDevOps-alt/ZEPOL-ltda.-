@@ -172,6 +172,14 @@ CREATE TABLE ot_materiales (
     -- puede necesitar materiales extra que la OT no listó.
     insumo_de_id        INTEGER REFERENCES ot_materiales(id),
     insumo_de_pendiente_id INTEGER,  -- FK agregada más abajo, ver ALTER
+    -- Código tal como estaba en el Excel cuando este pedido se promovió
+    -- desde un pendiente sin match directo en el catálogo (ver
+    -- ot_materiales_pendientes.codigo_mp) — NULL cuando el pedido no vino de
+    -- ahí (materia prima) o cuando el código de Excel coincidía tal cual con
+    -- el del catálogo. Sin esto, comparar_con_excel/comparar_todas_con_excel
+    -- vuelven a marcar el material como "nuevo" para siempre después de
+    -- promovido, porque solo conocen el código YA resuelto del catálogo.
+    codigo_mp_excel     VARCHAR(50),
     creado_en           TIMESTAMP NOT NULL DEFAULT now(),
 
     -- el proceso_id debe coincidir con el del paso de OT elegido

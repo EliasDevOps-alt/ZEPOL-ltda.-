@@ -904,11 +904,24 @@ function EditarPedido({
   )
   const [error, setError] = useState<string | null>(null)
 
+  // Corregir a qué material corresponde el pedido sigue siendo seguro con
+  // materia prima, entregas o devoluciones ya cargadas (ver
+  // ordenes_controller.actualizar_pedido — bloqueado solo si alguna ya tiene
+  // el SID completado, el backend avisa si es el caso). La cantidad y el
+  // borrado del pedido entero sí quedan bloqueados apenas hay cualquier
+  // movimiento — ver eliminar_pedido.
+  const tieneMovimiento =
+    pedido.tiene_materia_prima ||
+    pedido.total_entregado > 0 ||
+    pedido.total_devuelto > 0 ||
+    pedido.total_ingresado > 0
+  const soloCorregirMaterial = tieneMovimiento
+
   const editar = useMutation({
     mutationFn: () =>
       api.editarPedido(apiBaseUrl, token, pedido.ot_material_id, {
         material_id: materialId ? Number(materialId) : undefined,
-        cantidad_requerida: cantidad ? Number(cantidad) : undefined
+        cantidad_requerida: soloCorregirMaterial || !cantidad ? undefined : Number(cantidad)
       }),
     onSuccess: () => {
       setAbierto(false)
@@ -933,11 +946,19 @@ function EditarPedido({
     return (
       <div className="mt-3 flex items-center gap-2">
         <Button type="button" variant="outline" size="sm" onClick={() => setAbierto(true)}>
-          Corregir material/cantidad
+          {soloCorregirMaterial ? 'Corregir material' : 'Corregir material/cantidad'}
         </Button>
-        <Button type="button" variant="destructive" size="sm" disabled={eliminar.isPending} onClick={handleEliminar}>
-          {eliminar.isPending ? 'Eliminando...' : 'Eliminar pedido'}
-        </Button>
+        {!soloCorregirMaterial && (
+          <Button
+            type="button"
+            variant="destructive"
+            size="sm"
+            disabled={eliminar.isPending}
+            onClick={handleEliminar}
+          >
+            {eliminar.isPending ? 'Eliminando...' : 'Eliminar pedido'}
+          </Button>
+        )}
         {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
     )
@@ -946,7 +967,9 @@ function EditarPedido({
   return (
     <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
       <p className="mb-2 text-xs text-muted-foreground">
-        Corregir {pedido.codigo_mp} — por ejemplo si el código o la cantidad vinieron mal del Excel:
+        {soloCorregirMaterial
+          ? `A qué material corresponde realmente ${pedido.codigo_mp} — por ejemplo si se resolvió a uno equivocado del catálogo:`
+          : `Corregir ${pedido.codigo_mp} — por ejemplo si el código o la cantidad vinieron mal del Excel:`}
       </p>
       <div className="flex flex-col gap-2">
         <Combobox
@@ -956,14 +979,21 @@ function EditarPedido({
           placeholder="Nuevo material (dejalo vacío para no cambiarlo)"
           emptyText="Sin materiales activos que coincidan"
         />
-        <Input
-          type="number"
-          step="0.01"
-          value={cantidad}
-          onChange={(e) => setCantidad(e.target.value)}
-          placeholder={`Cantidad${pedido.unidad ? ` (${pedido.unidad})` : ''}`}
-        />
+        {!soloCorregirMaterial && (
+          <Input
+            type="number"
+            step="0.01"
+            value={cantidad}
+            onChange={(e) => setCantidad(e.target.value)}
+            placeholder={`Cantidad${pedido.unidad ? ` (${pedido.unidad})` : ''}`}
+          />
+        )}
       </div>
+      {soloCorregirMaterial && (
+        <p className="mt-1 text-xs text-muted-foreground">
+          Ya tiene materia prima cargada — la cantidad y el borrado del pedido ya no se pueden tocar desde acá.
+        </p>
+      )}
       {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
       <div className="mt-2 flex gap-2">
         <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>
@@ -1044,20 +1074,15 @@ function PedidoEntregaCard({
 
       <MoverPedido pedido={pedido} procesos={procesos} onMovido={onMovido} />
 
-      {pedido.total_entregado === 0 &&
-        pedido.total_devuelto === 0 &&
-        pedido.total_ingresado === 0 &&
-        !pedido.tiene_materia_prima && (
-          <EditarPedido
-            pedido={pedido}
-            materialOptions={materialOptions}
-            onEditado={onMovido}
-            onEliminado={() => {
-              onQuitar()
-              onMovido()
-            }}
-          />
-        )}
+      <EditarPedido
+        pedido={pedido}
+        materialOptions={materialOptions}
+        onEditado={onMovido}
+        onEliminado={() => {
+          onQuitar()
+          onMovido()
+        }}
+      />
     </div>
   )
 }

@@ -205,13 +205,22 @@ def _formatear_valor(valor: Any) -> Optional[str]:
 def _codigos_materiales_en_sistema(ot: OrdenTrabajo) -> set:
     """Códigos (normalizados) de todos los materiales que la OT ya tiene,
     pendientes o ya promovidos a pedido — no incluye la materia prima
-    agregada para fabricarlos, esa nunca vino del Excel."""
+    agregada para fabricarlos, esa nunca vino del Excel.
+
+    Un pedido promovido desde un pendiente sin match directo (ver
+    OtMaterial.codigo_mp_excel) cuenta por LOS DOS códigos: el resuelto del
+    catálogo y el original de Excel. Sin el segundo, un material como
+    "ZIPPER" (Excel) resuelto a "ZIPPER PRB" (catálogo) volvería a aparecer
+    como "material nuevo" para siempre después de promovido, porque acá solo
+    se conocía el código ya resuelto."""
     codigos = {p.codigo_mp.strip().lower() for p in ot.pendientes}
     for ot_proceso in ot.procesos:
         for om in ot_proceso.materiales:
             if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
                 continue
             codigos.add(om.material.codigo_mp.strip().lower())
+            if om.codigo_mp_excel:
+                codigos.add(om.codigo_mp_excel.strip().lower())
     return codigos
 
 
@@ -555,6 +564,7 @@ def _crear_o_reutilizar_ot_material(
     material_id: int,
     cantidad_requerida: Optional[float],
     insumo_de_id: Optional[int] = None,
+    codigo_mp_excel: Optional[str] = None,
 ) -> Tuple[OtMaterial, bool]:
     """Devuelve el pedido y si hubo que crearlo (False = ya existía y se
     reutiliza, como hace guardar_detalle)."""
@@ -576,6 +586,7 @@ def _crear_o_reutilizar_ot_material(
         # Solo se marca al crearlo — si ya existía (se está reutilizando un
         # pedido que ya estaba ahí por otro motivo), no se pisa su origen.
         insumo_de_id=insumo_de_id,
+        codigo_mp_excel=codigo_mp_excel,
     )
     db.add(ot_material)
     db.flush()
@@ -601,7 +612,9 @@ def promover_pendiente(db: Session, pendiente_id: int, data: schemas.PromoverPen
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
 
     ot_proceso = crear_o_reutilizar_ot_proceso(db, pendiente.ot_id, data.proceso_id, data.maquina_id)
-    ot_material, _ = _crear_o_reutilizar_ot_material(db, ot_proceso, material_id, pendiente.cantidad_requerida)
+    ot_material, _ = _crear_o_reutilizar_ot_material(
+        db, ot_proceso, material_id, pendiente.cantidad_requerida, codigo_mp_excel=pendiente.codigo_mp
+    )
 
     # La materia prima que se entregó mientras esto era un pendiente ya apunta
     # al material correcto; ahora que existe el pedido, se le cuelga a él.
@@ -791,15 +804,50 @@ def actualizar_pedido(
     db: Session, ot_material_id: int, material_id: Optional[int], cantidad_requerida: Optional[float]
 ) -> OtMaterial:
     """Corrige el material o la cantidad de un pedido ya asignado a un
-    proceso, siempre que todavía no tenga ningún movimiento real (ver
-    _bloquear_si_pedido_tiene_movimientos) — para el mismo tipo de error de
-    tipeo que actualizar_pendiente, pero cuando el material ya se promovió."""
+    proceso — para el mismo tipo de error de tipeo/resolución que
+    actualizar_pendiente, pero cuando el material ya se promovió (ej. un
+    pendiente de Excel sin match directo se resolvió al material equivocado
+    del catálogo, y para cuando se nota ya se le cargó materia prima, o
+    incluso ya se le registraron entregas/devoluciones bajo ese nombre
+    equivocado).
+
+    Cambiar a qué material corresponde el pedido es seguro aunque ya tenga
+    materia prima cargada (insumos): esos apuntan a este pedido por su id,
+    no por su material_id, así que corregir el material no los invalida —
+    siguen sirviendo para fabricar lo que el pedido realmente es. Para
+    entregas/devoluciones propias, se usa el mismo criterio que ya rige
+    corregirlas una por una (ver entregas_controller._bloquear_si_entrega_tiene_sid):
+    bloqueado solo si alguna ya tiene el SID completado, no por el simple
+    hecho de existir — el SID es el trámite externo que de verdad no se
+    puede hacer desaparecer, no el registro en sí. Igual que con una
+    sustitución (Entrega.material_id ya puede diferir del pedido), esto no
+    corrige solo las entregas/devoluciones ya cargadas contra este pedido —
+    eso se hace aparte, editando cada una, si también estaban mal.
+    Cambiar la CANTIDAD sigue bloqueado apenas hay algún movimiento, ya que
+    ahí no hay un mecanismo de corrección puntual equivalente."""
     ot_material = db.get(OtMaterial, ot_material_id)
     if ot_material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pedido no encontrado")
-    _bloquear_si_pedido_tiene_movimientos(ot_material)
 
-    if material_id is not None and material_id != ot_material.material_id:
+    cambia_cantidad = cantidad_requerida is not None and cantidad_requerida != ot_material.cantidad_requerida
+    cambia_material = material_id is not None and material_id != ot_material.material_id
+
+    if cambia_cantidad and (ot_material.entregas or ot_material.devoluciones):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Este pedido ya tiene entregas o devoluciones registradas — no se puede cambiar la cantidad.",
+        )
+    if cambia_material and (
+        any(e.sid_completado for e in ot_material.entregas)
+        or any(d.sid_completado for d in ot_material.devoluciones)
+    ):
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Este pedido tiene una entrega o devolución con el SID ya registrado — no se puede cambiar el "
+            "material. Desmarcá el SID de ese movimiento en Registro SID primero.",
+        )
+
+    if cambia_material:
         ya_existe = db.scalar(
             select(OtMaterial).where(
                 OtMaterial.ot_proceso_id == ot_material.ot_proceso_id,
