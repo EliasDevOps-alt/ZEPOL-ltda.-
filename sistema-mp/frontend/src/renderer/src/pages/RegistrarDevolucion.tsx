@@ -278,7 +278,7 @@ function IngresoLibreForm({
     return (
       <Button type="button" variant="outline" size="sm" className="mb-4" onClick={() => setAbierto(true)}>
         <Plus className="h-3.5 w-3.5" />
-        Registrar ingreso de un material que la OT no tiene
+        Registrar ingreso de LDPE-3
       </Button>
     )
   }
