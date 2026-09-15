@@ -119,6 +119,24 @@ class Configuracion(Base):
     valor: Mapped[Optional[str]] = mapped_column(Text)
 
 
+class RegistroExcelAutomatico(Base):
+    """Una fila por cada OT que el vigilante del Excel OC-MP importó o
+    actualizó solo, sin que nadie tocara el sistema (ver
+    app.services.excel_watcher y ordenes_controller.sincronizar_automaticamente_excel).
+    Existe porque ese trabajo pasa en segundo plano, sin ninguna pantalla
+    donde quede visible como sí queda una entrega/devolución editada a mano —
+    sin esto no habría forma de saber qué trajo el vigilante ni cuándo."""
+
+    __tablename__ = "registro_excel_automatico"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    numero_ot: Mapped[str] = mapped_column(String(50))
+    cliente: Mapped[Optional[str]] = mapped_column(String(255))
+    tipo: Mapped[str] = mapped_column(String(20))  # "nueva" | "actualizada"
+    detalle: Mapped[str] = mapped_column(Text)
+
+
 class OrdenTrabajo(Base):
     """El cliente y el diseño son únicos por OT (una OT es un solo pedido de
     un solo cliente para un solo diseño, aunque pase por varios procesos)."""
@@ -131,6 +149,12 @@ class OrdenTrabajo(Base):
     diseno: Mapped[Optional[str]] = mapped_column(String(150))
     fecha_creacion: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     activo: Mapped[bool] = mapped_column(Boolean, default=True)
+    # TRUE = OT que la empresa fabrica para sí misma, sin cliente real detrás
+    # — pasa raramente. No se escribe en el Excel OC-MP en absoluto (ver
+    # ordenes_controller._sincronizar_excel): tener fila ahí implicaría que
+    # le corresponde un pedido real, que es justo lo que no es. El personal
+    # la numera a su criterio (ej. "001") para distinguirla a simple vista.
+    uso_interno: Mapped[bool] = mapped_column(Boolean, default=False)
 
     # Columnas comerciales espejo de la hoja "oc mp" del Excel OC-MP.
     fecha_seguimiento_mp: Mapped[Optional[date]] = mapped_column(Date)
@@ -318,6 +342,10 @@ class Entrega(Base):
     # SID día por día, así que cada entrega/devolución necesita su propio
     # check (ver sid_controller.recalcular_estado_entrega).
     sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Cuándo se marcó el check de arriba (null mientras no está marcado) — se
+    # muestra en Registro SID como "Registro SID DD/MM/YYYY HH:MM" para saber
+    # cuándo se tramitó, no solo que ya se tramitó (ver sid_controller).
+    sid_completado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Quién corrigió esta entrega por última vez (y cuándo) — el personal de
     # planta no siempre tipea bien a la primera, así que a diferencia de casi
@@ -386,6 +414,8 @@ class Devolucion(Base):
     hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
     # SID de ESTE movimiento puntual — ver Entrega.sid_completado.
     sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Ver la nota equivalente en Entrega.sid_completado_en.
+    sid_completado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Ver la nota equivalente en Entrega.editado_por_id/editado_en.
     editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))

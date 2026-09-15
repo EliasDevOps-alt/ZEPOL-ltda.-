@@ -56,6 +56,57 @@ function revisarActualizaciones(): void {
   })
 }
 
+type ResultadoBusquedaActualizacion =
+  | { estado: 'sin-actualizacion' }
+  | { estado: 'descargando'; version: string }
+  | { estado: 'error'; mensaje: string }
+
+// Botón "Buscar actualización" en Login — la revisión automática (cada hora,
+// o al abrir la app) ya existe, pero el personal quería poder disparar la
+// revisión ellos mismos cuando les convenga (ej. antes de cerrar turno), sin
+// esperar el próximo chequeo automático. autoDownload sigue en TRUE (ver
+// iniciarAutoUpdate): si hay una versión nueva, ya se pone a descargar sola
+// y el diálogo de "lista para instalar" de siempre avisa cuando termine —
+// esto solo dispara la revisión y devuelve un resultado inmediato para
+// mostrar en pantalla.
+function buscarActualizacionManual(): Promise<ResultadoBusquedaActualizacion> {
+  if (!app.isPackaged) {
+    return Promise.resolve({
+      estado: 'error',
+      mensaje: 'Solo disponible en la app instalada — no hay actualizaciones que buscar en modo desarrollo.'
+    })
+  }
+  return new Promise((resolve) => {
+    const limpiar = (): void => {
+      autoUpdater.removeListener('update-available', onDisponible)
+      autoUpdater.removeListener('update-not-available', onNoDisponible)
+      autoUpdater.removeListener('error', onError)
+    }
+    const onDisponible = (info: { version: string }): void => {
+      limpiar()
+      resolve({ estado: 'descargando', version: info.version })
+    }
+    const onNoDisponible = (): void => {
+      limpiar()
+      resolve({ estado: 'sin-actualizacion' })
+    }
+    const onError = (err: Error): void => {
+      limpiar()
+      resolve({ estado: 'error', mensaje: err.message })
+    }
+    autoUpdater.once('update-available', onDisponible)
+    autoUpdater.once('update-not-available', onNoDisponible)
+    autoUpdater.once('error', onError)
+
+    const { apiBaseUrl } = readConfig()
+    autoUpdater.setFeedURL({ provider: 'generic', url: `${apiBaseUrl.replace(/\/$/, '')}/updates/` })
+    autoUpdater.checkForUpdates().catch((err) => {
+      limpiar()
+      resolve({ estado: 'error', mensaje: err instanceof Error ? err.message : String(err) })
+    })
+  })
+}
+
 function iniciarAutoUpdate(): void {
   // En dev (npm run dev) no hay build empaquetado ni updates que buscar.
   if (!app.isPackaged) return
@@ -109,6 +160,7 @@ app.whenReady().then(() => {
     if (resultado.canceled || resultado.filePaths.length === 0) return null
     return resultado.filePaths[0]
   })
+  ipcMain.handle('updates:buscar', () => buscarActualizacionManual())
 
   createWindow()
   iniciarAutoUpdate()

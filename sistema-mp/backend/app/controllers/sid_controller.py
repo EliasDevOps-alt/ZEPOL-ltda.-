@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -35,6 +37,7 @@ def marcar_entrega_sid(db: Session, entrega_id: int, completado: bool) -> Entreg
     if entrega is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
     entrega.sid_completado = completado
+    entrega.sid_completado_en = datetime.now() if completado else None
     db.flush()
     recalcular_estado_entrega(db, entrega.ot_material)
     db.commit()
@@ -58,6 +61,7 @@ def marcar_devolucion_sid(db: Session, devolucion_id: int, completado: bool) -> 
     if devolucion.ot_material_id is None:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ese material todavía no tiene pedido asignado")
     devolucion.sid_completado = completado
+    devolucion.sid_completado_en = datetime.now() if completado else None
     db.flush()
     recalcular_sid_devolucion(db, devolucion.ot_material)
     db.commit()

@@ -82,6 +82,7 @@ export interface OrdenTrabajo {
   diseno: string | null
   fecha_creacion: string
   sincronizado_excel: boolean
+  uso_interno: boolean
 }
 
 // Columnas comerciales espejo 1:1 de la hoja "oc mp" del Excel OC-MP,
@@ -121,6 +122,10 @@ export interface OtDetalleCreate extends CamposComercialesOt {
   cliente?: string | null
   diseno?: string | null
   materiales: MaterialPedidoIn[]
+  // TRUE = material que la empresa fabrica para sí misma, sin cliente real
+  // detrás — no se escribe en el Excel OC-MP. Solo tiene efecto al CREAR la
+  // OT; en una OT ya existente se ignora.
+  uso_interno?: boolean
 }
 
 export interface MaterialPedidoOut {
@@ -156,6 +161,7 @@ export interface OtDetalleOut extends CamposComercialesOt {
   diseno: string | null
   sincronizado_excel: boolean
   excel_sync_error: string | null
+  uso_interno: boolean
   procesos: ProcesoDetalleOut[]
   pendientes: OtMaterialPendiente[]
 }
@@ -205,6 +211,17 @@ export interface OtExcel extends CamposComercialesOt {
 export interface ConfiguracionExcel {
   ruta: string | null
   tiene_password: boolean
+}
+
+// Una OT que el vigilante del Excel OC-MP importó o actualizó solo, sin que
+// nadie tocara el sistema (ver app/services/excel_watcher.py en el backend).
+export interface RegistroExcelAutomatico {
+  id: number
+  creado_en: string
+  numero_ot: string
+  cliente: string | null
+  tipo: 'nueva' | 'actualizada'
+  detalle: string
 }
 
 // Una fila de "oc mp" cuyo número de OT todavía no está en la base de datos
@@ -301,6 +318,14 @@ export interface MaterialUpdate {
 //     sustitución: esa materia prima obtiene su PROPIO pedido, en el proceso y
 //     la máquina donde se consume —que no tienen por qué ser los del pedido que
 //     completa— y la entrega va contra ese. Vale para cualquier proceso.
+// Ningún flujo de la UI arma como_materia_prima:true hoy — se sacó el botón
+// "Agregar materia prima" de RegistrarEntrega (planta reportó casos reales
+// donde el pedido "padre" nunca se cargó en la OT, o ya estaba registrado
+// como su propio pedido, así que no había a qué asociarla). El campo se deja
+// en el contrato porque OtMaterial.insumo_de_id sigue existiendo para datos
+// ya cargados; los pedidos nuevos que antes hubieran sido materia prima se
+// crean sueltos con EntregaCreate.numero_ot ("Entregar un material que la OT
+// no tiene").
 export interface EntregaCreate {
   // Exactamente uno de los tres. pendiente_id solo vale con
   // como_materia_prima: es materia prima para un material que todavía no
@@ -352,6 +377,8 @@ export interface Entrega {
   descripcion_entregado: string | null
   usa_bobinas: boolean
   sid_completado: boolean
+  // Cuándo se marcó el check de arriba — null mientras no está marcado.
+  sid_completado_en: string | null
   observacion: string | null
   // ot_material_id/proceso/codigo_mp de arriba son los del pedido donde
   // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
@@ -417,8 +444,15 @@ export interface Devolucion {
   // null mientras el material que entró a almacén no tenga pedido todavía.
   ot_material_id: number | null
   pendiente_id: number | null
+  // A qué OT pertenece — necesario como campo propio (no derivable de un
+  // Consumo) porque un ingreso a almacén contra un pendiente suelto nunca
+  // tiene ot_material_id y por lo tanto no aparece en /consumo (ver
+  // RegistroSid.tsx, pestaña "Ingresados").
+  numero_ot: string
+  cliente: string | null
   material_id: number
   codigo_mp: string
+  unidad: string
   usuario: string
   fecha: string
   hora: string
@@ -427,6 +461,8 @@ export interface Devolucion {
   total_devuelto_pedido: number
   usa_bobinas: boolean
   sid_completado: boolean
+  // Cuándo se marcó el check de arriba — null mientras no está marcado.
+  sid_completado_en: string | null
   es_ingreso_produccion: boolean
   // Quién la corrigió por última vez y cuándo — ver Entrega.editado_por.
   editado_por: string | null

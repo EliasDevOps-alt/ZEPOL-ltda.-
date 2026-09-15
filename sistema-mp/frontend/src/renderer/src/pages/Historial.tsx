@@ -8,7 +8,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Combobox } from '@renderer/components/ui/combobox'
-import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
+import { CampoCantidad, pesosCargados, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -25,10 +25,9 @@ const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
 }
 
 function bobinasDesde(valores: number[]): BobinasPedido {
-  return {
-    cantidadBobinas: valores.length ? String(valores.length) : '1',
-    bobinas: valores.length ? valores.map(String) : ['']
-  }
+  // Siempre deja una fila vacía al final, lista para escribir una bobina más
+  // sin tener que tocar nada primero (ver CampoCantidad).
+  return { bobinas: [...valores.map(String), ''] }
 }
 
 /** Corregir/borrar una entrega ya registrada — el personal de planta no
@@ -84,7 +83,7 @@ function FilaEntrega({
         fecha,
         material_id: Number(materialId),
         observacion: observacion || null,
-        bobinas: seleccion.bobinas.map(Number).filter((n) => n > 0),
+        bobinas: pesosCargados(seleccion),
         proceso_id: Number(procesoId),
         maquina_id: Number(maquinaId)
       }),
@@ -276,7 +275,7 @@ function FilaDevolucion({
       api.editarDevolucion(apiBaseUrl, token, devolucion.id, {
         fecha,
         material_id: Number(materialId),
-        bobinas: seleccion.bobinas.map(Number).filter((n) => n > 0)
+        bobinas: pesosCargados(seleccion)
       }),
     onSuccess: () => {
       setEditando(false)

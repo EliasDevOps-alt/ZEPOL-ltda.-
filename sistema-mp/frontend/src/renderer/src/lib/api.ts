@@ -34,6 +34,7 @@ import type {
   Proceso,
   PromoverPendienteIn,
   PromoverPendienteOut,
+  RegistroExcelAutomatico,
   Usuario,
   UsuarioAdmin,
   UsuarioCreate,
@@ -360,6 +361,10 @@ export function actualizarPasswordExcel(baseUrl: string, token: string, password
     token,
     body: { password }
   })
+}
+
+export function obtenerRegistroExcel(baseUrl: string, token: string) {
+  return request<RegistroExcelAutomatico[]>(baseUrl, '/configuracion/excel-oc-mp/registro', { token })
 }
 
 // El SID se tramita día por día, así que el check vive en cada movimiento

@@ -1,13 +1,14 @@
 import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, FileSpreadsheet, FolderOpen, KeyRound, TriangleAlert } from 'lucide-react'
+import { CheckCircle2, FileSpreadsheet, FolderOpen, KeyRound, RefreshCw, TriangleAlert } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
+import { formatearFechaHoraCompleta } from '@renderer/lib/fechas'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 
@@ -26,6 +27,14 @@ export function ConfiguracionExcel() {
   const configuracion = useQuery({
     queryKey: ['configuracion-excel'],
     queryFn: () => api.obtenerConfigExcel(apiBaseUrl, token)
+  })
+
+  // Se refresca sola cada 20s (el mismo ritmo del vigilante en el backend)
+  // para que quede visible lo que trajo sin tener que recargar la pantalla.
+  const registro = useQuery({
+    queryKey: ['registro-excel-automatico'],
+    queryFn: () => api.obtenerRegistroExcel(apiBaseUrl, token),
+    refetchInterval: 20000
   })
 
   const guardar = useMutation({
@@ -164,6 +173,53 @@ export function ConfiguracionExcel() {
               Contraseña guardada — se validó que abre el archivo configurado.
             </p>
           )}
+        </CardContent>
+      </Card>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <RefreshCw className="h-4 w-4" />
+            Sincronización automática
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          <p className="text-sm text-muted-foreground">
+            El sistema revisa este archivo solo, cada pocos segundos, y trae automáticamente las OT nuevas y los
+            materiales o datos comerciales que se le hayan agregado a una OT ya importada — sin que nadie tenga
+            que hacer nada. Acá queda el registro de lo que trajo.
+          </p>
+
+          {registro.isError && (
+            <p className="text-sm text-destructive">No se pudo consultar el registro de sincronización.</p>
+          )}
+          {registro.data?.length === 0 && (
+            <p className="text-sm text-muted-foreground">Todavía no se registró ninguna sincronización automática.</p>
+          )}
+
+          <div className="flex flex-col gap-2">
+            {registro.data?.map((item) => (
+              <div key={item.id} className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="font-medium">
+                    OT {item.numero_ot}
+                    {item.cliente ? ` — ${item.cliente}` : ''}
+                    <span
+                      className={
+                        item.tipo === 'nueva'
+                          ? 'ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary'
+                          : 'ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
+                      }
+                    >
+                      {item.tipo === 'nueva' ? 'OT nueva' : 'Actualizada'}
+                    </span>
+                  </p>
+                  <span className="text-xs text-muted-foreground">{formatearFechaHoraCompleta(item.creado_en)}</span>
+                </div>
+                <p className="mt-1 text-muted-foreground">{item.detalle}</p>
+              </div>
+            ))}
+          </div>
         </CardContent>
       </Card>
     </div>

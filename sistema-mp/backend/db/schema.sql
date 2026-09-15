@@ -76,6 +76,17 @@ CREATE TABLE configuracion (
     valor   TEXT
 );
 
+-- Una fila por cada OT que el vigilante del Excel OC-MP importó o actualizó
+-- solo, sin que nadie tocara el sistema (ver app/services/excel_watcher.py).
+CREATE TABLE registro_excel_automatico (
+    id          SERIAL PRIMARY KEY,
+    creado_en   TIMESTAMP NOT NULL DEFAULT now(),
+    numero_ot   VARCHAR(50) NOT NULL,
+    cliente     VARCHAR(255),
+    tipo        VARCHAR(20) NOT NULL,  -- 'nueva' | 'actualizada'
+    detalle     TEXT NOT NULL
+);
+
 -- ============================================================
 -- Órdenes de trabajo
 -- ============================================================
@@ -127,7 +138,13 @@ CREATE TABLE ordenes_trabajo (
     -- de 6 materiales, etc.) — ahí excel_sync_error guarda el motivo para
     -- mostrarlo y permitir reintentar a mano.
     sincronizado_excel           BOOLEAN     NOT NULL DEFAULT TRUE,
-    excel_sync_error             TEXT
+    excel_sync_error             TEXT,
+
+    -- TRUE = OT que la empresa fabrica para sí misma, sin cliente real
+    -- detrás — pasa raramente. _sincronizar_excel la salta por completo, así
+    -- que nunca genera una fila en el Excel OC-MP (tenerla ahí implicaría un
+    -- pedido real de cliente, que es justo lo que no es).
+    uso_interno                  BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
 -- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD.
@@ -248,6 +265,9 @@ CREATE TABLE entregas (
     -- partir de estos (ver sid_controller.recalcular_estado_entrega) — nunca
     -- se marca completado si hay una entrega nueva sin registrar.
     sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
+    -- Cuándo se marcó el check de arriba (NULL mientras no está marcado) —
+    -- se muestra en Registro SID como "Registro SID DD/MM/YYYY HH:MM".
+    sid_completado_en TIMESTAMP,
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     -- Quién corrigió esta entrega por última vez (y cuándo) — a diferencia de
     -- casi todo lo demás en el sistema, una entrega SÍ se puede corregir
@@ -302,6 +322,8 @@ CREATE TABLE devoluciones (
     -- SID de ESTE movimiento puntual — ver entregas.sid_completado. El
     -- agregado ot_materiales.sid_devolucion_completado se recalcula solo.
     sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
+    -- Ver la nota equivalente en entregas.sid_completado_en.
+    sid_completado_en TIMESTAMP,
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     -- Ver la nota equivalente en entregas.editado_por_id/editado_en.
     editado_por_id INTEGER   REFERENCES usuarios(id),

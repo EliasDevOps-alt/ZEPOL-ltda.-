@@ -10,16 +10,18 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { formatearFechaHora, hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
+import { formatearFechaHora, formatearFechaHoraCompleta, hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
 type ModoFecha = 'dia' | 'mes'
-type Pestana = 'entregados' | 'devueltos'
+type Pestana = 'entregados' | 'devueltos' | 'ingresados' | 'todos'
 type Filtro = 'pendientes' | 'completados' | 'todos'
 
 const PESTANAS: { valor: Pestana; etiqueta: string }[] = [
   { valor: 'entregados', etiqueta: 'Entregados' },
-  { valor: 'devueltos', etiqueta: 'Devueltos' }
+  { valor: 'devueltos', etiqueta: 'Devueltos' },
+  { valor: 'ingresados', etiqueta: 'Ingresados' },
+  { valor: 'todos', etiqueta: 'Todos' }
 ]
 
 const FILTROS: { valor: Filtro; etiqueta: string }[] = [
@@ -28,12 +30,27 @@ const FILTROS: { valor: Filtro; etiqueta: string }[] = [
   { valor: 'todos', etiqueta: 'Todos' }
 ]
 
+function entregaCompleta(pedido: Consumo): boolean {
+  return pedido.estado_sid === 'COMPLETADO'
+}
+
+function devolucionCompleta(pedido: Consumo): boolean {
+  return pedido.sid_devolucion_completado
+}
+
 // Completo = TODOS los movimientos de ese tipo ya tienen su check marcado
 // (lo mantiene al día el backend: ver sid_controller.recalcular_estado_entrega/
 // recalcular_sid_devolucion). Un movimiento nuevo sin registrar reabre esto
-// solo, sin que nadie tenga que "desmarcar" nada a mano.
+// solo, sin que nadie tenga que "desmarcar" nada a mano. En "Todos" cuentan
+// los dos trámites a la vez, pero solo el que de verdad aplica: un pedido sin
+// devoluciones/ingresos no tiene por qué tener su SID de devolución tramitado
+// para considerarse completo.
 function estaCompletado(pedido: Consumo, pestana: Pestana): boolean {
-  return pestana === 'entregados' ? pedido.estado_sid === 'COMPLETADO' : pedido.sid_devolucion_completado
+  if (pestana === 'entregados') return entregaCompleta(pedido)
+  if (pestana === 'devueltos') return devolucionCompleta(pedido)
+  const aplicaEntrega = pedido.total_entregado > 0
+  const aplicaDevolucion = pedido.total_devuelto + pedido.total_ingresado > 0
+  return (!aplicaEntrega || entregaCompleta(pedido)) && (!aplicaDevolucion || devolucionCompleta(pedido))
 }
 
 export function RegistroSid() {
@@ -42,7 +59,7 @@ export function RegistroSid() {
   const token = sesion!.token
   const queryClient = useQueryClient()
 
-  const [pestana, setPestana] = useState<Pestana>('entregados')
+  const [pestana, setPestana] = useState<Pestana>('todos')
   const [q, setQ] = useState('')
   const [filtro, setFiltro] = useState<Filtro>('pendientes')
   const [modoFecha, setModoFecha] = useState<ModoFecha>('dia')
@@ -111,6 +128,41 @@ export function RegistroSid() {
     return mapa
   }, [devoluciones.data])
 
+  // Material fabricado en la OT entrando a almacén — con pedido ya asignado o
+  // todavía como pendiente suelto (ver crear_pendiente_libre). Un pendiente
+  // suelto nunca aparece en /consumo, así que se agrupa directo por numero_ot
+  // en vez de por pedido — es la única forma de que su SID sea visible acá.
+  const ingresos = useMemo(() => (devoluciones.data ?? []).filter((d) => d.es_ingreso_produccion), [devoluciones.data])
+  const ingresosEnRango = useMemo(
+    () => ingresos.filter((d) => !desde || (d.fecha >= desde && d.fecha <= hasta)),
+    [ingresos, desde, hasta]
+  )
+  const ingresosPorOt = useMemo(() => {
+    const mapa = new Map<string, Devolucion[]>()
+    for (const d of ingresosEnRango) mapa.set(d.numero_ot, [...(mapa.get(d.numero_ot) ?? []), d])
+    return mapa
+  }, [ingresosEnRango])
+  // Completo = TODOS los ingresos de esa OT (de toda la historia, no solo los
+  // del rango de fecha elegido) ya tienen su check — mismo criterio que
+  // entregados/devueltos.
+  const ingresosCompletoPorOt = useMemo(() => {
+    const mapa = new Map<string, boolean>()
+    for (const d of ingresos) mapa.set(d.numero_ot, (mapa.get(d.numero_ot) ?? true) && d.sid_completado)
+    return mapa
+  }, [ingresos])
+  const gruposIngresos = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    let numerosOt = [...ingresosPorOt.keys()]
+    if (needle) numerosOt = numerosOt.filter((n) => n.toLowerCase().includes(needle))
+    if (filtro === 'completados') numerosOt = numerosOt.filter((n) => ingresosCompletoPorOt.get(n))
+    if (filtro === 'pendientes') numerosOt = numerosOt.filter((n) => !ingresosCompletoPorOt.get(n))
+    return numerosOt.map((numeroOt) => ({
+      numeroOt,
+      movimientos: ingresosPorOt.get(numeroOt) ?? [],
+      completo: ingresosCompletoPorOt.get(numeroOt) ?? false
+    }))
+  }, [ingresosPorOt, q, filtro, ingresosCompletoPorOt])
+
   const alFallar = (err: unknown) =>
     setError(err instanceof ApiError ? err.message : 'No se pudo actualizar el estado SID')
 
@@ -147,12 +199,17 @@ export function RegistroSid() {
   // Solo listamos lo que realmente ya se movió — nada de "cantidad entregada
   // 0" mezclado con lo que sí se entregó. En la pestaña de devueltos cuentan
   // también los ingresos de material fabricado: son movimientos hacia almacén
-  // con su propio trámite, igual que un sobrante.
+  // con su propio trámite, igual que un sobrante. "Todos" es la unión de las
+  // dos: un pedido aparece si tiene cualquiera de los dos movimientos.
+  const tieneEntrega = (p: Consumo) => p.total_entregado > 0
+  const tieneDevolucion = (p: Consumo) => p.total_devuelto + p.total_ingresado > 0
   const visiblesEnPestana = useMemo(
     () =>
-      pedidosNoTinta.filter((p) =>
-        pestana === 'entregados' ? p.total_entregado > 0 : p.total_devuelto + p.total_ingresado > 0
-      ),
+      pedidosNoTinta.filter((p) => {
+        if (pestana === 'entregados') return tieneEntrega(p)
+        if (pestana === 'devueltos') return tieneDevolucion(p)
+        return tieneEntrega(p) || tieneDevolucion(p)
+      }),
     [pedidosNoTinta, pestana]
   )
 
@@ -187,9 +244,11 @@ export function RegistroSid() {
     // pasaría a depender de qué día estás mirando, y no tiene que ser así.
     if (desde) {
       lista = lista.filter((p) => {
-        const movimientos =
-          pestana === 'entregados' ? entregasPorPedido.get(p.ot_material_id) : devolucionesPorPedido.get(p.ot_material_id)
-        return (movimientos?.length ?? 0) > 0
+        const enEntregas = (entregasPorPedido.get(p.ot_material_id)?.length ?? 0) > 0
+        const enDevoluciones = (devolucionesPorPedido.get(p.ot_material_id)?.length ?? 0) > 0
+        if (pestana === 'entregados') return enEntregas
+        if (pestana === 'devueltos') return enDevoluciones
+        return enEntregas || enDevoluciones
       })
     }
     return lista
@@ -233,6 +292,7 @@ export function RegistroSid() {
             type="button"
             variant={pestana === p.valor ? 'default' : 'outline'}
             onClick={() => setPestana(p.valor)}
+            className="flex-1"
           >
             {p.etiqueta}
           </Button>
@@ -318,24 +378,38 @@ export function RegistroSid() {
       )}
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
-      {pedidos.isSuccess && grupos.length === 0 && (
-        <p className="text-sm text-muted-foreground">No hay pedidos que coincidan con este filtro.</p>
-      )}
+      {pestana === 'ingresados'
+        ? devoluciones.isSuccess &&
+          gruposIngresos.length === 0 && (
+            <p className="text-sm text-muted-foreground">No hay ingresos a almacén que coincidan con este filtro.</p>
+          )
+        : pedidos.isSuccess &&
+          grupos.length === 0 && <p className="text-sm text-muted-foreground">No hay pedidos que coincidan con este filtro.</p>}
 
       <div className="flex flex-col gap-4">
-        {grupos.map((grupo) => (
-          <GrupoOt
-            key={grupo.numeroOt}
-            numeroOt={grupo.numeroOt}
-            pedidos={grupo.pedidos}
-            completo={grupo.completo}
-            pestana={pestana}
-            entregasPorPedido={entregasPorPedido}
-            devolucionesPorPedido={devolucionesPorPedido}
-            marcarEntregaSid={marcarEntregaSid}
-            marcarDevolucionSid={marcarDevolucionSid}
-          />
-        ))}
+        {pestana === 'ingresados'
+          ? gruposIngresos.map((grupo) => (
+              <GrupoOtIngresos
+                key={grupo.numeroOt}
+                numeroOt={grupo.numeroOt}
+                movimientos={grupo.movimientos}
+                completo={grupo.completo}
+                marcarDevolucionSid={marcarDevolucionSid}
+              />
+            ))
+          : grupos.map((grupo) => (
+              <GrupoOt
+                key={grupo.numeroOt}
+                numeroOt={grupo.numeroOt}
+                pedidos={grupo.pedidos}
+                completo={grupo.completo}
+                pestana={pestana}
+                entregasPorPedido={entregasPorPedido}
+                devolucionesPorPedido={devolucionesPorPedido}
+                marcarEntregaSid={marcarEntregaSid}
+                marcarDevolucionSid={marcarDevolucionSid}
+              />
+            ))}
       </div>
     </div>
   )
@@ -395,6 +469,89 @@ function GrupoOt({
   )
 }
 
+// Un ingreso a almacén es una Devolucion, no un pedido — con pedido ya
+// asignado o todavía como pendiente suelto (ver crear_pendiente_libre, que
+// nunca aparece en /consumo). Por eso esta tarjeta no reutiliza GrupoOt/
+// FilaMaterial (pensadas para Consumo): agrupa directo por numero_ot y,
+// dentro, por material, y reutiliza SeccionSid/MovimientoRow para el check.
+function GrupoOtIngresos({
+  numeroOt,
+  movimientos,
+  completo,
+  marcarDevolucionSid
+}: {
+  numeroOt: string
+  movimientos: Devolucion[]
+  completo: boolean
+  marcarDevolucionSid: MutacionSid
+}) {
+  const cliente = movimientos[0]?.cliente ?? null
+
+  const porMaterial = useMemo(() => {
+    const mapa = new Map<number, Devolucion[]>()
+    for (const d of movimientos) mapa.set(d.material_id, [...(mapa.get(d.material_id) ?? []), d])
+    return [...mapa.values()].map((movs) => [...movs].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id))
+  }, [movimientos])
+
+  return (
+    <Card>
+      <CardContent className="flex flex-col gap-4 pt-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CeldaCopiable texto={numeroOt} className="text-base font-semibold" />
+          <span
+            className={cn(
+              'rounded-full px-2 py-0.5 text-xs font-medium',
+              completo ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
+            )}
+          >
+            {completo ? 'Completado' : 'En proceso'}
+          </span>
+        </div>
+
+        {cliente && (
+          <div>
+            <p className="text-xs text-muted-foreground">Cliente</p>
+            <CeldaCopiable texto={cliente} />
+          </div>
+        )}
+
+        <div className="flex flex-col divide-y divide-border">
+          {porMaterial.map((ordenados) => (
+            <div key={ordenados[0].material_id} className="py-3 first:pt-0 last:pb-0">
+              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+                <CeldaCopiable texto={ordenados[0].codigo_mp} />
+                {ordenados[0].ot_material_id == null && (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+                    ingreso almacén · sin registro de entrega
+                  </span>
+                )}
+              </p>
+              <SeccionSid titulo="Ingreso a almacén" completado={ordenados.every((d) => d.sid_completado)}>
+                {ordenados.map((d) => (
+                  <MovimientoRow
+                    key={d.id}
+                    fecha={formatearFechaHora(d.fecha, d.hora)}
+                    etiqueta={null}
+                    cantidad={d.total_devuelto}
+                    unidad={d.unidad}
+                    usaBobinas={d.usa_bobinas}
+                    bobinas={d.bobinas}
+                    usuario={d.usuario}
+                    completado={d.sid_completado}
+                    sidCompletadoEn={d.sid_completado_en}
+                    cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
+                    onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
+                  />
+                ))}
+              </SeccionSid>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
 function FilaMaterial({
   pedido,
   pestana,
@@ -410,8 +567,6 @@ function FilaMaterial({
   marcarEntregaSid: MutacionSid
   marcarDevolucionSid: MutacionSid
 }) {
-  const completado = estaCompletado(pedido, pestana)
-
   const entregasOrdenadas = useMemo(
     () => [...susEntregas].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id),
     [susEntregas]
@@ -421,20 +576,69 @@ function FilaMaterial({
     [susDevoluciones]
   )
 
+  const seccionEntrega = (
+    <SeccionSid titulo="SID de entrega" completado={entregasOrdenadas.length > 0 ? entregaCompleta(pedido) : null}>
+      {entregasOrdenadas.map((e) => (
+        <MovimientoRow
+          key={e.id}
+          fecha={formatearFechaHora(e.fecha, e.hora)}
+          etiqueta={
+            e.codigo_mp_entregado !== pedido.codigo_mp ? (
+              <span className="text-warning">
+                {e.codigo_mp_entregado} (pedido: {pedido.codigo_mp})
+              </span>
+            ) : null
+          }
+          cantidad={e.total_entregado}
+          unidad={pedido.unidad}
+          usaBobinas={e.usa_bobinas}
+          bobinas={e.bobinas}
+          usuario={e.usuario}
+          completado={e.sid_completado}
+          sidCompletadoEn={e.sid_completado_en}
+          cambiando={marcarEntregaSid.isPending && marcarEntregaSid.variables?.id === e.id}
+          onCambiar={(nuevo) => marcarEntregaSid.mutate({ id: e.id, completado: nuevo })}
+        />
+      ))}
+      {entregasOrdenadas.length === 0 && <p className="text-xs text-muted-foreground">Sin registros.</p>}
+    </SeccionSid>
+  )
+
+  const seccionDevolucion = (
+    <SeccionSid
+      titulo="SID de devolución"
+      completado={devolucionesOrdenadas.length > 0 ? devolucionCompleta(pedido) : null}
+    >
+      {devolucionesOrdenadas.map((d) => (
+        <MovimientoRow
+          key={d.id}
+          fecha={formatearFechaHora(d.fecha, d.hora)}
+          etiqueta={
+            d.es_ingreso_produccion ? (
+              <span className="text-warning">Ingreso a almacén</span>
+            ) : d.codigo_mp !== pedido.codigo_mp ? (
+              <span className="text-warning">
+                {d.codigo_mp} (pedido: {pedido.codigo_mp})
+              </span>
+            ) : null
+          }
+          cantidad={d.total_devuelto}
+          unidad={pedido.unidad}
+          usaBobinas={d.usa_bobinas}
+          bobinas={d.bobinas}
+          usuario={d.usuario}
+          completado={d.sid_completado}
+          sidCompletadoEn={d.sid_completado_en}
+          cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
+          onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
+        />
+      ))}
+      {devolucionesOrdenadas.length === 0 && <p className="text-xs text-muted-foreground">Sin registros.</p>}
+    </SeccionSid>
+  )
+
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-sm font-medium">SID {pestana === 'entregados' ? 'de entrega' : 'de devolución'}</span>
-        <span
-          className={cn(
-            'rounded-full px-2 py-0.5 text-xs font-medium',
-            completado ? 'bg-success/10 text-success' : 'bg-warning/10 text-warning'
-          )}
-        >
-          {completado ? 'Completo' : 'Pendiente'}
-        </span>
-      </div>
-
       <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
         <div>
           <p className="text-xs text-muted-foreground">Cliente</p>
@@ -477,57 +681,55 @@ function FilaMaterial({
         )}
       </div>
 
-      <div className="flex flex-col gap-2">
-        <p className="text-xs font-medium text-muted-foreground">Registros por fecha</p>
-        {pestana === 'entregados'
-          ? entregasOrdenadas.map((e) => (
-              <MovimientoRow
-                key={e.id}
-                fecha={formatearFechaHora(e.fecha, e.hora)}
-                etiqueta={
-                  e.codigo_mp_entregado !== pedido.codigo_mp ? (
-                    <span className="text-warning">
-                      {e.codigo_mp_entregado} (pedido: {pedido.codigo_mp})
-                    </span>
-                  ) : null
-                }
-                cantidad={e.total_entregado}
-                unidad={pedido.unidad}
-                usaBobinas={e.usa_bobinas}
-                bobinas={e.bobinas}
-                usuario={e.usuario}
-                completado={e.sid_completado}
-                cambiando={marcarEntregaSid.isPending && marcarEntregaSid.variables?.id === e.id}
-                onCambiar={(nuevo) => marcarEntregaSid.mutate({ id: e.id, completado: nuevo })}
-              />
-            ))
-          : devolucionesOrdenadas.map((d) => (
-              <MovimientoRow
-                key={d.id}
-                fecha={formatearFechaHora(d.fecha, d.hora)}
-                etiqueta={
-                  d.es_ingreso_produccion ? (
-                    <span className="text-warning">Ingreso a almacén</span>
-                  ) : d.codigo_mp !== pedido.codigo_mp ? (
-                    <span className="text-warning">
-                      {d.codigo_mp} (pedido: {pedido.codigo_mp})
-                    </span>
-                  ) : null
-                }
-                cantidad={d.total_devuelto}
-                unidad={pedido.unidad}
-                usaBobinas={d.usa_bobinas}
-                bobinas={d.bobinas}
-                usuario={d.usuario}
-                completado={d.sid_completado}
-                cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
-                onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
-              />
-            ))}
-        {(pestana === 'entregados' ? entregasOrdenadas : devolucionesOrdenadas).length === 0 && (
-          <p className="text-xs text-muted-foreground">Sin registros.</p>
-        )}
+      {/* En "Todos" van lado a lado (entrega a la izquierda, devolución a la
+          derecha, cada una hasta la mitad) para no tener que ir cambiando de
+          pestaña para ver los dos trámites del mismo material. En Entregados/
+          Devueltos se muestra solo la columna correspondiente, a todo el ancho. */}
+      {pestana === 'todos' ? (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div>{seccionEntrega}</div>
+          <div>{seccionDevolucion}</div>
+        </div>
+      ) : pestana === 'entregados' ? (
+        seccionEntrega
+      ) : (
+        seccionDevolucion
+      )}
+    </div>
+  )
+}
+
+function SeccionSid({
+  titulo,
+  completado,
+  children
+}: {
+  titulo: string
+  // null = este material nunca tuvo movimientos de este tipo (ej. se entregó
+  // todo y no quedó nada para devolver) — no hay ningún trámite pendiente,
+  // así que no tiene sentido mostrarlo como "Pendiente".
+  completado: boolean | null
+  children: React.ReactNode
+}) {
+  return (
+    <div className="flex h-full flex-col gap-2 rounded-md border border-border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-sm font-medium">{titulo}</span>
+        <span
+          className={cn(
+            'rounded-full px-2 py-0.5 text-xs font-medium',
+            completado === null
+              ? 'bg-muted text-muted-foreground'
+              : completado
+                ? 'bg-success/10 text-success'
+                : 'bg-warning/10 text-warning'
+          )}
+        >
+          {completado === null ? 'Sin movimientos' : completado ? 'Completo' : 'Pendiente'}
+        </span>
       </div>
+      <p className="text-xs font-medium text-muted-foreground">Registros por fecha</p>
+      <div className="flex flex-col gap-2">{children}</div>
     </div>
   )
 }
@@ -541,6 +743,7 @@ function MovimientoRow({
   bobinas,
   usuario,
   completado,
+  sidCompletadoEn,
   cambiando,
   onCambiar
 }: {
@@ -552,6 +755,7 @@ function MovimientoRow({
   bobinas: number[]
   usuario: string
   completado: boolean
+  sidCompletadoEn: string | null
   cambiando: boolean
   onCambiar: (completado: boolean) => void
 }) {
@@ -581,6 +785,9 @@ function MovimientoRow({
         <p className="mt-1 pl-6 text-muted-foreground">
           {bobinas.length} {bobinas.length === 1 ? 'bobina' : 'bobinas'}: {bobinas.map((b) => `${b} ${unidad}`).join(', ')}
         </p>
+      )}
+      {completado && sidCompletadoEn && (
+        <p className="mt-1 pl-6 text-primary">Registro SID {formatearFechaHoraCompleta(sidCompletadoEn)}</p>
       )}
     </div>
   )

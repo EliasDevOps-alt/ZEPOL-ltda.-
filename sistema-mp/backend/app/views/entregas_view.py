@@ -44,6 +44,7 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         descripcion_entregado=entrega.material.descripcion,
         usa_bobinas=entrega.material.usa_bobinas,
         sid_completado=entrega.sid_completado,
+        sid_completado_en=entrega.sid_completado_en,
         observacion=entrega.observacion,
         pedido_creado=pedido_creado,
         editado_por=entrega.editado_por.inicial if entrega.editado_por else None,

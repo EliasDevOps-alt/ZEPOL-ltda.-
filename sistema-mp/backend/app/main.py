@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -7,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from .services.excel_watcher import bucle_vigilancia_excel
 from .views import (
     auth_view,
     catalogos_view,
@@ -60,3 +62,20 @@ app.mount("/updates", StaticFiles(directory=str(UPDATES_DIR)), name="updates")
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+# Vigilante del Excel OC-MP: revisa en segundo plano si el archivo cambió
+# (el personal sigue registrando OT y agregando materiales ahí, en paralelo
+# al sistema) y trae los cambios solo, sin que nadie tenga que acordarse de
+# apretar "Comparar con Excel" -- ver excel_watcher.py para el detalle de
+# por qué es seguro hacerlo sin supervisión.
+@app.on_event("startup")
+async def iniciar_vigilante_excel() -> None:
+    app.state.tarea_vigilante_excel = asyncio.create_task(bucle_vigilancia_excel())
+
+
+@app.on_event("shutdown")
+async def detener_vigilante_excel() -> None:
+    tarea = getattr(app.state, "tarea_vigilante_excel", None)
+    if tarea is not None:
+        tarea.cancel()

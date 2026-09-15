@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from typing import List
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from .. import schemas, security
-from ..controllers import configuracion_controller
+from ..controllers import configuracion_controller, ordenes_controller
 from ..database import get_db
 
 router = APIRouter(
@@ -34,3 +36,8 @@ def actualizar_ruta_excel(data: schemas.ConfiguracionExcelIn, db: Session = Depe
 def actualizar_password_excel(data: schemas.ConfiguracionExcelPasswordIn, db: Session = Depends(get_db)):
     configuracion_controller.actualizar_password_excel(db, data.password)
     return _config_out(db)
+
+
+@router.get("/excel-oc-mp/registro", response_model=List[schemas.RegistroExcelAutomaticoOut])
+def obtener_registro_excel(db: Session = Depends(get_db)):
+    return ordenes_controller.listar_registro_excel_automatico(db)

@@ -15,12 +15,20 @@ router = APIRouter(prefix="/devoluciones", tags=["devoluciones"], dependencies=[
 
 
 def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
+    ot = (
+        devolucion.ot_material.ot_proceso.ot
+        if devolucion.ot_material is not None
+        else devolucion.ot_material_pendiente.ot
+    )
     return schemas.DevolucionOut(
         id=devolucion.id,
         ot_material_id=devolucion.ot_material_id,
         pendiente_id=devolucion.ot_material_pendiente_id,
+        numero_ot=ot.numero_ot,
+        cliente=ot.cliente,
         material_id=devolucion.material_id,
         codigo_mp=devolucion.material.codigo_mp,
+        unidad=devolucion.material.unidad,
         usuario=devolucion.usuario.inicial,
         fecha=devolucion.fecha,
         hora=devolucion.hora,
@@ -33,6 +41,7 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         ),
         usa_bobinas=devolucion.material.usa_bobinas,
         sid_completado=devolucion.sid_completado,
+        sid_completado_en=devolucion.sid_completado_en,
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
         editado_por=devolucion.editado_por.inicial if devolucion.editado_por else None,
         editado_en=devolucion.editado_en,

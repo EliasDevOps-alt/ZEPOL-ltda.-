@@ -59,6 +59,7 @@ def _serializar_detalle(ot: OrdenTrabajo) -> schemas.OtDetalleOut:
         diseno=ot.diseno,
         sincronizado_excel=ot.sincronizado_excel,
         excel_sync_error=ot.excel_sync_error,
+        uso_interno=ot.uso_interno,
         **{campo: getattr(ot, campo) for campo in CAMPOS_COMERCIALES},
         pendientes=[_serializar_pendiente(p) for p in ot.pendientes],
         procesos=[

@@ -3,7 +3,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
-import { ArrowRightLeft, Beaker, CheckCircle2, PackagePlus, Plus, Search, X } from 'lucide-react'
+import { ArrowRightLeft, Beaker, CheckCircle2, FileSpreadsheet, PackagePlus, Plus, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Combobox } from '@renderer/components/ui/combobox'
 import { CrearMaterialDialog } from '@renderer/components/CrearMaterialDialog'
-import { CampoCantidad, type BobinasPedido } from '@renderer/components/CampoCantidad'
+import { CampoCantidad, hayPesoInvalido, pesosCargados, type BobinasPedido } from '@renderer/components/CampoCantidad'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -37,43 +37,25 @@ function entregaVacia(usaBobinas: boolean, procesoId = '', maquinaId = ''): Entr
     procesoId,
     maquinaId,
     observacion: '',
-    ...(usaBobinas ? { cantidadBobinas: '', bobinas: [] } : { cantidadBobinas: '1', bobinas: [''] })
+    bobinas: usaBobinas ? [] : ['']
   }
 }
 
-/** Un material que hizo falta para poder completar el del pedido. La OT pide
- * LDPE-4 pero almacén no lo tiene: se fabrica mezclando LDPE-1 y LDPE-2, y
- * cada uno de esos pasa a ser un pedido propio de la OT. Lleva proceso y
- * máquina propios porque se consume donde se fabrica (Extrusión/CHINA), no
- * donde se usa el resultado (Impresión/F4). */
-interface MateriaPrima extends BobinasPedido {
-  materialId: string
-  procesoId: string
-  maquinaId: string
-  observacion: string
-}
-
-function materiaPrimaVacia(): MateriaPrima {
-  return { materialId: '', procesoId: '', maquinaId: '', cantidadBobinas: '', bobinas: [], observacion: '' }
-}
-
-/** Lo que se registra para un pedido en un solo envío: la entrega del material
- * pedido y/o la materia prima que hizo falta para completarlo. Son
- * independientes — se puede mandar una, la otra, o las dos. */
-interface SeleccionPedido {
-  entrega: EntradaMaterial
-  materiasPrimas: MateriaPrima[]
-}
+/** Lo que se registra para un pedido en un solo envío: la entrega del
+ * material pedido. La materia prima que hace falta para completar OTRO
+ * pedido ya no se agrega desde acá — ver EntregaLibreForm: crear un pedido
+ * suelto con "Entregar un material que la OT no tiene" evita el error real
+ * de planta donde el padre (ej. LDPE-3) nunca llegó a existir en la OT, o ya
+ * estaba registrado como su propio pedido, y no había a qué "asociarle" la
+ * materia prima. */
+type SeleccionPedido = EntradaMaterial
 
 function seleccionVacia(pedido: { usa_bobinas: boolean; proceso_id?: number; maquina_id?: number }): SeleccionPedido {
-  return {
-    entrega: entregaVacia(
-      pedido.usa_bobinas,
-      pedido.proceso_id != null ? String(pedido.proceso_id) : '',
-      pedido.maquina_id != null ? String(pedido.maquina_id) : ''
-    ),
-    materiasPrimas: []
-  }
+  return entregaVacia(
+    pedido.usa_bobinas,
+    pedido.proceso_id != null ? String(pedido.proceso_id) : '',
+    pedido.maquina_id != null ? String(pedido.maquina_id) : ''
+  )
 }
 
 /** Igual que seleccionVacia, pero si el pedido ya tiene entregas previas
@@ -90,16 +72,13 @@ function seleccionVaciaContinuando(
   const ultima = entregasDelPedido?.at(-1)
   if (!ultima) return seleccionVacia(pedido)
   return {
-    entrega: {
-      ...entregaVacia(pedido.usa_bobinas, String(ultima.proceso_id), String(ultima.maquina_id)),
-      materialId: ultima.material_entregado_id !== pedido.material_id ? String(ultima.material_entregado_id) : ''
-    },
-    materiasPrimas: []
+    ...entregaVacia(pedido.usa_bobinas, String(ultima.proceso_id), String(ultima.maquina_id)),
+    materialId: ultima.material_entregado_id !== pedido.material_id ? String(ultima.material_entregado_id) : ''
   }
 }
 
 function tieneCantidad(datos: BobinasPedido): boolean {
-  return datos.bobinas.length > 0 && datos.bobinas.some((b) => Number(b) > 0)
+  return pesosCargados(datos).length > 0
 }
 
 /** La entrega del material del pedido. Normalmente sale de almacén tal cual,
@@ -126,8 +105,6 @@ function EntregaDelPedido({
   materialOptions: { value: string; label: string }[]
   unidadPedido: string
   usaBobinasPedido: boolean
-  // Solo hace falta esta cantidad si no se va a cargar materia prima en su
-  // lugar — ver requiereAsignacion/validarSeleccion.
   requerido?: boolean
   // Con estos tres se puede corregir dónde se consume ESTA entrega puntual
   // (ver EntradaMaterial.procesoId/maquinaId). Sin ellos (pendiente recién
@@ -274,266 +251,51 @@ function EntregaDelPedido({
   )
 }
 
-function FilaMateriaPrima({
-  entrada,
-  indice,
-  onChange,
-  onQuitar,
-  materiales,
-  materialOptions,
-  procesos
-}: {
-  entrada: MateriaPrima
-  indice: number
-  onChange: (cambios: Partial<MateriaPrima>) => void
-  onQuitar: () => void
-  materiales: Material[]
-  materialOptions: { value: string; label: string }[]
-  procesos: Proceso[]
-}) {
-  const { apiBaseUrl } = useConfig()
-  const { sesion } = useAuth()
-  const token = sesion!.token
-
-  const maquinas = useQuery({
-    queryKey: ['maquinas', entrada.procesoId],
-    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(entrada.procesoId)),
-    enabled: !!entrada.procesoId
-  })
-
-  const material = materiales.find((m) => String(m.id) === entrada.materialId)
-
-  return (
-    <div className="rounded-md border border-border bg-muted/30 p-3">
-      <div className="mb-2 flex items-end gap-2">
-        <div className="flex flex-1 flex-col gap-1.5">
-          <Label className="text-xs">Materia prima #{indice + 1}</Label>
-          <Combobox
-            value={entrada.materialId}
-            onChange={(v) => onChange({ materialId: v })}
-            options={materialOptions}
-            placeholder="Buscar código MP..."
-            emptyText="Sin materiales activos que coincidan"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={onQuitar}
-          className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
-          aria-label="Quitar esta materia prima"
-        >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-
-      <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso donde se consume</Label>
-          <Select value={entrada.procesoId} onValueChange={(v) => onChange({ procesoId: v, maquinaId: '' })}>
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
-            </SelectTrigger>
-            <SelectContent>
-              {procesos.map((p) => (
-                <SelectItem key={p.id} value={String(p.id)}>
-                  {p.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina</Label>
-          <Select
-            value={entrada.maquinaId}
-            onValueChange={(v) => onChange({ maquinaId: v })}
-            disabled={!entrada.procesoId}
-          >
-            <SelectTrigger>
-              <SelectValue placeholder="Selecciona" />
-            </SelectTrigger>
-            <SelectContent>
-              {maquinas.data?.map((m) => (
-                <SelectItem key={m.id} value={String(m.id)}>
-                  {m.nombre}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <CampoCantidad
-        unidad={material?.unidad ?? ''}
-        usaBobinas={material?.usa_bobinas ?? true}
-        datos={entrada}
-        onChange={(d) => onChange(d)}
-      />
-      <Input
-        className="mt-2"
-        placeholder="Nota (opcional)"
-        value={entrada.observacion}
-        onChange={(e) => onChange({ observacion: e.target.value })}
-      />
-    </div>
-  )
-}
-
-/** Materiales extra que hicieron falta para completar el pedido. Disponible en
- * CUALQUIER pedido de cualquier proceso: que la OT pida un código y haga falta
- * otro material para poder armarlo no es exclusivo de Extrusión. Cada uno se
- * manda con como_materia_prima y el backend le crea su propio pedido — no es
- * una sustitución del material pedido, es un pedido nuevo de la OT. */
-function MateriasPrimas({
-  entradas,
-  onChange,
-  materiales,
-  materialOptions,
-  procesos
-}: {
-  entradas: MateriaPrima[]
-  onChange: (entradas: MateriaPrima[]) => void
-  materiales: Material[]
-  materialOptions: { value: string; label: string }[]
-  procesos: Proceso[]
-}) {
-  return (
-    <div className="mt-3 flex flex-col gap-3 border-t border-border pt-3">
-      {entradas.length > 0 && (
-        <p className="text-xs text-muted-foreground">
-          Materiales que hicieron falta para completar este pedido. Cada uno queda como pedido propio de la OT, en
-          el proceso y la máquina donde se consume.
-        </p>
-      )}
-      {entradas.map((entrada, indice) => (
-        <FilaMateriaPrima
-          key={indice}
-          entrada={entrada}
-          indice={indice}
-          onChange={(cambios) => onChange(entradas.map((e, i) => (i === indice ? { ...e, ...cambios } : e)))}
-          onQuitar={() => onChange(entradas.filter((_, i) => i !== indice))}
-          materiales={materiales}
-          materialOptions={materialOptions}
-          procesos={procesos}
-        />
-      ))}
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="self-start"
-        onClick={() => onChange([...entradas, materiaPrimaVacia()])}
-      >
-        <Plus className="h-3.5 w-3.5" />
-        Agregar materia prima
-      </Button>
-    </div>
-  )
-}
-
-/** Manda una entrega por cada cosa cargada en un pedido: la del material
- * pedido y una por materia prima. No hay endpoint por lote — se reporta el
- * fallo por separado para no perder lo que sí entró. */
+/** Manda la entrega del material pedido. No hay endpoint por lote, pero ya no
+ * hace falta lotear nada más: la materia prima que antes salía de acá ahora
+ * es su propio pedido suelto (ver EntregaLibreForm). */
 async function enviarSeleccion(
   apiBaseUrl: string,
   token: string,
-  // El material al que se le carga esto: un pedido ya creado, o un pendiente
-  // que todavía no tiene proceso (ahí solo se puede mandar materia prima).
   destino: { ot_material_id: number } | { pendiente_id: number },
   fecha: string,
-  sel: SeleccionPedido,
+  entrega: SeleccionPedido,
   codigoPedido: string,
   materiales: Material[]
 ): Promise<{ exitos: Entrega[]; fallos: string[]; restante: SeleccionPedido | null }> {
-  const exitos: Entrega[] = []
-  const fallos: string[] = []
-  let entregaFallida: EntradaMaterial | null = null
-  const materiasPrimasFallidas: MateriaPrima[] = []
-
+  if (!tieneCantidad(entrega)) {
+    return { exitos: [], fallos: [], restante: null }
+  }
   const codigoDe = (materialId: string, porDefecto: string) =>
     materiales.find((m) => String(m.id) === materialId)?.codigo_mp ?? porDefecto
 
-  if (tieneCantidad(sel.entrega)) {
-    try {
-      exitos.push(
-        await api.registrarEntrega(apiBaseUrl, token, {
-          ...destino,
-          fecha,
-          bobinas: sel.entrega.bobinas.map(Number),
-          material_id: sel.entrega.materialId ? Number(sel.entrega.materialId) : undefined,
-          proceso_id: sel.entrega.procesoId ? Number(sel.entrega.procesoId) : undefined,
-          maquina_id: sel.entrega.maquinaId ? Number(sel.entrega.maquinaId) : undefined,
-          observacion: sel.entrega.observacion.trim() || undefined
-        })
-      )
-    } catch (err) {
-      fallos.push(`${codigoDe(sel.entrega.materialId, codigoPedido)} (${err instanceof ApiError ? err.message : 'error de conexión'})`)
-      entregaFallida = sel.entrega
-    }
-  }
-
-  for (const mp of sel.materiasPrimas) {
-    if (!tieneCantidad(mp)) continue
-    try {
-      exitos.push(
-        await api.registrarEntrega(apiBaseUrl, token, {
-          ...destino,
-          fecha,
-          bobinas: mp.bobinas.map(Number),
-          material_id: Number(mp.materialId),
-          proceso_id: Number(mp.procesoId),
-          maquina_id: Number(mp.maquinaId),
-          como_materia_prima: true,
-          observacion: mp.observacion.trim() || undefined
-        })
-      )
-    } catch (err) {
-      fallos.push(`${codigoDe(mp.materialId, 'materia prima')} (${err instanceof ApiError ? err.message : 'error de conexión'})`)
-      materiasPrimasFallidas.push(mp)
-    }
-  }
-
-  const hayRestante = entregaFallida !== null || materiasPrimasFallidas.length > 0
-  return {
-    exitos,
-    fallos,
-    restante: hayRestante
-      ? {
-          entrega: entregaFallida ?? { ...sel.entrega, cantidadBobinas: '', bobinas: [] },
-          materiasPrimas: materiasPrimasFallidas
-        }
-      : null
+  try {
+    const exito = await api.registrarEntrega(apiBaseUrl, token, {
+      ...destino,
+      fecha,
+      bobinas: pesosCargados(entrega),
+      material_id: entrega.materialId ? Number(entrega.materialId) : undefined,
+      proceso_id: entrega.procesoId ? Number(entrega.procesoId) : undefined,
+      maquina_id: entrega.maquinaId ? Number(entrega.maquinaId) : undefined,
+      observacion: entrega.observacion.trim() || undefined
+    })
+    return { exitos: [exito], fallos: [], restante: null }
+  } catch (err) {
+    const fallo = `${codigoDe(entrega.materialId, codigoPedido)} (${err instanceof ApiError ? err.message : 'error de conexión'})`
+    return { exitos: [], fallos: [fallo], restante: entrega }
   }
 }
 
 /** Qué falta completar antes de poder mandar un pedido. Devuelve null si está
  * todo bien. Se comparte entre la tarjeta de pendientes y la de pedidos. */
-function validarSeleccion(sel: SeleccionPedido): string | null {
-  if (sel.entrega.bobinas.length > 0 && sel.entrega.bobinas.some((b) => !b || Number(b) <= 0)) {
+function validarSeleccion(entrega: SeleccionPedido): string | null {
+  if (hayPesoInvalido(entrega)) {
     return 'La cantidad entregada debe ser válida y mayor a 0'
   }
-  for (const mp of sel.materiasPrimas) {
-    const cargada = mp.bobinas.length > 0 || mp.materialId || mp.procesoId || mp.maquinaId
-    if (!cargada) continue
-    if (!mp.materialId) return 'Elige qué materia prima se está entregando'
-    if (!mp.procesoId || !mp.maquinaId) return 'Elige el proceso y la máquina donde se consume cada materia prima'
-    if (mp.bobinas.length === 0 || mp.bobinas.some((b) => !b || Number(b) <= 0)) {
-      return 'Cada materia prima necesita una cantidad válida mayor a 0'
-    }
-  }
-  if (!tieneCantidad(sel.entrega) && !sel.materiasPrimas.some(tieneCantidad)) {
-    return 'Completa la cantidad entregada o agrega al menos una materia prima'
+  if (!tieneCantidad(entrega)) {
+    return 'Completa la cantidad entregada'
   }
   return null
-}
-
-/** Un pendiente se puede trabajar de dos formas, y solo una exige decidir a
- * qué proceso va: si se entrega el material tal cual, hay que asignarlo; si lo
- * único que sale de almacén hoy es su materia prima —porque el material hay
- * que fabricarlo— el proceso del resultado suele decidirse recién cuando
- * producción lo devuelve, y forzarlo acá sería inventar el dato. */
-function requiereAsignacion(sel: SeleccionPedido): boolean {
-  return tieneCantidad(sel.entrega)
 }
 
 /** El personal no siempre puede esperar a que alguien actualice la OT para
@@ -567,7 +329,7 @@ function EntregaLibreForm({
   const [materialId, setMaterialId] = useState('')
   const [procesoId, setProcesoId] = useState('')
   const [maquinaId, setMaquinaId] = useState('')
-  const [datos, setDatos] = useState<BobinasPedido>({ cantidadBobinas: '', bobinas: [] })
+  const [datos, setDatos] = useState<BobinasPedido>({ bobinas: [] })
   const [error, setError] = useState<string | null>(null)
 
   const material = materiales.find((m) => String(m.id) === materialId)
@@ -583,7 +345,7 @@ function EntregaLibreForm({
       api.registrarEntrega(apiBaseUrl, token, {
         numero_ot: numeroOt,
         fecha,
-        bobinas: datos.bobinas.map(Number),
+        bobinas: pesosCargados(datos),
         material_id: Number(materialId),
         proceso_id: Number(procesoId),
         maquina_id: Number(maquinaId)
@@ -593,7 +355,7 @@ function EntregaLibreForm({
       setMaterialId('')
       setProcesoId('')
       setMaquinaId('')
-      setDatos({ cantidadBobinas: '', bobinas: [] })
+      setDatos({ bobinas: [] })
       setError(null)
       onRegistrado([entrega])
     },
@@ -610,7 +372,7 @@ function EntregaLibreForm({
       setError('Elegí el proceso y la máquina donde se consume')
       return
     }
-    if (datos.bobinas.length === 0 || datos.bobinas.some((b) => !b || Number(b) <= 0)) {
+    if (pesosCargados(datos).length === 0 || hayPesoInvalido(datos)) {
       setError('Cargá una cantidad válida mayor a 0')
       return
     }
@@ -734,33 +496,17 @@ function PendienteCard({
     enabled: !!form.procesoId
   })
 
-  // Con proceso y máquina elegidos el pendiente se convierte en pedido; sin
-  // ellos se queda pendiente y solo recibe materia prima.
-  const asignar = Boolean(form.procesoId && form.maquinaId)
-
   const mutation = useMutation({
     mutationFn: async () => {
-      // Sin proceso elegido el pendiente sigue siendo pendiente y la materia
-      // prima se le cuelga igual — ver requiereAsignacion. La materia prima
-      // no promueve el pendiente, así que si acá es la primera vez que se
-      // indica a qué material del catálogo corresponde, hay que guardarlo
-      // aparte — si no, se pierde apenas se cambia de pantalla y la próxima
-      // vez vuelve a preguntar (ver ordenes_controller.actualizar_pendiente,
-      // que ya permite esto aunque el pendiente tenga materia prima cargada).
-      if (!asignar && form.materialId && pendiente.material_id == null) {
-        await api.editarPendiente(apiBaseUrl, token, pendiente.id, { material_id: Number(form.materialId) })
+      const destino = {
+        ot_material_id: (
+          await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
+            proceso_id: Number(form.procesoId),
+            maquina_id: Number(form.maquinaId),
+            material_id: form.materialId ? Number(form.materialId) : null
+          })
+        ).ot_material_id
       }
-      const destino = asignar
-        ? {
-            ot_material_id: (
-              await api.promoverPendiente(apiBaseUrl, token, pendiente.id, {
-                proceso_id: Number(form.procesoId),
-                maquina_id: Number(form.maquinaId),
-                material_id: form.materialId ? Number(form.materialId) : null
-              })
-            ).ot_material_id
-          }
-        : { pendiente_id: pendiente.id }
       return enviarSeleccion(apiBaseUrl, token, destino, fecha, seleccion, pendiente.codigo_mp, materiales)
     },
     onSuccess: ({ exitos, fallos }) => {
@@ -783,12 +529,8 @@ function PendienteCard({
       setError('Indica a qué material del catálogo corresponde')
       return
     }
-    if (requiereAsignacion(seleccion) && !asignar) {
+    if (!form.procesoId || !form.maquinaId) {
       setError(`Para entregar ${pendiente.codigo_mp} elegí su proceso y su máquina`)
-      return
-    }
-    if (Boolean(form.procesoId) !== Boolean(form.maquinaId)) {
-      setError('Elegiste proceso pero falta la máquina (o al revés)')
       return
     }
     const problema = validarSeleccion(seleccion)
@@ -800,10 +542,24 @@ function PendienteCard({
     mutation.mutate()
   }
 
+  // Si ya se resolvió a un material del catálogo, mostrar ESE código como
+  // identidad principal — el código de Excel puede no significar nada para
+  // quien lo lee (ej. "11001" cuando el material real es "11002"). Se
+  // conserva igual al lado, con ícono, para poder rastrear de qué pedido de
+  // Excel viene (mismo patrón que PendienteIngresoCard en RegistrarDevolucion).
+  const materialResuelto = pendiente.material_id != null ? materialPedido : undefined
+  const codigoDistinto = materialResuelto != null && materialResuelto.codigo_mp !== pendiente.codigo_mp
+
   return (
     <form onSubmit={handleSubmit} className="rounded-md border border-warning/30 bg-warning/5 p-4">
-      <p className="mb-3 text-sm font-medium">
-        {pendiente.codigo_mp}
+      <p className="mb-3 flex items-center gap-1.5 text-sm font-medium">
+        {materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp}
+        {codigoDistinto && (
+          <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+            <FileSpreadsheet className="h-3 w-3" />
+            {pendiente.codigo_mp}
+          </span>
+        )}
         {pendiente.cantidad_requerida != null
           ? ` — ${pendiente.cantidad_requerida}${materialPedido?.unidad ? ` ${materialPedido.unidad}` : ''} (del Excel)`
           : ''}
@@ -811,7 +567,7 @@ function PendienteCard({
 
       {pendiente.materias_primas.length > 0 && (
         <p className="mb-3 rounded-md border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
-          Materia prima ya entregada: {pendiente.materias_primas.join(', ')}.
+          Materia prima ya entregada (registrada antes de este cambio): {pendiente.materias_primas.join(', ')}.
         </p>
       )}
 
@@ -846,7 +602,7 @@ function PendienteCard({
 
       <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Proceso {requiereAsignacion(seleccion) ? '(obligatorio)' : '(opcional)'}</Label>
+          <Label className="text-xs">Proceso (obligatorio)</Label>
           <Select value={form.procesoId} onValueChange={(v) => setForm({ ...form, procesoId: v, maquinaId: '' })}>
             <SelectTrigger>
               <SelectValue placeholder="Selecciona" />
@@ -861,7 +617,7 @@ function PendienteCard({
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label className="text-xs">Máquina {requiereAsignacion(seleccion) ? '(obligatorio)' : '(opcional)'}</Label>
+          <Label className="text-xs">Máquina (obligatorio)</Label>
           <Select
             value={form.maquinaId}
             onValueChange={(v) => setForm({ ...form, maquinaId: v })}
@@ -881,41 +637,20 @@ function PendienteCard({
         </div>
       </div>
 
-      {/* Proceso y máquina solo hacen falta para entregar el material; para
-          cargarle materia prima no, y a veces todavía no se sabe adónde va.
-          Ver requiereAsignacion. */}
-      <p className="mb-2 text-xs text-muted-foreground">
-        Cantidad que sale de almacén ahora. Si todavía no sale nada, dejala vacía.
-      </p>
-
       <EntregaDelPedido
-        datos={seleccion.entrega}
-        onChange={(entrega) => setSeleccion({ ...seleccion, entrega })}
+        datos={seleccion}
+        onChange={setSeleccion}
         materiales={materiales}
         materialOptions={materialOptions}
         unidadPedido={materialPedido?.unidad ?? ''}
         usaBobinasPedido={materialPedido?.usa_bobinas ?? true}
-        requerido={!seleccion.materiasPrimas.some(tieneCantidad)}
-      />
-
-      <MateriasPrimas
-        entradas={seleccion.materiasPrimas}
-        onChange={(materiasPrimas) => setSeleccion({ ...seleccion, materiasPrimas })}
-        materiales={materiales}
-        materialOptions={materialOptions}
-        procesos={procesos}
+        requerido
       />
 
       {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
 
       <Button type="submit" className="mt-3" disabled={mutation.isPending}>
-        {mutation.isPending
-          ? 'Guardando...'
-          : requiereAsignacion(seleccion)
-            ? 'Asignar y registrar entrega'
-            : asignar
-              ? 'Asignar y registrar materia prima'
-              : 'Registrar materia prima'}
+        {mutation.isPending ? 'Guardando...' : 'Asignar y registrar entrega'}
       </Button>
     </form>
   )
@@ -1209,24 +944,16 @@ function PedidoEntregaCard({
       )}
 
       <EntregaDelPedido
-        datos={seleccion.entrega}
-        onChange={(entrega) => onChange({ ...seleccion, entrega })}
+        datos={seleccion}
+        onChange={onChange}
         materiales={materiales}
         materialOptions={materialOptions}
         unidadPedido={pedido.unidad}
         usaBobinasPedido={pedido.usa_bobinas}
-        requerido={!seleccion.materiasPrimas.some(tieneCantidad)}
+        requerido
         procesos={procesos}
         procesoIdPedido={String(pedido.proceso_id)}
         maquinaIdPedido={String(pedido.maquina_id)}
-      />
-
-      <MateriasPrimas
-        entradas={seleccion.materiasPrimas}
-        onChange={(materiasPrimas) => onChange({ ...seleccion, materiasPrimas })}
-        materiales={materiales}
-        materialOptions={materialOptions}
-        procesos={procesos}
       />
 
       <MoverPedido pedido={pedido} procesos={procesos} onMovido={onMovido} />

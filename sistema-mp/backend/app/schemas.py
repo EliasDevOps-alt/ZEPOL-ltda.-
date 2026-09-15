@@ -145,6 +145,7 @@ class OrdenTrabajoOut(BaseModel):
     diseno: Optional[str]
     fecha_creacion: datetime
     sincronizado_excel: bool
+    uso_interno: bool
 
 
 class CamposComercialesOt(BaseModel):
@@ -211,6 +212,12 @@ class OtDetalleCreate(CamposComercialesOt):
     cliente: Optional[str] = None
     diseno: Optional[str] = None
     materiales: List[MaterialPedidoIn] = []
+    # TRUE = material que la empresa fabrica para sí misma, sin cliente real
+    # detrás — no se escribe en el Excel OC-MP en absoluto (ver
+    # ordenes_controller._sincronizar_excel). Solo tiene efecto al CREAR la
+    # OT; si ya existe, se ignora (no cambia a mitad de camino si esa OT ya
+    # se sincronizó, o no, con el Excel).
+    uso_interno: bool = False
 
 
 class MaterialPedidoOut(BaseModel):
@@ -238,6 +245,7 @@ class OtDetalleOut(CamposComercialesOt):
     diseno: Optional[str]
     sincronizado_excel: bool
     excel_sync_error: Optional[str] = None
+    uso_interno: bool
     procesos: List[ProcesoDetalleOut]
     pendientes: List[OtMaterialPendienteOut] = []
 
@@ -278,6 +286,17 @@ class ConfiguracionExcelIn(BaseModel):
 
 class ConfiguracionExcelPasswordIn(BaseModel):
     password: str
+
+
+class RegistroExcelAutomaticoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    creado_en: datetime
+    numero_ot: str
+    cliente: Optional[str] = None
+    tipo: str
+    detalle: str
 
 
 class OtBusquedaOut(BaseModel):
@@ -445,6 +464,7 @@ class EntregaOut(BaseModel):
     descripcion_entregado: Optional[str]
     usa_bobinas: bool
     sid_completado: bool
+    sid_completado_en: Optional[datetime] = None
     observacion: Optional[str] = None
     # ot_material_id/proceso/maquina/codigo_mp de arriba son los del pedido
     # donde REALMENTE quedó la entrega, que con como_materia_prima no es el
@@ -494,8 +514,16 @@ class DevolucionOut(BaseModel):
     # None mientras el material que entró a almacén no tenga pedido todavía.
     ot_material_id: Optional[int]
     pendiente_id: Optional[int]
+    # A qué OT pertenece — hace falta como campo propio (y no solo derivable
+    # de un Consumo/pedido) porque un ingreso a almacén registrado contra un
+    # pendiente suelto (ver crear_pendiente_libre) nunca tiene ot_material_id
+    # y por lo tanto no aparece en vista_consumo: Registro SID lo agrupa por
+    # este campo directamente, sin pasar por un pedido.
+    numero_ot: str
+    cliente: Optional[str]
     material_id: int
     codigo_mp: str
+    unidad: str
     usuario: str
     fecha: date
     hora: time
@@ -504,6 +532,7 @@ class DevolucionOut(BaseModel):
     total_devuelto_pedido: float
     usa_bobinas: bool
     sid_completado: bool
+    sid_completado_en: Optional[datetime] = None
     es_ingreso_produccion: bool
     # Quién la corrigió por última vez y cuándo — ver EntregaOut.editado_por.
     editado_por: Optional[str] = None

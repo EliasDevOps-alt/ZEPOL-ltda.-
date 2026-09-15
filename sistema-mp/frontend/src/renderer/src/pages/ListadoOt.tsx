@@ -511,7 +511,12 @@ export function ListadoOt() {
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
-                    {!ot.sincronizado_excel && (
+                    {ot.uso_interno && (
+                      <span className="whitespace-nowrap rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        Uso interno
+                      </span>
+                    )}
+                    {!ot.sincronizado_excel && !ot.uso_interno && (
                       <span className="flex items-center gap-1 whitespace-nowrap rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                         <FileSpreadsheet className="h-3 w-3" />
                         Excel pendiente

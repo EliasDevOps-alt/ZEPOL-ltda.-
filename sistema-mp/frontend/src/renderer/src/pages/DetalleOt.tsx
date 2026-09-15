@@ -202,6 +202,13 @@ function FilaPendienteExistente({
   )
   const [error, setError] = useState<string | null>(null)
 
+  const materialResuelto =
+    pendiente.material_id != null ? materialesData?.find((m) => m.id === pendiente.material_id) : undefined
+  // Solo mostrar el código de Excel al lado si de verdad difiere del
+  // resuelto — si son iguales (el caso normal, sin ningún error de tipeo de
+  // por medio), repetir el mismo código dos veces es puro ruido.
+  const codigoDistinto = materialResuelto != null && materialResuelto.codigo_mp !== pendiente.codigo_mp
+
   const tieneMovimientos = pendiente.materias_primas.length > 0 || pendiente.total_ingresado > 0
   // Resolver por primera vez a qué material del catálogo corresponde este
   // código de Excel no contradice la materia prima/el ingreso ya cargados
@@ -237,7 +244,8 @@ function FilaPendienteExistente({
   })
 
   function handleEliminar() {
-    if (!confirm(`¿Eliminar ${pendiente.codigo_mp} de esta OT?`)) return
+    const codigo = materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp
+    if (!confirm(`¿Eliminar ${codigo} de esta OT?`)) return
     eliminar.mutate()
   }
 
@@ -284,8 +292,14 @@ function FilaPendienteExistente({
 
   return (
     <li className="flex items-center justify-between gap-2">
-      <span>
-        {pendiente.codigo_mp}
+      <span className="flex items-center gap-1.5">
+        {materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp}
+        {codigoDistinto && (
+          <span className="inline-flex items-center gap-1 text-xs font-normal text-muted-foreground">
+            <FileSpreadsheet className="h-3 w-3" />
+            {pendiente.codigo_mp}
+          </span>
+        )}
         {conCantidadYUnidad(pendiente.cantidad_requerida, unidad)}
       </span>
       {bloqueado ? (
@@ -326,6 +340,11 @@ export function DetalleOt() {
   const [numeroOt, setNumeroOt] = useState('')
   const [cliente, setCliente] = useState('')
   const [diseno, setDiseno] = useState('')
+  // Uso interno: material que la empresa fabrica para sí misma, sin cliente
+  // real detrás — pasa raramente. Solo se puede elegir al crear la OT (ver
+  // OtDetalleCreate.uso_interno); una vez guardada, se muestra como dato
+  // fijo de esa OT, no como algo que se pueda cambiar después.
+  const [usoInterno, setUsoInterno] = useState(false)
   const [materialesForm, setMaterialesForm] = useState<FilaMaterial[]>([filaMaterialVacia()])
   const [comerciales, setComerciales] = useState<ComercialesForm>(COMERCIALES_VACIO)
   const [mostrarComerciales, setMostrarComerciales] = useState(false)
@@ -343,6 +362,11 @@ export function DetalleOt() {
 
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
+  // Solo se puede elegir al crear — una vez que la OT ya existe (en la base
+  // de datos, o viene del Excel y por lo tanto es de un cliente real), se
+  // muestra como dato fijo en vez de casilla editable.
+  const usoInternoBloqueado = origenCargado === 'bd' || origenCargado === 'excel' || confirmacion !== null
+
   const materialOptions = useMemo(
     () =>
       (materiales.data ?? []).map((m) => ({
@@ -358,6 +382,7 @@ export function DetalleOt() {
     setComparacion(null)
     setCliente(detalle.cliente ?? '')
     setDiseno(detalle.diseno ?? '')
+    setUsoInterno(detalle.uso_interno)
     setComerciales(comercialesDesdeApi(detalle))
     setProcesosExistentes(detalle.procesos)
     setPendientesExistentes(detalle.pendientes)
@@ -454,6 +479,7 @@ export function DetalleOt() {
         numero_ot: numeroOt,
         cliente: cliente || null,
         diseno: diseno || null,
+        uso_interno: usoInterno,
         ...comercialesParaApi(comerciales),
         materiales: materialesForm
           .filter((m) => m.materialId)
@@ -778,7 +804,7 @@ export function DetalleOt() {
       )}
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-2">
             Datos de la OT
             {origenCargado === 'bd' && (
@@ -787,6 +813,15 @@ export function DetalleOt() {
               </span>
             )}
           </CardTitle>
+          <label className="flex items-center gap-2 text-sm">
+            Registrar en Excel
+            <Switch
+              checked={!usoInterno}
+              onCheckedChange={(checked) => setUsoInterno(!checked)}
+              disabled={usoInternoBloqueado}
+              className="data-[state=checked]:bg-success data-[state=unchecked]:bg-destructive"
+            />
+          </label>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -822,7 +857,7 @@ export function DetalleOt() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Diseño</Label>
-                <Input value={diseno} onChange={(e) => setDiseno(e.target.value)} placeholder="pipocas" />
+                <Input value={diseno} onChange={(e) => setDiseno(e.target.value)} />
               </div>
             </div>
 

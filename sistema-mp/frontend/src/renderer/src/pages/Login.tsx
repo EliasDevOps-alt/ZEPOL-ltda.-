@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
-import { Settings2 } from 'lucide-react'
+import { RefreshCw, Settings2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -27,6 +27,22 @@ export function Login() {
   const [cargando, setCargando] = useState(false)
   const [mostrarConfig, setMostrarConfig] = useState(false)
   const [urlTemp, setUrlTemp] = useState(apiBaseUrl)
+  const [estadoActualizacion, setEstadoActualizacion] = useState<
+    | { tipo: 'inactivo' }
+    | { tipo: 'buscando' }
+    | { tipo: 'sin-actualizacion' }
+    | { tipo: 'descargando'; version: string }
+    | { tipo: 'error'; mensaje: string }
+  >({ tipo: 'inactivo' })
+
+  async function buscarActualizacion(): Promise<void> {
+    setEstadoActualizacion({ tipo: 'buscando' })
+    const resultado = await window.api.buscarActualizacion()
+    if (resultado.estado === 'sin-actualizacion') setEstadoActualizacion({ tipo: 'sin-actualizacion' })
+    else if (resultado.estado === 'descargando')
+      setEstadoActualizacion({ tipo: 'descargando', version: resultado.version })
+    else setEstadoActualizacion({ tipo: 'error', mensaje: resultado.mensaje })
+  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault()
@@ -129,6 +145,29 @@ export function Login() {
                 </div>
               )}
             </form>
+
+            <div className="mt-3 flex flex-col items-center gap-1 border-t border-border pt-3">
+              <button
+                type="button"
+                onClick={buscarActualizacion}
+                disabled={estadoActualizacion.tipo === 'buscando'}
+                className="flex items-center justify-center gap-1.5 text-xs text-muted-foreground hover:text-foreground disabled:opacity-60"
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                {estadoActualizacion.tipo === 'buscando' ? 'Buscando actualización...' : 'Buscar actualización'}
+              </button>
+              {estadoActualizacion.tipo === 'sin-actualizacion' && (
+                <p className="text-xs text-success">Ya tenés la última versión instalada.</p>
+              )}
+              {estadoActualizacion.tipo === 'descargando' && (
+                <p className="text-center text-xs text-muted-foreground">
+                  Descargando la versión {estadoActualizacion.version} — avisará cuando esté lista para instalar.
+                </p>
+              )}
+              {estadoActualizacion.tipo === 'error' && (
+                <p className="text-center text-xs text-destructive">{estadoActualizacion.mensaje}</p>
+              )}
+            </div>
           </CardContent>
         </Card>
       </motion.div>

@@ -8,7 +8,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import schemas
-from ..models import EstadoSid, Maquina, Material, OrdenTrabajo, OtMaterial, OtMaterialPendiente, OtProceso
+from ..models import (
+    EstadoSid,
+    Maquina,
+    Material,
+    OrdenTrabajo,
+    OtMaterial,
+    OtMaterialPendiente,
+    OtProceso,
+    RegistroExcelAutomatico,
+)
 from ..services import excel_oc_mp
 
 CAMPOS_COMERCIALES = list(schemas.CamposComercialesOt.model_fields.keys())
@@ -77,7 +86,20 @@ def _materiales_para_excel(ot: OrdenTrabajo) -> List[Dict[str, Any]]:
     máquina, más los que ya se promovieron a pedido real. NO incluye la
     materia prima que se les haya agregado para poder fabricarlos — eso es
     un detalle interno de almacén que el cliente nunca pidió en el Excel."""
-    materiales = [{"codigo_mp": p.codigo_mp, "cantidad_requerida": p.cantidad_requerida} for p in ot.pendientes]
+    materiales = [
+        {
+            # Si ya se resolvió a un material del catálogo, escribir ESE
+            # código — p.codigo_mp se conserva crudo a propósito (ver
+            # actualizar_pendiente) para que comparar_con_excel lo siga
+            # reconociendo, pero eso no debe congelar lo que se le devuelve
+            # al Excel: si el pendiente se corrigió (ej. 11001 -> 11002 en
+            # OT 77777), el Excel tiene que reflejar la corrección igual que
+            # ya lo hace un pedido promovido (ver la rama de abajo).
+            "codigo_mp": p.material.codigo_mp if p.material_id and p.material else p.codigo_mp,
+            "cantidad_requerida": p.cantidad_requerida,
+        }
+        for p in ot.pendientes
+    ]
     for ot_proceso in ot.procesos:
         for om in ot_proceso.materiales:
             if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
@@ -93,7 +115,13 @@ def _sincronizar_excel(db: Session, ot: OrdenTrabajo) -> None:
     ya está segura en la base de datos de todas formas. Se llama cada vez que
     se guarda algo de la OT desde el sistema (creación, materiales nuevos,
     datos comerciales) y también desde el reintento manual — escribir_oc_mp
-    actualiza la fila existente si ya hay una en vez de duplicarla."""
+    actualiza la fila existente si ya hay una en vez de duplicarla.
+
+    Una OT de uso_interno nunca llega a escribir_oc_mp — ni siquiera lo
+    intenta — así que no queda ninguna fila suya en el Excel para nadie
+    (cliente incluido) que la lea como si fuera un pedido real."""
+    if ot.uso_interno:
+        return
     campos = {campo: getattr(ot, campo) for campo in CAMPOS_COMERCIALES}
     materiales = _materiales_para_excel(ot)
     try:
@@ -121,7 +149,9 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
 
     ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
     if ot is None:
-        ot = OrdenTrabajo(numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno)
+        ot = OrdenTrabajo(
+            numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno, uso_interno=data.uso_interno
+        )
         db.add(ot)
         db.flush()
     else:
@@ -212,8 +242,20 @@ def _codigos_materiales_en_sistema(ot: OrdenTrabajo) -> set:
     catálogo y el original de Excel. Sin el segundo, un material como
     "ZIPPER" (Excel) resuelto a "ZIPPER PRB" (catálogo) volvería a aparecer
     como "material nuevo" para siempre después de promovido, porque acá solo
-    se conocía el código ya resuelto."""
-    codigos = {p.codigo_mp.strip().lower() for p in ot.pendientes}
+    se conocía el código ya resuelto.
+
+    Un pendiente sin promover todavía tiene el mismo problema: su codigo_mp
+    se conserva crudo a propósito (ver actualizar_pendiente), pero desde que
+    _materiales_para_excel también escribe el código YA RESUELTO de vuelta
+    al Excel, esa fila puede terminar mostrando el código resuelto en vez del
+    original — y si acá solo se reconociera el crudo, ese mismo código
+    apareceria como "material nuevo" (caso real: OT 77777, "11001" resuelto
+    a "11002" se re-detectaba como material nuevo "11002" al comparar)."""
+    codigos = set()
+    for p in ot.pendientes:
+        codigos.add(p.codigo_mp.strip().lower())
+        if p.material_id and p.material:
+            codigos.add(p.material.codigo_mp.strip().lower())
     for ot_proceso in ot.procesos:
         for om in ot_proceso.materiales:
             if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
@@ -290,19 +332,28 @@ def comparar_todas_con_excel(db: Session) -> List[Dict[str, Any]]:
     return resultado
 
 
-def aplicar_cambios_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
+def aplicar_cambios_excel(
+    db: Session, numero_ot: str, datos_excel: Optional[Dict[str, Any]] = None
+) -> OrdenTrabajo:
     """Trae al sistema los campos comerciales y los materiales nuevos que
     haya en el Excel OC-MP para esta OT — pensado para usarse después de
-    comparar_con_excel, una vez que el usuario revisó las diferencias.
+    comparar_con_excel, una vez que el usuario revisó las diferencias (o
+    automáticamente, ver excel_watcher.sincronizar_automaticamente_excel).
     Nunca toca proceso/máquina ni borra materiales existentes: solo
     actualiza los campos comerciales y agrega como pendientes los
     materiales del Excel que el sistema todavía no tenga (ni pendientes ni
-    ya promovidos)."""
+    ya promovidos) — es justo esa propiedad (nunca destructivo) lo que
+    permite aplicarlo sin supervisión desde el vigilante automático.
+
+    `datos_excel` permite pasar una fila ya leída, igual que
+    guardar_desde_excel — evita reabrir el archivo por cada OT cuando quien
+    llama ya leyó todo 'oc mp' de una sola pasada."""
     ot = obtener_detalle(db, numero_ot)
     if ot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
 
-    datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
+    if datos_excel is None:
+        datos_excel = excel_oc_mp.leer_oc_mp(db, numero_ot)
     if datos_excel is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa OT no está en el Excel OC-MP")
 
@@ -331,6 +382,98 @@ def aplicar_cambios_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
     db.commit()
     db.refresh(ot)
     return ot
+
+
+def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
+    """Trae al sistema, sin intervención humana, tanto las OT nuevas del
+    Excel como los materiales/datos comerciales que se le hayan agregado a
+    una OT ya importada — pensada para el vigilante de archivo (ver
+    excel_watcher.py), que llama a esto cada vez que nota que 'oc mp' cambió
+    de tamaño o fecha de modificación.
+
+    Es seguro hacerlo sin que nadie revise antes porque reutiliza
+    guardar_desde_excel/aplicar_cambios_excel tal cual, y ninguna de las dos
+    borra ni pisa nada existente — solo agregan lo que falta. El plan
+    original (planteado por el usuario) era avisar y dejar que alguien
+    aplique a mano, pero se decidió automatizar también la importación de OT
+    nuevas para que el personal no tenga que hacer doble trabajo (cargarlo
+    en Excel y de nuevo en el sistema).
+
+    Lee 'oc mp' una sola vez (leer_todas_oc_mp) y le pasa esos datos ya
+    leídos a guardar_desde_excel/aplicar_cambios_excel para no reabrir el
+    archivo una vez por OT.
+
+    Cada OT importada o actualizada queda además como una fila en
+    RegistroExcelAutomatico, con un detalle legible de qué trajo — sin esto
+    no habría ninguna pantalla donde ver qué hizo el vigilante (a diferencia
+    de una entrega editada a mano, que sí queda visible en su propia
+    tarjeta)."""
+    todas_excel = excel_oc_mp.leer_todas_oc_mp(db)
+    numeros_en_bd = {
+        ot.numero_ot: ot for ot in db.scalars(select(OrdenTrabajo)).all()
+    }
+
+    ots_nuevas: List[str] = []
+    ots_actualizadas: List[str] = []
+
+    for numero_ot, datos_excel in todas_excel.items():
+        ot = numeros_en_bd.get(numero_ot)
+        if ot is None:
+            ot = guardar_desde_excel(db, numero_ot, datos=datos_excel)
+            cantidad_materiales = len(datos_excel.get("materiales") or [])
+            plural = "material" if cantidad_materiales == 1 else "materiales"
+            db.add(
+                RegistroExcelAutomatico(
+                    numero_ot=numero_ot,
+                    cliente=ot.cliente,
+                    tipo="nueva",
+                    detalle=f"OT nueva importada del Excel con {cantidad_materiales} {plural}.",
+                )
+            )
+            ots_nuevas.append(numero_ot)
+            continue
+
+        comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
+        if comparacion["diferencias_comerciales"] or comparacion["materiales_nuevos"]:
+            aplicar_cambios_excel(db, numero_ot, datos_excel=datos_excel)
+            db.add(
+                RegistroExcelAutomatico(
+                    numero_ot=numero_ot,
+                    cliente=ot.cliente,
+                    tipo="actualizada",
+                    detalle=_detalle_actualizacion_excel(comparacion),
+                )
+            )
+            ots_actualizadas.append(numero_ot)
+
+    db.commit()
+    return {"nuevas": ots_nuevas, "actualizadas": ots_actualizadas}
+
+
+def _detalle_actualizacion_excel(comparacion: Dict[str, Any]) -> str:
+    partes = []
+    materiales_nuevos = comparacion.get("materiales_nuevos") or []
+    if materiales_nuevos:
+        codigos = ", ".join(m["codigo_mp"] for m in materiales_nuevos)
+        partes.append(f"Material(es) nuevo(s): {codigos}")
+    diferencias = comparacion.get("diferencias_comerciales") or []
+    if diferencias:
+        etiquetas = ", ".join(d["etiqueta"] for d in diferencias)
+        partes.append(f"Datos comerciales actualizados: {etiquetas}")
+    return " · ".join(partes) or "Sin detalle"
+
+
+def listar_registro_excel_automatico(db: Session, limite: int = 100) -> List[RegistroExcelAutomatico]:
+    """Últimas OT que el vigilante del Excel importó o actualizó solo, más
+    recientes primero — pensado para una pantalla simple de "qué trajo el
+    vigilante", no un historial completo con filtros (ver el rechazo a una
+    tabla de auditoría completa para entregas/devoluciones: la idea acá es
+    la misma, mantenerlo simple)."""
+    return list(
+        db.scalars(
+            select(RegistroExcelAutomatico).order_by(RegistroExcelAutomatico.creado_en.desc()).limit(limite)
+        ).all()
+    )
 
 
 def obtener_detalle(db: Session, numero_ot: str) -> Optional[OrdenTrabajo]:
@@ -421,17 +564,27 @@ def listar_ots_nuevas_en_excel(db: Session) -> List[Dict[str, Any]]:
     return [ot for ot in excel_oc_mp.listar_ots_excel(db) if ot["numero_ot"] not in numeros_en_bd]
 
 
-def guardar_desde_excel(db: Session, numero_ot: str) -> OrdenTrabajo:
+def guardar_desde_excel(
+    db: Session, numero_ot: str, datos: Optional[Dict[str, Any]] = None
+) -> OrdenTrabajo:
     """Crea la OT en la base de datos a partir del Excel OC-MP: cliente y
     datos comerciales van directo a la OT; sus materiales pedidos quedan
     como 'pendientes' (sin proceso ni máquina — eso se completa en
     Registrar Entrega). Si la OT ya existe en la base de datos, no hace
-    nada y la devuelve tal cual (esta acción es idempotente)."""
+    nada y la devuelve tal cual (esta acción es idempotente).
+
+    `datos` permite pasar una fila ya leída (ver
+    excel_watcher.sincronizar_automaticamente_excel, que lee todo 'oc mp' de
+    una sola pasada con leer_todas_oc_mp para muchas OT a la vez) en vez de
+    volver a abrir el archivo por cada una — los llamadores manuales (botón
+    "Buscar OT nuevas en el Excel") lo dejan en None y se comportan como
+    siempre, releyendo la fila puntual."""
     ot_existente = obtener_detalle(db, numero_ot)
     if ot_existente is not None:
         return ot_existente
 
-    datos = excel_oc_mp.leer_oc_mp(db, numero_ot)
+    if datos is None:
+        datos = excel_oc_mp.leer_oc_mp(db, numero_ot)
     if datos is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa OT no está en el Excel OC-MP")
 
