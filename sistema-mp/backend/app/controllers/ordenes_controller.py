@@ -373,7 +373,15 @@ def _materiales_eliminados_del_excel(ot: OrdenTrabajo, datos_excel: Dict[str, An
     sincronizar_automaticamente_excel) borra del sistema los que NO están
     bloqueados; los bloqueados se dejan para revisar y borrar a mano, porque
     perder una entrega/devolución real solo porque el Excel cambió sería
-    peor que la inconsistencia misma."""
+    peor que la inconsistencia misma.
+
+    Si la última escritura de esta OT al Excel falló (sincronizado_excel=False)
+    no se compara nada: el sistema va ADELANTE del Excel (un material recién
+    agregado todavía no se escribió), y tomar eso por "el cliente lo borró"
+    haría que el vigilante borrara el material que el usuario acaba de
+    cargar."""
+    if not ot.sincronizado_excel:
+        return []
     codigos_en_excel = {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
     eliminados = []
     for p in ot.pendientes:
@@ -414,10 +422,13 @@ def _eliminar_materiales_removidos_del_excel(
     desde aplicar_cambios_excel, tanto al apretar 'Aplicar cambios del
     Excel' a mano como desde el vigilante automático. Los bloqueados se
     dejan sin tocar. Devuelve (códigos borrados, códigos bloqueados) para
-    poder avisar qué pasó con cada uno."""
-    codigos_en_excel = {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
+    poder avisar qué pasó con cada uno. Misma salvaguarda que
+    _materiales_eliminados_del_excel: sin sincronizado_excel no toca nada."""
     borrados: List[str] = []
     bloqueados: List[str] = []
+    if not ot.sincronizado_excel:
+        return borrados, bloqueados
+    codigos_en_excel = {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
 
     for pendiente in list(ot.pendientes):
         codigos_item = {pendiente.codigo_mp.strip().lower()}
@@ -651,10 +662,20 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
             continue
 
         comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
+        # Solo lo ACCIONABLE dispara la actualización y su aviso. Un material
+        # "bloqueado" (tiene movimientos) que el Excel no lista no se puede
+        # resolver solo y no desaparece: contarlo acá repetía el mismo aviso
+        # en CADA guardado del Excel (el vigilante corre cada vez que alguien
+        # lo guarda), y además es poco confiable — un pedido asignado antes de
+        # que existiera codigo_mp_excel puede estar escrito con otro nombre en
+        # el Excel y verse como "borrado" sin serlo (visto en el servidor:
+        # LDPE-BRASKEM/PEMET-1 en ~15 OT). Sigue visible en la comparación
+        # manual (DetalleOt), donde alguien lo revisa.
+        hay_eliminados_accionables = any(not m.get("bloqueado") for m in comparacion["materiales_eliminados"])
         if (
             comparacion["diferencias_comerciales"]
             or comparacion["materiales_nuevos"]
-            or comparacion["materiales_eliminados"]
+            or hay_eliminados_accionables
         ):
             aplicar_cambios_excel(db, numero_ot, datos_excel=datos_excel)
             db.add(
@@ -684,15 +705,11 @@ def _detalle_actualizacion_excel(comparacion: Dict[str, Any]) -> str:
         etiquetas = ", ".join(d["etiqueta"] for d in diferencias)
         partes.append(f"Datos comerciales actualizados: {etiquetas}")
     eliminados = comparacion.get("materiales_eliminados") or []
+    # Los bloqueados no se mencionan a propósito: ver el comentario en
+    # sincronizar_automaticamente_excel — no son accionables ni confiables.
     borrados = [m["codigo_mp"] for m in eliminados if not m.get("bloqueado")]
-    bloqueados = [m["codigo_mp"] for m in eliminados if m.get("bloqueado")]
     if borrados:
         partes.append(f"Material(es) eliminado(s) (ya no están en el Excel): {', '.join(borrados)}")
-    if bloqueados:
-        partes.append(
-            f"Material(es) que el Excel ya no tiene pero NO se borraron (ya tienen movimientos): "
-            f"{', '.join(bloqueados)}"
-        )
     return " · ".join(partes) or "Sin detalle"
 
 
@@ -857,7 +874,16 @@ def _procesar_ots_ausentes_del_excel(
                 "La OT ya no está en el Excel OC-MP, pero sigue en el sistema porque ya tiene entregas, "
                 "devoluciones o materia prima registrada — revisala y borrala a mano si corresponde."
             )
-        db.add(RegistroExcelAutomatico(numero_ot=numero_ot, cliente=cliente, tipo="eliminada", detalle=detalle))
+        # La OT con movimientos sigue ausente en cada pasada siguiente (el
+        # vigilante corre con cada guardado del Excel): avisar una sola vez,
+        # no repetir el mismo aviso indefinidamente.
+        ya_avisada = db.scalar(
+            select(RegistroExcelAutomatico.id)
+            .where(RegistroExcelAutomatico.numero_ot == numero_ot, RegistroExcelAutomatico.detalle == detalle)
+            .limit(1)
+        )
+        if ya_avisada is None:
+            db.add(RegistroExcelAutomatico(numero_ot=numero_ot, cliente=cliente, tipo="eliminada", detalle=detalle))
         procesadas.append(numero_ot)
     return procesadas
 
