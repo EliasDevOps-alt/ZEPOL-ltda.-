@@ -172,15 +172,41 @@ def _contador_sot_actual(db: Session, tipo: str) -> int:
     return 1
 
 
+def _primer_numero_libre_sot(
+    db: Session, tipo: str, desde: int, ignorar_numero_ot: Optional[str] = None
+) -> int:
+    """Primer número >= desde que todavía no lo usa ninguna OT de ese tipo.
+    El contador solo se entera de las OT creadas por Crear OT: una OT SO-2
+    creada directo en el Excel entra por el vigilante (guardar_desde_excel),
+    que no pasa por el contador, y la sugerencia se quedaba en SO-2 (ya
+    existente, caso real 2026-09-19). Saltear lo ya usado arregla eso sin
+    perder la otra regla: un número puesto a mano más adelante (SM-10) no
+    hace saltar la secuencia, solo se saltea cuando se llega a él."""
+    prefijo = PREFIJOS_OT_SIN_NUMERO[tipo]
+    existentes = db.scalars(select(OrdenTrabajo.numero_ot).where(OrdenTrabajo.numero_ot.like(f"{prefijo}-%"))).all()
+    usados = set()
+    for numero in existentes:
+        if numero == ignorar_numero_ot:
+            continue
+        sufijo = numero[len(prefijo) + 1 :]
+        if sufijo.isdigit():
+            usados.add(int(sufijo))
+    candidato = desde
+    while candidato in usados:
+        candidato += 1
+    return candidato
+
+
 def sugerir_numero_ot_sin_asignar(db: Session, tipo: str) -> str:
     """Código que se le va a proponer al usuario para una OT sin número
     asignado (ver DetalleOt.tsx) — solo una sugerencia editable, no reserva
     nada todavía. El número real que termina usándose es el que venga en
     OtDetalleCreate.numero_ot al guardar, sea este mismo o uno tipeado a
-    mano."""
+    mano. Nunca propone un número que ya existe."""
     if tipo not in PREFIJOS_OT_SIN_NUMERO:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tipo inválido")
-    return f"{PREFIJOS_OT_SIN_NUMERO[tipo]}-{_contador_sot_actual(db, tipo)}"
+    libre = _primer_numero_libre_sot(db, tipo, _contador_sot_actual(db, tipo))
+    return f"{PREFIJOS_OT_SIN_NUMERO[tipo]}-{libre}"
 
 
 def _avanzar_contador_sot_si_corresponde(db: Session, numero_ot_usado: str) -> None:
@@ -203,15 +229,20 @@ def _avanzar_contador_sot_si_corresponde(db: Session, numero_ot_usado: str) -> N
     for tipo, prefijo in PREFIJOS_OT_SIN_NUMERO.items():
         if not numero_ot_usado.startswith(f"{prefijo}-"):
             continue
-        actual = _contador_sot_actual(db, tipo)
-        if numero_ot_usado != f"{prefijo}-{actual}":
+        # La sugerencia vigente es el primer número libre desde el contador
+        # (ver sugerir_numero_ot_sin_asignar), no el contador a secas — la
+        # OT recién creada ya está en la sesión, así que se la ignora.
+        libre = _primer_numero_libre_sot(
+            db, tipo, _contador_sot_actual(db, tipo), ignorar_numero_ot=numero_ot_usado
+        )
+        if numero_ot_usado != f"{prefijo}-{libre}":
             return
         clave = CLAVE_CONTADOR_SOT[tipo]
         fila = db.get(Configuracion, clave)
         if fila is None:
-            db.add(Configuracion(clave=clave, valor=str(actual + 1)))
+            db.add(Configuracion(clave=clave, valor=str(libre + 1)))
         else:
-            fila.valor = str(actual + 1)
+            fila.valor = str(libre + 1)
         return
 
 
