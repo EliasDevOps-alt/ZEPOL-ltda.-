@@ -207,6 +207,10 @@ export function guardarDetalleOt(baseUrl: string, token: string, data: OtDetalle
   return request<OtDetalleOut>(baseUrl, '/ordenes-trabajo/detalle', { method: 'POST', token, body: data })
 }
 
+export function siguienteNumeroOtSinAsignar(baseUrl: string, token: string, tipo: 'muestra' | 'otros') {
+  return request<{ numero_ot: string }>(baseUrl, `/ordenes-trabajo/siguiente-sot?tipo=${tipo}`, { token })
+}
+
 export function obtenerDetalleOt(baseUrl: string, token: string, numeroOt: string) {
   return request<OtDetalleOut>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/detalle`, { token })
 }
@@ -217,8 +221,12 @@ export function buscarOtConFallback(baseUrl: string, token: string, numeroOt: st
 
 // Borra la OT completa (procesos, pedidos, pendientes, entregas y
 // devoluciones) — se rechaza si algún movimiento ya tiene el SID registrado.
-export function eliminarOt(baseUrl: string, token: string, numeroOt: string) {
-  return request<void>(baseUrl, `/ordenes-trabajo/${encodeURIComponent(numeroOt)}`, { method: 'DELETE', token })
+export function eliminarOt(baseUrl: string, token: string, numeroOt: string, borrarExcel: boolean) {
+  return request<{ excel_eliminado: boolean; excel_error: string | null }>(
+    baseUrl,
+    `/ordenes-trabajo/${encodeURIComponent(numeroOt)}?borrar_excel=${borrarExcel}`,
+    { method: 'DELETE', token }
+  )
 }
 
 export function importarOtDesdeExcel(baseUrl: string, token: string, numeroOt: string) {

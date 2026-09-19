@@ -7,6 +7,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { SelectorUnidad } from '@renderer/components/SelectorUnidad'
+import { useConfirm } from '@renderer/components/ConfirmProvider'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -37,6 +38,7 @@ export function Materiales() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
   const queryClient = useQueryClient()
 
   const [q, setQ] = useState('')
@@ -126,8 +128,11 @@ export function Materiales() {
     guardar.mutate(form)
   }
 
-  function handleEliminar(material: MaterialAdmin) {
-    if (!confirm(`¿Eliminar ${material.codigo_mp}? Esta acción no se puede deshacer.`)) return
+  async function handleEliminar(material: MaterialAdmin) {
+    const seguir = await confirmar(`¿Eliminar ${material.codigo_mp}? Esta acción no se puede deshacer.`, {
+      destructivo: true
+    })
+    if (!seguir) return
     eliminar.mutate(material.id)
   }
 

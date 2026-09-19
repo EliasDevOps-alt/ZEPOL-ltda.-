@@ -21,6 +21,7 @@ import {
 import { cn } from '@renderer/lib/utils'
 import { useAuth } from '@renderer/lib/AuthContext'
 import type { Modulo } from '@renderer/lib/types'
+import { ExcelSyncToasts } from './ExcelSyncToasts'
 
 interface NavItem {
   to: string
@@ -182,6 +183,8 @@ export function Layout() {
           </motion.div>
         </AnimatePresence>
       </main>
+
+      <ExcelSyncToasts />
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
+import { useConfirm } from '@renderer/components/ConfirmProvider'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -31,6 +32,7 @@ export function Maquinas() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
   const queryClient = useQueryClient()
 
   const [q, setQ] = useState('')
@@ -108,8 +110,11 @@ export function Maquinas() {
     guardar.mutate(form)
   }
 
-  function handleEliminar(maquina: MaquinaAdmin) {
-    if (!confirm(`¿Eliminar ${maquina.nombre}? Esta acción no se puede deshacer.`)) return
+  async function handleEliminar(maquina: MaquinaAdmin) {
+    const seguir = await confirmar(`¿Eliminar ${maquina.nombre}? Esta acción no se puede deshacer.`, {
+      destructivo: true
+    })
+    if (!seguir) return
     eliminar.mutate(maquina.id)
   }
 

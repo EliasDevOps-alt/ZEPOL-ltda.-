@@ -22,9 +22,12 @@ def _estado_entrega(cantidad_requerida: float | None, total_entregado: float) ->
 
 def consultar_consumo(db: Session, numero_ot: Optional[str] = None) -> List[Dict[str, Any]]:
     if numero_ot is not None:
+        # numero_ot se compara en mayúsculas — Postgres distingue mayúsculas
+        # por defecto, y sin esto "sm-1" tipeado en Registrar Entrega no
+        # encontraba los pedidos de la OT "SM-1" ya creada.
         filas = db.execute(
             text("SELECT * FROM vista_consumo WHERE numero_ot = :numero_ot ORDER BY ot_material_id"),
-            {"numero_ot": numero_ot},
+            {"numero_ot": numero_ot.strip().upper()},
         ).mappings().all()
     else:
         filas = db.execute(text("SELECT * FROM vista_consumo ORDER BY numero_ot, ot_material_id")).mappings().all()

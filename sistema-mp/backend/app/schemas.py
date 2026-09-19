@@ -220,6 +220,10 @@ class OtDetalleCreate(CamposComercialesOt):
     uso_interno: bool = False
 
 
+class SiguienteOtSinNumeroOut(BaseModel):
+    numero_ot: str
+
+
 class MaterialPedidoOut(BaseModel):
     ot_material_id: int
     material_id: int
@@ -253,6 +257,17 @@ class OtDetalleOut(CamposComercialesOt):
 class MaterialExcelOut(BaseModel):
     codigo_mp: str
     cantidad_requerida: Optional[float] = None
+
+
+class MaterialEliminadoOut(MaterialExcelOut):
+    """Un material que el sistema ya tenía pero que el cliente borró de la
+    fila del Excel — ver ordenes_controller._materiales_eliminados_del_excel.
+    bloqueado=True significa que ya tiene movimientos reales (entregas,
+    devoluciones, materia prima o ingresos) y por eso NO se borra solo, ni
+    con "Aplicar cambios del Excel" ni desde el vigilante automático — hay
+    que revisarlo y borrarlo a mano si corresponde."""
+
+    bloqueado: bool = False
 
 
 class OtExcelOut(CamposComercialesOt):
@@ -325,6 +340,11 @@ class ComparacionExcelOut(BaseModel):
     encontrado_en_excel: bool
     diferencias_comerciales: List[DiferenciaExcelOut] = []
     materiales_nuevos: List[MaterialExcelOut] = []
+    # Materiales que el sistema ya tiene (pendientes o pedidos que vinieron
+    # de Excel/Crear OT) pero que ya no están en la fila actual del Excel —
+    # el cliente los borró ahí después de cargados. Solo informa, no se
+    # borran solos (ver ordenes_controller.aplicar_cambios_excel).
+    materiales_eliminados: List[MaterialEliminadoOut] = []
 
 
 class ComparacionMasivaItemOut(BaseModel):
@@ -337,6 +357,17 @@ class ComparacionMasivaItemOut(BaseModel):
     cliente: Optional[str] = None
     diferencias_comerciales: List[DiferenciaExcelOut] = []
     materiales_nuevos: List[MaterialExcelOut] = []
+    materiales_eliminados: List[MaterialEliminadoOut] = []
+
+
+class EliminarOtOut(BaseModel):
+    """Resultado de eliminar una OT — ver ordenes_controller.eliminar_ot. La
+    OT en sí ya está borrada de la base de datos cuando esto se devuelve;
+    esto solo informa qué pasó con el pedido opcional de borrarla también
+    del Excel OC-MP."""
+
+    excel_eliminado: bool = False
+    excel_error: Optional[str] = None
 
 
 class OtImportadaOut(BaseModel):

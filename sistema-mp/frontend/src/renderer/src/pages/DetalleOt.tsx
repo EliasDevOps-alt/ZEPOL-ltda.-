@@ -11,6 +11,7 @@ import {
   History,
   Pencil,
   Plus,
+  Search,
   Trash2,
   Upload
 } from 'lucide-react'
@@ -19,7 +20,9 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { Combobox } from '@renderer/components/ui/combobox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Switch } from '@renderer/components/ui/switch'
+import { useAlert, useConfirm } from '@renderer/components/ConfirmProvider'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import { cn } from '@renderer/lib/utils'
@@ -194,6 +197,7 @@ function FilaPendienteExistente({
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
 
   const [editando, setEditando] = useState(false)
   const [materialId, setMaterialId] = useState(pendiente.material_id != null ? String(pendiente.material_id) : '')
@@ -243,9 +247,9 @@ function FilaPendienteExistente({
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
   })
 
-  function handleEliminar() {
+  async function handleEliminar() {
     const codigo = materialResuelto ? materialResuelto.codigo_mp : pendiente.codigo_mp
-    if (!confirm(`¿Eliminar ${codigo} de esta OT?`)) return
+    if (!(await confirmar(`¿Eliminar ${codigo} de esta OT?`, { destructivo: true }))) return
     eliminar.mutate()
   }
 
@@ -334,10 +338,26 @@ export function DetalleOt() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
+  const avisar = useAlert()
   const queryClient = useQueryClient()
   const navigate = useNavigate()
 
   const [numeroOt, setNumeroOt] = useState('')
+  // OT sin número asignado por el cliente (muestra u otro caso) — el código
+  // (SM-1, SO-1, ...) lo genera el backend, ver ordenes_controller. Solo
+  // tiene sentido antes de crear: una vez cargada/guardada ya tiene su
+  // numero_ot real, y se vuelve a buscar como cualquier OT.
+  const [otSinNumero, setOtSinNumero] = useState(false)
+  const [tipoOtSinNumero, setTipoOtSinNumero] = useState<'muestra' | 'otros'>('muestra')
+  // Fuelle: una OT propia (con sus propios materiales, entregas, etc.) para
+  // la parte de fuelle de otra OT ya cargada — se numera F-<OT padre> (ej.
+  // F-6321) y copia cliente/diseño de esa OT padre para no retipearlos, ya
+  // que casi siempre son los mismos. No excluyente con "Registrar en
+  // Excel": F-6321 se sincroniza igual que cualquier OT.
+  const [esFuelle, setEsFuelle] = useState(false)
+  const [otPadre, setOtPadre] = useState('')
+  const [errorFuelle, setErrorFuelle] = useState<string | null>(null)
   const [cliente, setCliente] = useState('')
   const [diseno, setDiseno] = useState('')
   // Uso interno: material que la empresa fabrica para sí misma, sin cliente
@@ -356,9 +376,18 @@ export function DetalleOt() {
   const [pendientesExistentes, setPendientesExistentes] = useState<OtMaterialPendiente[]>([])
   const [syncExcel, setSyncExcel] = useState<{ ok: boolean; error: string | null } | null>(null)
   const [comparacion, setComparacion] = useState<ComparacionExcel | null>(null)
+  // Mientras se verifica si el numero_ot tipeado ya existe (ver
+  // handleSubmit) — deshabilita el botón de guardar para que no se pueda
+  // mandar dos veces mientras se espera esa respuesta.
+  const [verificandoExistencia, setVerificandoExistencia] = useState(false)
 
   const [searchParams] = useSearchParams()
   const autoCargadoRef = useRef(false)
+  // Recuerda para qué tipo ya se precargó la sugerencia en numeroOt, para no
+  // pisar lo que el usuario haya tipeado a mano cada vez que este componente
+  // se vuelve a renderizar — solo se vuelve a precargar cuando el tipo
+  // cambia de verdad (o al prender el switch).
+  const tipoSotPrecargadoRef = useRef<'muestra' | 'otros' | null>(null)
 
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
 
@@ -366,6 +395,42 @@ export function DetalleOt() {
   // de datos, o viene del Excel y por lo tanto es de un cliente real), se
   // muestra como dato fijo en vez de casilla editable.
   const usoInternoBloqueado = origenCargado === 'bd' || origenCargado === 'excel' || confirmacion !== null
+
+  // El "S/OT" no tiene sentido sobre una OT real ya cargada (de la base o
+  // del Excel) — pero, a diferencia de "Registrar en Excel", sí se mantiene
+  // disponible después de guardar (confirmacion !== null): guardar no carga
+  // la OT en pantalla (origenCargado sigue null), así que el formulario
+  // sigue en modo "crear" y hace falta poder seguir registrando más de una
+  // OT sin número asignado (ej. varias muestras seguidas) sin recargar la
+  // página.
+  const puedeElegirOtSinNumero = origenCargado === null
+
+  // Mismo criterio que el S/OT — no tiene sentido sobre una OT ya cargada,
+  // pero sigue disponible después de guardar para poder cargar otro fuelle
+  // sin recargar la página.
+  const puedeElegirFuelle = origenCargado === null
+
+  const sugerenciaSot = useQuery({
+    queryKey: ['siguiente-sot', tipoOtSinNumero],
+    queryFn: () => api.siguienteNumeroOtSinAsignar(apiBaseUrl, token, tipoOtSinNumero),
+    enabled: otSinNumero && puedeElegirOtSinNumero
+  })
+
+  // Precarga numeroOt con la sugerencia recién llegada, pero solo la primera
+  // vez que se aplica para ESTE tipo — así si el usuario la cambia a mano
+  // (ej. "SM-10"), no se la pisamos de nuevo en el próximo render. Cambiar
+  // de tipo (muestra -> otros) sí cuenta como "de nuevo": la sugerencia
+  // anterior ya no aplica.
+  useEffect(() => {
+    if (!otSinNumero) {
+      tipoSotPrecargadoRef.current = null
+      return
+    }
+    if (sugerenciaSot.data && tipoSotPrecargadoRef.current !== tipoOtSinNumero) {
+      setNumeroOt(sugerenciaSot.data.numero_ot)
+      tipoSotPrecargadoRef.current = tipoOtSinNumero
+    }
+  }, [otSinNumero, tipoOtSinNumero, sugerenciaSot.data])
 
   const materialOptions = useMemo(
     () =>
@@ -421,26 +486,68 @@ export function DetalleOt() {
     }
   })
 
+  // Busca la OT padre del fuelle solo para copiarle cliente/diseño — no usa
+  // cargarDesdeDetalle porque esto no es "cargar esta OT" (origenCargado
+  // sigue null, F-6321 sigue siendo una OT nueva por crear).
+  const buscarPadreFuelle = useMutation({
+    mutationFn: () => api.buscarOtConFallback(apiBaseUrl, token, otPadre),
+    onSuccess: (resultado) => {
+      const numeroPadreNormalizado = otPadre.trim().toUpperCase()
+      setNumeroOt(`F-${numeroPadreNormalizado}`)
+      if (resultado.origen === 'bd' && resultado.bd) {
+        setCliente(resultado.bd.cliente ?? '')
+        setDiseno(resultado.bd.diseno ?? '')
+        setErrorFuelle(null)
+      } else if (resultado.origen === 'excel' && resultado.excel) {
+        // El Excel no tiene diseño (nunca fue una columna de "oc mp") — solo
+        // se copia el cliente, el diseño queda para completar a mano.
+        setCliente(resultado.excel.cliente ?? '')
+        setErrorFuelle(null)
+      } else {
+        setErrorFuelle(`No se encontró la OT ${otPadre} — completá cliente y diseño a mano.`)
+      }
+    },
+    onError: (err) =>
+      setErrorFuelle(err instanceof ApiError ? err.message : 'No se pudo buscar la OT padre')
+  })
+
   // Borra la OT completa — el backend rechaza esto si algún movimiento ya
-  // tiene el SID registrado (ver ordenes_controller.eliminar_ot).
+  // tiene el SID registrado (ver ordenes_controller.eliminar_ot). El Excel
+  // solo se toca si el usuario lo pide explícitamente (borrarExcel) — nunca
+  // por defecto, sigue siendo del cliente.
   const eliminarOtCompleta = useMutation({
-    mutationFn: () => api.eliminarOt(apiBaseUrl, token, numeroOt),
-    onSuccess: () => {
+    mutationFn: (borrarExcel: boolean) => api.eliminarOt(apiBaseUrl, token, numeroOt, borrarExcel),
+    onSuccess: async (resultado, borrarExcel) => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-trabajo'] })
+      if (borrarExcel && resultado.excel_error) {
+        await avisar(
+          `La OT se eliminó del sistema, pero no se pudo borrar su fila del Excel OC-MP: ${resultado.excel_error}`
+        )
+      }
       navigate('/crear-ot/listado')
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar la OT')
   })
 
-  function handleEliminarOt() {
-    if (
-      !confirm(
-        `¿Eliminar la OT ${numeroOt} por completo? Esto borra sus pedidos, entregas y devoluciones. Esta acción no se puede deshacer.`
-      )
+  async function handleEliminarOt() {
+    const seguir = await confirmar(
+      `¿Eliminar la OT ${numeroOt} por completo? Esto borra sus pedidos, entregas y devoluciones. Esta acción no se puede deshacer.`,
+      { destructivo: true }
     )
-      return
+    if (!seguir) return
+
+    // uso_interno nunca tuvo fila en el Excel — preguntar ahí sería
+    // confuso, no hay nada que borrar.
+    let borrarExcel = false
+    if (!usoInterno) {
+      borrarExcel = await confirmar(
+        '¿Querés borrar también su fila en el Excel OC-MP? Si elegís que no, la fila queda como está.',
+        { textoConfirmar: 'Sí, borrar también', textoCancelar: 'No, dejarla' }
+      )
+    }
+
     setError(null)
-    eliminarOtCompleta.mutate()
+    eliminarOtCompleta.mutate(borrarExcel)
   }
 
   // Deep-link desde el listado de OT (/crear-ot?ot=2121): precarga el número
@@ -490,13 +597,21 @@ export function DetalleOt() {
       }),
     onSuccess: (detalle) => {
       setConfirmacion(detalle)
+      // Con OT sin número asignado, numeroOt seguía vacío hasta que el
+      // backend generó el código (SM-1, SO-1, ...) — a partir de acá se
+      // trata como cualquier OT ya creada.
+      setNumeroOt(detalle.numero_ot)
+      setOtSinNumero(false)
+      setEsFuelle(false)
+      setOtPadre('')
+      setErrorFuelle(null)
       setError(null)
       setProcesosExistentes(detalle.procesos)
       setPendientesExistentes(detalle.pendientes)
       setMaterialesForm([filaMaterialVacia()])
       setSyncExcel({ ok: detalle.sincronizado_excel, error: detalle.excel_sync_error })
       queryClient.invalidateQueries({ queryKey: ['ordenes-trabajo'] })
-      queryClient.invalidateQueries({ queryKey: ['consumo', numeroOt] })
+      queryClient.invalidateQueries({ queryKey: ['consumo', detalle.numero_ot] })
     },
     onError: (err) => setError(err instanceof ApiError ? err.message : 'Error al guardar la OT')
   })
@@ -533,13 +648,42 @@ export function DetalleOt() {
     setMaterialesForm(materialesForm.map((f, idx) => (idx === i ? { ...f, ...cambios } : f)))
   }
 
-  function handleSubmit(e: FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault()
     if (!numeroOt) {
       setError('Ingresa el número de OT')
       return
     }
     setError(null)
+
+    // Si esta OT todavía no se cargó en pantalla (con "Cargar OT
+    // existente"), el número puede coincidir por error con una OT real que
+    // ya tiene datos — sin este aviso, guardar la amplía en silencio (pasó
+    // de verdad: la OT 6321 se pensó libre y terminó sumándole un material
+    // que no era de ella, hubo que borrarlo a mano después).
+    if (origenCargado === null) {
+      setVerificandoExistencia(true)
+      try {
+        const resultado = await api.buscarOtConFallback(apiBaseUrl, token, numeroOt)
+        if (resultado.origen === 'bd' && resultado.bd) {
+          const seguir = await confirmar(
+            `La OT ${numeroOt} ya existe en el sistema` +
+              (resultado.bd.cliente ? ` (cliente: ${resultado.bd.cliente})` : '') +
+              '. ¿Querés agregar o modificar datos sobre ella?'
+          )
+          if (!seguir) {
+            setVerificandoExistencia(false)
+            return
+          }
+        }
+      } catch {
+        // Si la verificación falla (ej. sin conexión), no bloqueamos el
+        // guardado — guardar.mutate() va a fallar y mostrar su propio error
+        // si de verdad hay un problema.
+      }
+      setVerificandoExistencia(false)
+    }
+
     guardar.mutate()
   }
 
@@ -752,12 +896,15 @@ export function DetalleOt() {
             {comparacion &&
               comparacion.encontrado_en_excel &&
               comparacion.diferencias_comerciales.length === 0 &&
-              comparacion.materiales_nuevos.length === 0 && (
+              comparacion.materiales_nuevos.length === 0 &&
+              comparacion.materiales_eliminados.length === 0 && (
                 <p className="text-sm text-muted-foreground">Sin diferencias — el sistema ya tiene lo último del Excel.</p>
               )}
 
             {comparacion &&
-              (comparacion.diferencias_comerciales.length > 0 || comparacion.materiales_nuevos.length > 0) && (
+              (comparacion.diferencias_comerciales.length > 0 ||
+                comparacion.materiales_nuevos.length > 0 ||
+                comparacion.materiales_eliminados.length > 0) && (
                 <div className="flex flex-col gap-3 rounded-md border border-warning/30 bg-warning/10 p-3 text-sm">
                   {comparacion.diferencias_comerciales.length > 0 && (
                     <div>
@@ -788,15 +935,67 @@ export function DetalleOt() {
                       </ul>
                     </div>
                   )}
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="self-start"
-                    disabled={aplicarExcel.isPending}
-                    onClick={() => aplicarExcel.mutate()}
-                  >
-                    {aplicarExcel.isPending ? 'Aplicando...' : 'Aplicar cambios del Excel'}
-                  </Button>
+                  {comparacion.materiales_eliminados.some((m) => !m.bloqueado) && (
+                    <div>
+                      <p className="mb-1 font-medium text-destructive">
+                        Materiales que el Excel ya no tiene — se van a borrar del sistema
+                      </p>
+                      <ul className="flex flex-col gap-0.5 text-muted-foreground">
+                        {comparacion.materiales_eliminados
+                          .filter((m) => !m.bloqueado)
+                          .map((m) => (
+                            <li key={m.codigo_mp}>
+                              {m.codigo_mp}
+                              {conCantidadYUnidad(
+                                m.cantidad_requerida,
+                                unidadDeMaterial(materiales.data, { codigoMp: m.codigo_mp })
+                              )}
+                            </li>
+                          ))}
+                      </ul>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        El cliente lo borró en el Excel. Al aplicar cambios, se borran también del sistema.
+                      </p>
+                    </div>
+                  )}
+                  {comparacion.materiales_eliminados.some((m) => m.bloqueado) && (
+                    <div>
+                      <p className="mb-1 font-medium text-warning">
+                        Materiales que el Excel ya no tiene, pero ya tienen movimientos
+                      </p>
+                      <ul className="flex flex-col gap-0.5 text-muted-foreground">
+                        {comparacion.materiales_eliminados
+                          .filter((m) => m.bloqueado)
+                          .map((m) => (
+                            <li key={m.codigo_mp}>
+                              {m.codigo_mp}
+                              {conCantidadYUnidad(
+                                m.cantidad_requerida,
+                                unidadDeMaterial(materiales.data, { codigoMp: m.codigo_mp })
+                              )}
+                            </li>
+                          ))}
+                      </ul>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Ya tienen entregas, devoluciones o materia prima registrada — no se borran solos, ni con
+                        "Aplicar cambios del Excel". Revisalos y borralos a mano desde los pendientes o pedidos de
+                        la OT si corresponde.
+                      </p>
+                    </div>
+                  )}
+                  {(comparacion.diferencias_comerciales.length > 0 ||
+                    comparacion.materiales_nuevos.length > 0 ||
+                    comparacion.materiales_eliminados.some((m) => !m.bloqueado)) && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="self-start"
+                      disabled={aplicarExcel.isPending}
+                      onClick={() => aplicarExcel.mutate()}
+                    >
+                      {aplicarExcel.isPending ? 'Aplicando...' : 'Aplicar cambios del Excel'}
+                    </Button>
+                  )}
                 </div>
               )}
           </CardContent>
@@ -813,50 +1012,149 @@ export function DetalleOt() {
               </span>
             )}
           </CardTitle>
-          <label className="flex items-center gap-2 text-sm">
-            Registrar en Excel
-            <Switch
-              checked={!usoInterno}
-              onCheckedChange={(checked) => setUsoInterno(!checked)}
-              disabled={usoInternoBloqueado}
-              className="data-[state=checked]:bg-success data-[state=unchecked]:bg-destructive"
-            />
-          </label>
+          <div className="flex items-center gap-4">
+            {puedeElegirOtSinNumero && (
+              <label className="flex items-center gap-2 text-sm">
+                S/OT
+                <Switch
+                  checked={otSinNumero}
+                  onCheckedChange={(checked) => {
+                    setOtSinNumero(checked)
+                    if (checked) {
+                      setEsFuelle(false)
+                      setNumeroOt('')
+                    }
+                  }}
+                />
+              </label>
+            )}
+            {puedeElegirFuelle && (
+              <label className="flex items-center gap-2 text-sm">
+                Fuelle
+                <Switch
+                  checked={esFuelle}
+                  onCheckedChange={(checked) => {
+                    setEsFuelle(checked)
+                    setErrorFuelle(null)
+                    if (checked) {
+                      setOtSinNumero(false)
+                      setOtPadre('')
+                      setNumeroOt('')
+                    }
+                  }}
+                />
+              </label>
+            )}
+            <label className="flex items-center gap-2 text-sm">
+              Registrar en Excel
+              <Switch
+                checked={!usoInterno}
+                onCheckedChange={(checked) => setUsoInterno(!checked)}
+                disabled={usoInternoBloqueado}
+                className="data-[state=checked]:bg-success data-[state=unchecked]:bg-destructive"
+              />
+            </label>
+          </div>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-1.5">
-                <Label>OT</Label>
-                <Input
-                  value={numeroOt}
-                  onChange={(e) => setNumeroOt(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      if (numeroOt && !cargar.isPending) cargar.mutate()
-                    }
-                  }}
-                  placeholder="2121"
-                />
-              </div>
-              <div className="flex items-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  disabled={!numeroOt || cargar.isPending}
-                  onClick={() => cargar.mutate()}
-                >
-                  <Upload className="h-4 w-4" />
-                  Cargar OT existente
-                </Button>
-              </div>
+              {otSinNumero ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>Tipo</Label>
+                  <Select
+                    value={tipoOtSinNumero}
+                    onValueChange={(v) => setTipoOtSinNumero(v as 'muestra' | 'otros')}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="muestra">Muestra</SelectItem>
+                      <SelectItem value="otros">Otros</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : esFuelle ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>OT que tiene fuelle</Label>
+                  <Input
+                    value={otPadre}
+                    onChange={(e) => setOtPadre(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (otPadre && !buscarPadreFuelle.isPending) buscarPadreFuelle.mutate()
+                      }
+                    }}
+                    placeholder="6321"
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <Label>OT</Label>
+                  <Input
+                    value={numeroOt}
+                    onChange={(e) => setNumeroOt(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (numeroOt && !cargar.isPending) cargar.mutate()
+                      }
+                    }}
+                    placeholder="2121"
+                  />
+                </div>
+              )}
+              {otSinNumero ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label>OT</Label>
+                  <Input value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="SM-1" />
+                  <p className="text-xs text-muted-foreground">
+                    {sugerenciaSot.isFetching
+                      ? 'Calculando sugerencia...'
+                      : sugerenciaSot.data
+                        ? `Sugerido: ${sugerenciaSot.data.numero_ot} — podés cambiarlo`
+                        : 'Podés cambiarlo si corresponde otro número'}
+                  </p>
+                </div>
+              ) : esFuelle ? (
+                <div className="flex flex-col gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!otPadre || buscarPadreFuelle.isPending}
+                    onClick={() => buscarPadreFuelle.mutate()}
+                  >
+                    <Search className="h-4 w-4" />
+                    {buscarPadreFuelle.isPending ? 'Buscando...' : 'Buscar OT padre'}
+                  </Button>
+                  {numeroOt && (
+                    <p className="text-xs text-muted-foreground">
+                      Se va a registrar como <span className="font-medium text-foreground">{numeroOt}</span>
+                    </p>
+                  )}
+                  {errorFuelle && <p className="text-xs text-warning">{errorFuelle}</p>}
+                </div>
+              ) : (
+                <div className="flex items-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={!numeroOt || cargar.isPending}
+                    onClick={() => cargar.mutate()}
+                  >
+                    <Upload className="h-4 w-4" />
+                    Cargar OT existente
+                  </Button>
+                </div>
+              )}
               <div className="flex flex-col gap-1.5">
                 <Label>Cliente</Label>
                 <Input value={cliente} onChange={(e) => setCliente(e.target.value)} placeholder="La Estrella" />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label>Diseño</Label>
+                <Label>Descripción</Label>
                 <Input value={diseno} onChange={(e) => setDiseno(e.target.value)} />
               </div>
             </div>
@@ -1117,8 +1415,8 @@ export function DetalleOt() {
 
             {error && <p className="text-sm text-destructive">{error}</p>}
 
-            <Button type="submit" disabled={guardar.isPending}>
-              {guardar.isPending ? 'Guardando...' : 'Guardar OT'}
+            <Button type="submit" disabled={guardar.isPending || verificandoExistencia}>
+              {verificandoExistencia ? 'Verificando...' : guardar.isPending ? 'Guardando...' : 'Guardar OT'}
             </Button>
           </form>
         </CardContent>

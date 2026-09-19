@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas
 from ..models import (
+    Configuracion,
     EstadoSid,
     Maquina,
     Material,
@@ -20,7 +22,34 @@ from ..models import (
 )
 from ..services import excel_oc_mp
 
+logger = logging.getLogger(__name__)
+
 CAMPOS_COMERCIALES = list(schemas.CamposComercialesOt.model_fields.keys())
+
+
+def _normalizar_numero_ot(numero_ot: str) -> str:
+    """numero_ot se busca y se guarda siempre en mayúsculas — sin esto,
+    "sm-1" tipeado en Registrar Entrega no encontraba la OT "SM-1" ya creada
+    (Postgres compara texto sensible a mayúsculas por defecto). Un número
+    real de cliente es siempre numérico, así que esto no le cambia nada."""
+    return numero_ot.strip().upper()
+
+# Prefijos para una OT que todavía no tiene número asignado por el cliente
+# (ver OtDetalleCreate.tipo_ot_sin_numero) — sin barra ni espacio a propósito:
+# numero_ot viaja como segmento literal de URL (/ordenes-trabajo/{numero_ot}/…)
+# y una "/" ahí se interpretaría como separador de ruta, no como parte del
+# código. Como el código no es puramente numérico, Excel lo guarda como texto
+# tal cual (ver excel_oc_mp._numero_ot_texto/_coincide_ot) — a diferencia de
+# "001", no hay riesgo de que se lea como el número 1.
+PREFIJOS_OT_SIN_NUMERO = {"muestra": "SM", "otros": "SO"}
+
+# El "próximo número sugerido" para cada tipo se guarda en Configuración
+# (mismo mecanismo que ruta_excel_oc_mp) en vez de calcularse como
+# MAX(existentes)+1 — a propósito, ver _avanzar_contador_sot_si_corresponde:
+# si alguien sobreescribe la sugerencia a mano (ej. pide SM-10 cuando el
+# contador iba en el 5), el contador se queda en 5 en vez de saltar a 11, así
+# la próxima sugerencia sigue ofreciendo los números que quedaron sin usar.
+CLAVE_CONTADOR_SOT = {"muestra": "contador_sot_muestra", "otros": "contador_sot_otros"}
 
 
 def _aplicar_campos_comerciales(ot: OrdenTrabajo, data: schemas.CamposComercialesOt) -> None:
@@ -136,6 +165,56 @@ def _sincronizar_excel(db: Session, ot: OrdenTrabajo) -> None:
     db.refresh(ot)
 
 
+def _contador_sot_actual(db: Session, tipo: str) -> int:
+    fila = db.get(Configuracion, CLAVE_CONTADOR_SOT[tipo])
+    if fila and fila.valor and fila.valor.isdigit():
+        return int(fila.valor)
+    return 1
+
+
+def sugerir_numero_ot_sin_asignar(db: Session, tipo: str) -> str:
+    """Código que se le va a proponer al usuario para una OT sin número
+    asignado (ver DetalleOt.tsx) — solo una sugerencia editable, no reserva
+    nada todavía. El número real que termina usándose es el que venga en
+    OtDetalleCreate.numero_ot al guardar, sea este mismo o uno tipeado a
+    mano."""
+    if tipo not in PREFIJOS_OT_SIN_NUMERO:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Tipo inválido")
+    return f"{PREFIJOS_OT_SIN_NUMERO[tipo]}-{_contador_sot_actual(db, tipo)}"
+
+
+def _avanzar_contador_sot_si_corresponde(db: Session, numero_ot_usado: str) -> None:
+    """Si numero_ot_usado tiene la forma de una OT sin número asignado
+    (SM-#/SO-#) y coincide EXACTAMENTE con la sugerencia vigente para ese
+    tipo, avanza el contador para la próxima vez. El tipo se detecta por el
+    propio numero_ot (su prefijo), no por un flag aparte que el frontend
+    tenga que acordarse de mandar — a propósito: la primera vez que se usó
+    esto en planta, alguien tipeó "SM-1"/"SM-2" directo en el campo normal
+    de OT (sin pasar por el switch "S/OT" que mandaba ese flag) y el
+    contador nunca se enteró, así que la sugerencia se quedó pegada en
+    SM-1 para siempre. Detectándolo acá, funciona sin importar por dónde se
+    haya escrito el número.
+
+    Si no coincide con la sugerencia (el usuario puso otro número a mano,
+    ej. SM-10 cuando la sugerencia era SM-5, porque ese número ya significa
+    algo afuera del sistema), el contador se queda en 5 — la próxima
+    sugerencia sigue ofreciendo 5, después 6, en vez de saltar a 11 y dejar
+    esos números sin usar para siempre."""
+    for tipo, prefijo in PREFIJOS_OT_SIN_NUMERO.items():
+        if not numero_ot_usado.startswith(f"{prefijo}-"):
+            continue
+        actual = _contador_sot_actual(db, tipo)
+        if numero_ot_usado != f"{prefijo}-{actual}":
+            return
+        clave = CLAVE_CONTADOR_SOT[tipo]
+        fila = db.get(Configuracion, clave)
+        if fila is None:
+            db.add(Configuracion(clave=clave, valor=str(actual + 1)))
+        else:
+            fila.valor = str(actual + 1)
+        return
+
+
 def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
     """Crea o amplía la OT: fija cliente/diseño/datos comerciales (únicos
     para toda la OT) y agrega los materiales pedidos con su cantidad, como
@@ -145,15 +224,26 @@ def guardar_detalle(db: Session, data: schemas.OtDetalleCreate) -> OrdenTrabajo:
     acción sirve para crear la OT o para agregarle más materiales/corregir
     datos comerciales después. Siempre intenta reflejar el resultado en el
     Excel OC-MP — ver _sincronizar_excel — tanto al crear como al ampliar,
-    para que el Excel no quede desactualizado apenas se edita algo más."""
+    para que el Excel no quede desactualizado apenas se edita algo más.
 
-    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == data.numero_ot))
+    Si numero_ot tiene la forma de una OT sin número asignado (SM-#/SO-#),
+    ver _avanzar_contador_sot_si_corresponde — se detecta solo, no hace
+    falta avisarlo aparte. Solo tiene efecto al CREAR: se ignora en la rama
+    de ampliar.
+
+    numero_ot se guarda siempre en mayúsculas (ver _normalizar_numero_ot) —
+    así "sm-1" y "SM-1" son la misma OT en cualquier pantalla que busque por
+    número, sin importar cómo se haya tipeado."""
+
+    if not data.numero_ot:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "numero_ot es requerido")
+    numero_ot = _normalizar_numero_ot(data.numero_ot)
+    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
     if ot is None:
-        ot = OrdenTrabajo(
-            numero_ot=data.numero_ot, cliente=data.cliente, diseno=data.diseno, uso_interno=data.uso_interno
-        )
+        ot = OrdenTrabajo(numero_ot=numero_ot, cliente=data.cliente, diseno=data.diseno, uso_interno=data.uso_interno)
         db.add(ot)
         db.flush()
+        _avanzar_contador_sot_si_corresponde(db, numero_ot)
     else:
         if data.cliente:
             ot.cliente = data.cliente
@@ -266,6 +356,110 @@ def _codigos_materiales_en_sistema(ot: OrdenTrabajo) -> set:
     return codigos
 
 
+def _materiales_eliminados_del_excel(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Materiales que la OT ya tiene en el sistema (pendientes o pedidos que
+    vinieron de Excel/Crear OT — mismo filtro que _codigos_materiales_en_sistema,
+    excluye materia prima porque esa nunca vino del Excel) pero que ya no
+    están en la fila actual del Excel — el cliente los borró ahí después de
+    que el sistema los cargó (caso real: OT SM-2, MB01 borrado a mano en
+    'oc mp'). Antes esto no se detectaba porque materiales_nuevos solo mira
+    Excel -> sistema, nunca al revés, así que 'Comparar con Excel' informaba
+    'sin diferencias' aunque un material hubiera desaparecido.
+
+    "bloqueado" marca los que ya tienen movimientos reales (entregas,
+    devoluciones, materia prima o ingresos) — ver
+    _bloquear_si_pedido_tiene_movimientos/_bloquear_si_pendiente_tiene_movimientos.
+    aplicar_cambios_excel (llamado a mano o por el vigilante automático, ver
+    sincronizar_automaticamente_excel) borra del sistema los que NO están
+    bloqueados; los bloqueados se dejan para revisar y borrar a mano, porque
+    perder una entrega/devolución real solo porque el Excel cambió sería
+    peor que la inconsistencia misma."""
+    codigos_en_excel = {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
+    eliminados = []
+    for p in ot.pendientes:
+        codigos_item = {p.codigo_mp.strip().lower()}
+        if p.material_id and p.material:
+            codigos_item.add(p.material.codigo_mp.strip().lower())
+        if codigos_item.isdisjoint(codigos_en_excel):
+            eliminados.append(
+                {
+                    "codigo_mp": p.material.codigo_mp if p.material else p.codigo_mp,
+                    "cantidad_requerida": float(p.cantidad_requerida) if p.cantidad_requerida else None,
+                    "bloqueado": bool(p.materias_primas or p.ingresos),
+                }
+            )
+    for ot_proceso in ot.procesos:
+        for om in ot_proceso.materiales:
+            if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
+                continue
+            codigos_item = {om.material.codigo_mp.strip().lower()}
+            if om.codigo_mp_excel:
+                codigos_item.add(om.codigo_mp_excel.strip().lower())
+            if codigos_item.isdisjoint(codigos_en_excel):
+                eliminados.append(
+                    {
+                        "codigo_mp": om.material.codigo_mp,
+                        "cantidad_requerida": float(om.cantidad_requerida) if om.cantidad_requerida else None,
+                        "bloqueado": bool(om.entregas or om.devoluciones or om.insumos),
+                    }
+                )
+    return eliminados
+
+
+def _eliminar_materiales_removidos_del_excel(
+    db: Session, ot: OrdenTrabajo, datos_excel: Dict[str, Any]
+) -> Tuple[List[str], List[str]]:
+    """Borra los pendientes/pedidos que _materiales_eliminados_del_excel
+    marcó como no bloqueados (sin movimientos reales todavía) — llamado
+    desde aplicar_cambios_excel, tanto al apretar 'Aplicar cambios del
+    Excel' a mano como desde el vigilante automático. Los bloqueados se
+    dejan sin tocar. Devuelve (códigos borrados, códigos bloqueados) para
+    poder avisar qué pasó con cada uno."""
+    codigos_en_excel = {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
+    borrados: List[str] = []
+    bloqueados: List[str] = []
+
+    for pendiente in list(ot.pendientes):
+        codigos_item = {pendiente.codigo_mp.strip().lower()}
+        if pendiente.material_id and pendiente.material:
+            codigos_item.add(pendiente.material.codigo_mp.strip().lower())
+        if not codigos_item.isdisjoint(codigos_en_excel):
+            continue
+        codigo_mostrado = pendiente.material.codigo_mp if pendiente.material else pendiente.codigo_mp
+        try:
+            _bloquear_si_pendiente_tiene_movimientos(pendiente)
+        except HTTPException:
+            bloqueados.append(codigo_mostrado)
+            continue
+        db.delete(pendiente)
+        borrados.append(codigo_mostrado)
+    db.flush()
+
+    for ot_proceso in list(ot.procesos):
+        for om in list(ot_proceso.materiales):
+            if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
+                continue
+            codigos_item = {om.material.codigo_mp.strip().lower()}
+            if om.codigo_mp_excel:
+                codigos_item.add(om.codigo_mp_excel.strip().lower())
+            if not codigos_item.isdisjoint(codigos_en_excel):
+                continue
+            try:
+                _bloquear_si_pedido_tiene_movimientos(om)
+            except HTTPException:
+                bloqueados.append(om.material.codigo_mp)
+                continue
+            db.delete(om)
+            borrados.append(om.material.codigo_mp)
+        db.flush()
+        # Mismo criterio que mover_pedido/revertir_a_pendiente_si_vacio: un
+        # proceso que se queda sin ningún pedido no tiene sentido dejarlo.
+        if not ot_proceso.materiales:
+            db.delete(ot_proceso)
+
+    return borrados, bloqueados
+
+
 def _comparar_ot_con_datos_excel(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) -> Dict[str, Any]:
     """Diferencias comerciales y materiales nuevos entre una OT y su fila ya
     leída del Excel — compartido por comparar_con_excel (una OT puntual) y
@@ -292,8 +486,13 @@ def _comparar_ot_con_datos_excel(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) 
     materiales_nuevos = [
         m for m in datos_excel["materiales"] if m["codigo_mp"].strip().lower() not in codigos_existentes
     ]
+    materiales_eliminados = _materiales_eliminados_del_excel(ot, datos_excel)
 
-    return {"diferencias_comerciales": diferencias, "materiales_nuevos": materiales_nuevos}
+    return {
+        "diferencias_comerciales": diferencias,
+        "materiales_nuevos": materiales_nuevos,
+        "materiales_eliminados": materiales_eliminados,
+    }
 
 
 def comparar_con_excel(db: Session, numero_ot: str) -> Dict[str, Any]:
@@ -327,7 +526,11 @@ def comparar_todas_con_excel(db: Session) -> List[Dict[str, Any]]:
         if datos_excel is None:
             continue
         comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
-        if comparacion["diferencias_comerciales"] or comparacion["materiales_nuevos"]:
+        if (
+            comparacion["diferencias_comerciales"]
+            or comparacion["materiales_nuevos"]
+            or comparacion["materiales_eliminados"]
+        ):
             resultado.append({"numero_ot": ot.numero_ot, "cliente": ot.cliente, **comparacion})
     return resultado
 
@@ -335,15 +538,20 @@ def comparar_todas_con_excel(db: Session) -> List[Dict[str, Any]]:
 def aplicar_cambios_excel(
     db: Session, numero_ot: str, datos_excel: Optional[Dict[str, Any]] = None
 ) -> OrdenTrabajo:
-    """Trae al sistema los campos comerciales y los materiales nuevos que
-    haya en el Excel OC-MP para esta OT — pensado para usarse después de
-    comparar_con_excel, una vez que el usuario revisó las diferencias (o
-    automáticamente, ver excel_watcher.sincronizar_automaticamente_excel).
-    Nunca toca proceso/máquina ni borra materiales existentes: solo
-    actualiza los campos comerciales y agrega como pendientes los
-    materiales del Excel que el sistema todavía no tenga (ni pendientes ni
-    ya promovidos) — es justo esa propiedad (nunca destructivo) lo que
-    permite aplicarlo sin supervisión desde el vigilante automático.
+    """Trae al sistema los campos comerciales, los materiales nuevos y los
+    materiales borrados que haya en el Excel OC-MP para esta OT — pensado
+    para usarse después de comparar_con_excel, una vez que el usuario revisó
+    las diferencias (o automáticamente, ver
+    excel_watcher.sincronizar_automaticamente_excel). Nunca toca
+    proceso/máquina: agrega como pendientes los materiales del Excel que el
+    sistema todavía no tenga, y borra los pendientes/pedidos que el cliente
+    sacó de la fila del Excel — salvo que ya tengan movimientos reales
+    (entregas, devoluciones, materia prima o ingresos), en cuyo caso se
+    dejan sin tocar para no perder esos registros (ver
+    _eliminar_materiales_removidos_del_excel/_materiales_eliminados_del_excel,
+    "bloqueado"). Esta propiedad — nunca pisa ni pierde un movimiento real —
+    es lo que permite aplicarlo sin supervisión desde el vigilante
+    automático.
 
     `datos_excel` permite pasar una fila ya leída, igual que
     guardar_desde_excel — evita reabrir el archivo por cada OT cuando quien
@@ -379,6 +587,8 @@ def aplicar_cambios_excel(
             )
         )
 
+    _eliminar_materiales_removidos_del_excel(db, ot, datos_excel)
+
     db.commit()
     db.refresh(ot)
     return ot
@@ -386,18 +596,25 @@ def aplicar_cambios_excel(
 
 def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
     """Trae al sistema, sin intervención humana, tanto las OT nuevas del
-    Excel como los materiales/datos comerciales que se le hayan agregado a
-    una OT ya importada — pensada para el vigilante de archivo (ver
-    excel_watcher.py), que llama a esto cada vez que nota que 'oc mp' cambió
-    de tamaño o fecha de modificación.
+    Excel como los materiales/datos comerciales que se le hayan agregado (o
+    quitado) a una OT ya importada — pensada para el vigilante de archivo
+    (ver excel_watcher.py), que llama a esto cada vez que nota que 'oc mp'
+    cambió de tamaño o fecha de modificación.
 
     Es seguro hacerlo sin que nadie revise antes porque reutiliza
-    guardar_desde_excel/aplicar_cambios_excel tal cual, y ninguna de las dos
-    borra ni pisa nada existente — solo agregan lo que falta. El plan
-    original (planteado por el usuario) era avisar y dejar que alguien
-    aplique a mano, pero se decidió automatizar también la importación de OT
-    nuevas para que el personal no tenga que hacer doble trabajo (cargarlo
-    en Excel y de nuevo en el sistema).
+    guardar_desde_excel/aplicar_cambios_excel tal cual: agregan lo que falta
+    y borran los pendientes/pedidos que el cliente sacó del Excel, pero
+    NUNCA un material que ya tenga movimientos reales (entregas,
+    devoluciones, materia prima o ingresos) — ver
+    aplicar_cambios_excel/_eliminar_materiales_removidos_del_excel. Esos
+    quedan bloqueados y se avisan en el detalle, no se tocan solos. Lo mismo
+    un nivel más arriba, para una OT ENTERA que desaparece del Excel (ver
+    _procesar_ots_ausentes_del_excel) — se borra sola del sistema solo si no
+    tiene ningún movimiento real todavía. El plan original (planteado por el
+    usuario) era avisar y dejar que alguien aplique a mano, pero se decidió
+    automatizar también la importación de OT nuevas para que el personal no
+    tenga que hacer doble trabajo (cargarlo en Excel y de nuevo en el
+    sistema).
 
     Lee 'oc mp' una sola vez (leer_todas_oc_mp) y le pasa esos datos ya
     leídos a guardar_desde_excel/aplicar_cambios_excel para no reabrir el
@@ -434,7 +651,11 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
             continue
 
         comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
-        if comparacion["diferencias_comerciales"] or comparacion["materiales_nuevos"]:
+        if (
+            comparacion["diferencias_comerciales"]
+            or comparacion["materiales_nuevos"]
+            or comparacion["materiales_eliminados"]
+        ):
             aplicar_cambios_excel(db, numero_ot, datos_excel=datos_excel)
             db.add(
                 RegistroExcelAutomatico(
@@ -446,8 +667,10 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
             )
             ots_actualizadas.append(numero_ot)
 
+    ots_eliminadas = _procesar_ots_ausentes_del_excel(db, todas_excel, numeros_en_bd)
+
     db.commit()
-    return {"nuevas": ots_nuevas, "actualizadas": ots_actualizadas}
+    return {"nuevas": ots_nuevas, "actualizadas": ots_actualizadas, "eliminadas": ots_eliminadas}
 
 
 def _detalle_actualizacion_excel(comparacion: Dict[str, Any]) -> str:
@@ -460,6 +683,16 @@ def _detalle_actualizacion_excel(comparacion: Dict[str, Any]) -> str:
     if diferencias:
         etiquetas = ", ".join(d["etiqueta"] for d in diferencias)
         partes.append(f"Datos comerciales actualizados: {etiquetas}")
+    eliminados = comparacion.get("materiales_eliminados") or []
+    borrados = [m["codigo_mp"] for m in eliminados if not m.get("bloqueado")]
+    bloqueados = [m["codigo_mp"] for m in eliminados if m.get("bloqueado")]
+    if borrados:
+        partes.append(f"Material(es) eliminado(s) (ya no están en el Excel): {', '.join(borrados)}")
+    if bloqueados:
+        partes.append(
+            f"Material(es) que el Excel ya no tiene pero NO se borraron (ya tienen movimientos): "
+            f"{', '.join(bloqueados)}"
+        )
     return " · ".join(partes) or "Sin detalle"
 
 
@@ -477,41 +710,67 @@ def listar_registro_excel_automatico(db: Session, limite: int = 100) -> List[Reg
 
 
 def obtener_detalle(db: Session, numero_ot: str) -> Optional[OrdenTrabajo]:
-    return db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
+    return db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == _normalizar_numero_ot(numero_ot)))
 
 
-def _tiene_sid_registrado(ot: OrdenTrabajo) -> bool:
-    """True si algún movimiento (entrega o devolución) de esta OT ya tiene su
-    SID marcado — el SID es un trámite externo frente al ingeniero, así que
-    una vez reportado no puede desaparecer por debajo sin que él se entere."""
+def _movimientos_con_sid_registrado(ot: OrdenTrabajo) -> List[Dict[str, Any]]:
+    """Material y fecha de cada movimiento (entrega, devolución o ingreso)
+    que todavía tiene el SID marcado — el SID es un trámite externo frente
+    al ingeniero, así que una vez reportado no puede desaparecer por debajo
+    sin que él se entere. Se usa para bloquear eliminar_ot Y para decir en
+    el mensaje CUÁLES son, con su fecha: Registro SID no tiene una vista
+    "todo el historial" (solo día o mes), así que sin la fecha, encontrar a
+    mano cuál de varios materiales era el bloqueante significaba adivinar
+    en qué día/mes mirar (caso real, conversación 2026-09-17: un sobrante de
+    ZIPPER PP de dos días antes, invisible bajo el filtro de "hoy")."""
+    movimientos = []
     for ot_proceso in ot.procesos:
         for ot_material in ot_proceso.materiales:
-            if any(e.sid_completado for e in ot_material.entregas):
-                return True
-            if any(d.sid_completado for d in ot_material.devoluciones):
-                return True
+            for entrega in ot_material.entregas:
+                if entrega.sid_completado:
+                    movimientos.append({"codigo_mp": ot_material.material.codigo_mp, "fecha": entrega.fecha})
+            for devolucion in ot_material.devoluciones:
+                if devolucion.sid_completado:
+                    movimientos.append({"codigo_mp": ot_material.material.codigo_mp, "fecha": devolucion.fecha})
     for pendiente in ot.pendientes:
-        if any(d.sid_completado for d in pendiente.ingresos):
-            return True
-    return False
+        for ingreso in pendiente.ingresos:
+            if ingreso.sid_completado:
+                movimientos.append(
+                    {
+                        "codigo_mp": pendiente.material.codigo_mp if pendiente.material else pendiente.codigo_mp,
+                        "fecha": ingreso.fecha,
+                    }
+                )
+    return movimientos
 
 
-def eliminar_ot(db: Session, numero_ot: str) -> None:
-    """Borra la OT completa (procesos, pedidos, pendientes, entregas y
-    devoluciones) — solo si ningún movimiento tiene ya su SID registrado. Para
-    corregir una OT cargada por error (número equivocado, duplicada) antes de
-    que tenga algo irreversible encima; no toca el Excel OC-MP, que sigue
-    siendo del cliente."""
-    ot = obtener_detalle(db, numero_ot)
-    if ot is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+def _ot_sin_movimientos_reales(ot: OrdenTrabajo) -> bool:
+    """True si esta OT no tiene ningún movimiento real todavía (ni
+    entregas, ni devoluciones, ni materia prima, ni ingresos) en ningún
+    pedido ni pendiente — mismo criterio combinado que
+    _bloquear_si_pedido_tiene_movimientos/_bloquear_si_pendiente_tiene_movimientos,
+    pero mirando la OT entera de una. Se usa para decidir si es seguro
+    borrarla sola cuando desaparece del Excel (ver
+    _procesar_ots_ausentes_del_excel) — a diferencia de eliminar_ot (acción
+    manual, bloquea solo si el SID ya se registró), acá el listón es más
+    alto porque nadie confirma nada a mano: cualquier movimiento real, aunque
+    no tenga el SID hecho todavía, deja la OT en pie para revisión manual."""
+    for ot_proceso in ot.procesos:
+        for ot_material in ot_proceso.materiales:
+            if ot_material.entregas or ot_material.devoluciones or ot_material.insumos:
+                return False
+    for pendiente in ot.pendientes:
+        if pendiente.materias_primas or pendiente.ingresos:
+            return False
+    return True
 
-    if _tiene_sid_registrado(ot):
-        raise HTTPException(
-            status.HTTP_400_BAD_REQUEST,
-            "Esta OT ya tiene movimientos con el SID registrado — no se puede eliminar",
-        )
 
+def _borrar_estructura_ot(db: Session, ot: OrdenTrabajo) -> None:
+    """El borrado en sí de una OT (procesos, pedidos, pendientes, entregas y
+    devoluciones) sin el chequeo de SID ni el commit — separado de
+    eliminar_ot para reutilizarlo desde _procesar_ots_ausentes_del_excel,
+    que ya hizo su propio chequeo de seguridad
+    (_ot_sin_movimientos_reales) antes de llamar acá."""
     materiales = [om for otp in ot.procesos for om in otp.materiales]
     for ot_material in materiales:
         for entrega in list(ot_material.entregas):
@@ -537,7 +796,111 @@ def eliminar_ot(db: Session, numero_ot: str) -> None:
         db.delete(pendiente)
 
     db.delete(ot)
+
+
+# Si de golpe aparecen más OT "ausentes" del Excel que esto en una sola
+# pasada del vigilante, no se borra ninguna sola — ver
+# _procesar_ots_ausentes_del_excel.
+LIMITE_OTS_AUSENTES_AUTOMATICO = 3
+
+
+def _procesar_ots_ausentes_del_excel(
+    db: Session, todas_excel: Dict[str, Any], numeros_en_bd: Dict[str, OrdenTrabajo]
+) -> List[str]:
+    """OT que el sistema ya tenía sincronizadas con el Excel pero cuya fila
+    ya no está en la lectura actual — el cliente la borró en 'oc mp' (caso
+    real: OT 6321). Si no tiene ningún movimiento real todavía (ver
+    _ot_sin_movimientos_reales), se borra sola del sistema — misma regla
+    que ya se aplica a un material suyo (ver
+    _eliminar_materiales_removidos_del_excel), aplicada a la OT entera
+    cuando lo que desaparece es todo, no solo un material. Si ya tiene algo
+    real encima, se deja y solo se avisa: perder una entrega/devolución
+    real porque el Excel cambió sería peor que la inconsistencia misma.
+
+    Nunca actúa sobre uso_interno (nunca tuvieron fila en el Excel) ni sobre
+    una OT que todavía no logró sincronizarse ni una vez
+    (sincronizado_excel=False es "todavía no se escribió", no "se borró
+    después de escrita" — tratarlas igual borraría una OT recién creada
+    solo porque el Excel estaba ocupado la primera vez).
+
+    Freno de seguridad (LIMITE_OTS_AUSENTES_AUTOMATICO): si de golpe
+    aparecen varias OT "ausentes" en una sola pasada, no se borra ninguna
+    sola — eso huele más a una lectura del Excel que falló a medias
+    (archivo bloqueado, hoja mal leída) que a que el cliente haya borrado
+    varios pedidos reales de una, y arriesgar un borrado masivo por un
+    error de lectura es mucho peor que dejarlas para revisión manual."""
+    ausentes = [
+        ot
+        for numero, ot in numeros_en_bd.items()
+        if numero not in todas_excel and ot.sincronizado_excel and not ot.uso_interno
+    ]
+    if not ausentes:
+        return []
+    if len(ausentes) > LIMITE_OTS_AUSENTES_AUTOMATICO:
+        logger.warning(
+            "Vigilante Excel OC-MP: %d OT parecen haber desaparecido del Excel de una — no se borra "
+            "ninguna automáticamente, revisar a mano (números: %s)",
+            len(ausentes),
+            ", ".join(o.numero_ot for o in ausentes),
+        )
+        return []
+
+    procesadas: List[str] = []
+    for ot in ausentes:
+        numero_ot = ot.numero_ot
+        cliente = ot.cliente
+        if _ot_sin_movimientos_reales(ot):
+            _borrar_estructura_ot(db, ot)
+            detalle = "La OT se borró del Excel OC-MP y no tenía movimientos — se eliminó también del sistema."
+        else:
+            detalle = (
+                "La OT ya no está en el Excel OC-MP, pero sigue en el sistema porque ya tiene entregas, "
+                "devoluciones o materia prima registrada — revisala y borrala a mano si corresponde."
+            )
+        db.add(RegistroExcelAutomatico(numero_ot=numero_ot, cliente=cliente, tipo="eliminada", detalle=detalle))
+        procesadas.append(numero_ot)
+    return procesadas
+
+
+def eliminar_ot(db: Session, numero_ot: str, borrar_excel: bool = False) -> Dict[str, Any]:
+    """Borra la OT completa (procesos, pedidos, pendientes, entregas y
+    devoluciones) — solo si ningún movimiento tiene ya su SID registrado. Para
+    corregir una OT cargada por error (número equivocado, duplicada) antes de
+    que tenga algo irreversible encima.
+
+    Por defecto no toca el Excel OC-MP (sigue siendo del cliente) — pero si
+    borrar_excel=True, además limpia su fila en 'oc mp' (ver
+    excel_oc_mp.borrar_fila_oc_mp), a pedido explícito de quien la borra, no
+    automáticamente. Un fallo al borrar del Excel (archivo en uso, etc.)
+    NUNCA deshace el borrado ya hecho en la base de datos — la OT ya no
+    existe acá de todas formas, así que no hay nada que "revertir"; el
+    resultado solo le avisa al que llama si esa parte falló, para poder
+    reintentarlo a mano o decirle al usuario."""
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    movimientos_con_sid = _movimientos_con_sid_registrado(ot)
+    if movimientos_con_sid:
+        detalle = ", ".join(f"{m['codigo_mp']} ({m['fecha'].strftime('%d/%m/%Y')})" for m in movimientos_con_sid)
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Esta OT ya tiene movimientos con el SID registrado — no se puede eliminar. "
+            f"Desmarcalos primero en Registro SID (fijate en esa fecha): {detalle}",
+        )
+
+    numero_ot_normalizado = ot.numero_ot
+    _borrar_estructura_ot(db, ot)
     db.commit()
+
+    resultado: Dict[str, Any] = {"excel_eliminado": False, "excel_error": None}
+    if borrar_excel:
+        try:
+            excel_oc_mp.borrar_fila_oc_mp(db, numero_ot_normalizado)
+            resultado["excel_eliminado"] = True
+        except Exception as exc:
+            resultado["excel_error"] = str(exc)
+    return resultado
 
 
 def buscar_con_fallback(db: Session, numero_ot: str) -> Dict[str, Any]:
@@ -632,7 +995,7 @@ def crear_pendiente_libre(
     importado del Excel. Sirve para registrar el ingreso a almacén de un
     material fabricado que nadie cargó de antemano en la OT, sin esperar a
     que alguien la actualice."""
-    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
+    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == _normalizar_numero_ot(numero_ot)))
     if ot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
     material = db.get(Material, material_id)
@@ -947,7 +1310,7 @@ def crear_pedido_libre(
 
     No hace commit: se llama desde entregas_controller.registrar_entrega,
     dentro de la misma transacción que registra la entrega."""
-    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == numero_ot))
+    ot = db.scalar(select(OrdenTrabajo).where(OrdenTrabajo.numero_ot == _normalizar_numero_ot(numero_ot)))
     if ot is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
     if db.get(Material, material_id) is None:

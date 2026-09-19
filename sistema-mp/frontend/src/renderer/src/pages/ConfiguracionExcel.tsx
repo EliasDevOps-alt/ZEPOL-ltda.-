@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/u
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import { formatearFechaHoraCompleta } from '@renderer/lib/fechas'
+import { cn } from '@renderer/lib/utils'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 
@@ -205,13 +206,14 @@ export function ConfiguracionExcel() {
                     OT {item.numero_ot}
                     {item.cliente ? ` — ${item.cliente}` : ''}
                     <span
-                      className={
-                        item.tipo === 'nueva'
-                          ? 'ml-2 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary'
-                          : 'ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
-                      }
+                      className={cn(
+                        'ml-2 rounded-full px-2 py-0.5 text-xs font-medium',
+                        item.tipo === 'nueva' && 'bg-primary/10 text-primary',
+                        item.tipo === 'actualizada' && 'bg-muted text-muted-foreground',
+                        item.tipo === 'eliminada' && 'bg-destructive/10 text-destructive'
+                      )}
                     >
-                      {item.tipo === 'nueva' ? 'OT nueva' : 'Actualizada'}
+                      {item.tipo === 'nueva' ? 'OT nueva' : item.tipo === 'eliminada' ? 'Eliminada' : 'Actualizada'}
                     </span>
                   </p>
                   <span className="text-xs text-muted-foreground">{formatearFechaHoraCompleta(item.creado_en)}</span>

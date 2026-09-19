@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -116,6 +116,15 @@ def comparar_todas_con_excel(db: Session = Depends(get_db)):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
 
 
+@router.get(
+    "/siguiente-sot",
+    response_model=schemas.SiguienteOtSinNumeroOut,
+    dependencies=[Depends(security.requiere_modulo("crear_ot"))],
+)
+def siguiente_numero_ot_sin_asignar(tipo: Literal["muestra", "otros"], db: Session = Depends(get_db)):
+    return schemas.SiguienteOtSinNumeroOut(numero_ot=ordenes_controller.sugerir_numero_ot_sin_asignar(db, tipo))
+
+
 @router.post(
     "/detalle",
     response_model=schemas.OtDetalleOut,
@@ -137,11 +146,12 @@ def obtener_detalle(numero_ot: str, db: Session = Depends(get_db)):
 
 @router.delete(
     "/{numero_ot}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=schemas.EliminarOtOut,
     dependencies=[Depends(security.requiere_modulo("crear_ot"))],
 )
-def eliminar_ot(numero_ot: str, db: Session = Depends(get_db)):
-    ordenes_controller.eliminar_ot(db, numero_ot)
+def eliminar_ot(numero_ot: str, borrar_excel: bool = False, db: Session = Depends(get_db)):
+    resultado = ordenes_controller.eliminar_ot(db, numero_ot, borrar_excel=borrar_excel)
+    return schemas.EliminarOtOut(**resultado)
 
 
 @router.get("/{numero_ot}/buscar", response_model=schemas.OtBusquedaOut)

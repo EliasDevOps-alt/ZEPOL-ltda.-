@@ -199,6 +199,14 @@ export interface MaterialExcel {
   cantidad_requerida: number | null
 }
 
+// Un material que el sistema tenía pero el cliente borró de la fila del
+// Excel. bloqueado=true significa que ya tiene movimientos reales
+// (entregas/devoluciones/materia prima/ingresos) y no se borra solo ni con
+// "Aplicar cambios del Excel" — hay que revisarlo y borrarlo a mano.
+export interface MaterialEliminado extends MaterialExcel {
+  bloqueado: boolean
+}
+
 // Datos de una OT tal como están en la hoja "oc mp" del Excel, cuando
 // todavía no existe en la base de datos.
 export interface OtExcel extends CamposComercialesOt {
@@ -220,7 +228,7 @@ export interface RegistroExcelAutomatico {
   creado_en: string
   numero_ot: string
   cliente: string | null
-  tipo: 'nueva' | 'actualizada'
+  tipo: 'nueva' | 'actualizada' | 'eliminada'
   detalle: string
 }
 
@@ -252,6 +260,10 @@ export interface ComparacionExcel {
   encontrado_en_excel: boolean
   diferencias_comerciales: DiferenciaExcel[]
   materiales_nuevos: MaterialExcel[]
+  // Materiales que el sistema ya tiene pero que el cliente borró de la fila
+  // del Excel después de cargados. "Aplicar cambios del Excel" los borra
+  // del sistema, salvo los bloqueados (ya tienen movimientos reales).
+  materiales_eliminados: MaterialEliminado[]
 }
 
 // Una OT (de las que ya están en el sistema) con diferencias reales al
@@ -261,6 +273,7 @@ export interface ComparacionMasivaItem {
   cliente: string | null
   diferencias_comerciales: DiferenciaExcel[]
   materiales_nuevos: MaterialExcel[]
+  materiales_eliminados: MaterialEliminado[]
 }
 
 export interface MaquinaAdmin {

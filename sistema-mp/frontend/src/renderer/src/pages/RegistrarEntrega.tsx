@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Combobox } from '@renderer/components/ui/combobox'
 import { CrearMaterialDialog } from '@renderer/components/CrearMaterialDialog'
 import { CampoCantidad, hayPesoInvalido, pesosCargados, type BobinasPedido } from '@renderer/components/CampoCantidad'
+import { useConfirm } from '@renderer/components/ConfirmProvider'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -788,6 +789,7 @@ function EditarPedido({
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
 
   const [abierto, setAbierto] = useState(false)
   const [materialId, setMaterialId] = useState('')
@@ -829,8 +831,11 @@ function EditarPedido({
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
   })
 
-  function handleEliminar() {
-    if (!confirm(`¿Eliminar el pedido de ${pedido.codigo_mp}? Esta acción no se puede deshacer.`)) return
+  async function handleEliminar() {
+    const seguir = await confirmar(`¿Eliminar el pedido de ${pedido.codigo_mp}? Esta acción no se puede deshacer.`, {
+      destructivo: true
+    })
+    if (!seguir) return
     eliminar.mutate()
   }
 
@@ -1335,7 +1340,7 @@ export function RegistrarEntrega() {
                       )}
                     </span>
                     <span className="text-muted-foreground">
-                      {pedido.diseno ? `Diseño: ${pedido.diseno} · ` : ''}Entregado: {pedido.total_entregado}{' '}
+                      {pedido.diseno ? `Descripción: ${pedido.diseno} · ` : ''}Entregado: {pedido.total_entregado}{' '}
                       {pedido.unidad}
                       {pedido.cantidad_requerida ? ` de ${pedido.cantidad_requerida} requeridos` : ''}
                       {pedido.total_ingresado > 0 ? ` · Fabricado en almacén: ${pedido.total_ingresado}` : ''} ·{' '}

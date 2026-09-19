@@ -76,7 +76,7 @@ export function Consulta() {
         <Card>
           <CardContent className="p-6 pb-0 text-sm text-muted-foreground">
             {consumo.data[0].cliente ?? 'Sin cliente'}
-            {consumo.data[0].diseno ? ` · Diseño: ${consumo.data[0].diseno}` : ''}
+            {consumo.data[0].diseno ? ` · Descripción: ${consumo.data[0].diseno}` : ''}
           </CardContent>
           <CardContent className="overflow-x-auto p-0">
             <table className="w-full text-sm">

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@renderer/components/ui/select'
 import { Combobox } from '@renderer/components/ui/combobox'
 import { CampoCantidad, pesosCargados, type BobinasPedido } from '@renderer/components/CampoCantidad'
+import { useConfirm } from '@renderer/components/ConfirmProvider'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
@@ -56,6 +57,7 @@ function FilaEntrega({
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
 
   const [editando, setEditando] = useState(false)
   const [fecha, setFecha] = useState(entrega.fecha)
@@ -101,9 +103,12 @@ function FilaEntrega({
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
   })
 
-  function handleEliminar() {
-    if (!confirm(`¿Eliminar esta entrega de ${entrega.codigo_mp_entregado}? Esta acción no se puede deshacer.`))
-      return
+  async function handleEliminar() {
+    const seguir = await confirmar(
+      `¿Eliminar esta entrega de ${entrega.codigo_mp_entregado}? Esta acción no se puede deshacer.`,
+      { destructivo: true }
+    )
+    if (!seguir) return
     eliminar.mutate()
   }
 
@@ -259,6 +264,7 @@ function FilaDevolucion({
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
+  const confirmar = useConfirm()
 
   const [editando, setEditando] = useState(false)
   const [fecha, setFecha] = useState(devolucion.fecha)
@@ -291,8 +297,12 @@ function FilaDevolucion({
     onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo eliminar')
   })
 
-  function handleEliminar() {
-    if (!confirm(`¿Eliminar esta devolución de ${devolucion.codigo_mp}? Esta acción no se puede deshacer.`)) return
+  async function handleEliminar() {
+    const seguir = await confirmar(
+      `¿Eliminar esta devolución de ${devolucion.codigo_mp}? Esta acción no se puede deshacer.`,
+      { destructivo: true }
+    )
+    if (!seguir) return
     eliminar.mutate()
   }
 

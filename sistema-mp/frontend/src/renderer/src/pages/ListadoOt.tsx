@@ -339,6 +339,9 @@ function ComparacionMasivaCard() {
                             : null,
                           ot.materiales_nuevos.length > 0
                             ? `${ot.materiales_nuevos.length} material${ot.materiales_nuevos.length === 1 ? '' : 'es'} nuevo${ot.materiales_nuevos.length === 1 ? '' : 's'}`
+                            : null,
+                          ot.materiales_eliminados.length > 0
+                            ? `${ot.materiales_eliminados.length} material${ot.materiales_eliminados.length === 1 ? '' : 'es'} eliminado${ot.materiales_eliminados.length === 1 ? '' : 's'}`
                             : null
                         ]
                           .filter(Boolean)

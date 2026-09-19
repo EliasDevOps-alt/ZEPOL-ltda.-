@@ -100,7 +100,7 @@ def listar_devoluciones_por_ot(db: Session, numero_ot: Optional[str] = None) -> 
         .order_by(Devolucion.id)
     )
     if numero_ot is not None:
-        stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot)
+        stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot.strip().upper())
     return db.scalars(stmt).all()
 
 

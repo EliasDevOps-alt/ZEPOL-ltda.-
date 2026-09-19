@@ -624,3 +624,98 @@ def escribir_oc_mp(
                 )
     finally:
         pythoncom.CoUninitialize()
+
+
+def borrar_fila_oc_mp(db: Session, numero_ot: str) -> None:
+    """Borra (limpia) la fila de esta OT en 'oc mp', si existe — para cuando
+    se elimina la OT también del sistema y se pide sacarla también del
+    Excel (ver ordenes_controller.eliminar_ot, borrar_excel=True).
+
+    No borra la FILA en sí (no desplaza las de abajo hacia arriba) — vacía
+    sus celdas de datos y deja las dos columnas de fórmulas (COLS_CALCULADAS)
+    sin tocar, igual que escribir_oc_mp: al quedar sin nada en las celdas
+    que esas fórmulas suman, recalculan solas a 0/vacío. La fila libre queda
+    disponible para _primera_fila_libre como si nunca hubiera tenido datos.
+
+    Si la OT no está en el Excel (uso_interno, o nunca se sincronizó), no
+    hace nada — no es un error, no hay fila que borrar.
+
+    Mismo manejo de Excel real vía COM que escribir_oc_mp, y las mismas
+    excepciones (ExcelBloqueadoError / ExcelEscrituraError)."""
+    ruta = obtener_ruta_configurada(db)
+    if not ruta:
+        raise ExcelEscrituraError("No hay ruta configurada para el Excel OC-MP")
+
+    password = obtener_password_configurada(db)
+
+    import pythoncom
+    import win32com.client
+
+    pythoncom.CoInitialize()
+    try:
+        try:
+            excel = win32com.client.DispatchEx("Excel.Application")
+        except Exception as exc:
+            raise ExcelEscrituraError(f"No se pudo iniciar Excel: {exc}") from exc
+
+        excel.Visible = False
+        excel.DisplayAlerts = False
+        excel.AskToUpdateLinks = False
+        try:
+            try:
+                wb = _con_reintentos(
+                    lambda: excel.Workbooks.Open(ruta, UpdateLinks=0, Password=password, ReadOnly=False)
+                )
+            except Exception as exc:
+                raise ExcelBloqueadoError(
+                    f"No se pudo abrir el archivo (¿está en uso en otro lado?): {exc}"
+                ) from exc
+
+            try:
+                try:
+                    _con_reintentos(lambda: setattr(excel, "Calculation", -4135))  # xlCalculationManual
+                except Exception:
+                    pass  # optimización best-effort, no es fatal si falla
+
+                if _con_reintentos(lambda: wb.ReadOnly):
+                    raise ExcelBloqueadoError("El archivo está abierto en otra sesión (se abrió de solo lectura)")
+
+                try:
+                    ws = _con_reintentos(lambda: wb.Worksheets(HOJA))
+                except Exception as exc:
+                    raise ExcelEscrituraError(f"No se encontró la hoja '{HOJA}': {exc}") from exc
+
+                fila = _con_reintentos(lambda: _buscar_fila_por_ot(ws, numero_ot))
+                if fila is None:
+                    return
+
+                def _limpiar_celdas() -> None:
+                    ws.Cells(fila, COL_OT).Value = None
+                    ws.Cells(fila, COL_CLIENTE).Value = None
+                    for col in CAMPOS_A_COLUMNAS.values():
+                        ws.Cells(fila, col).Value = None
+                    for col_codigo, col_cantidad in COLS_MATERIALES:
+                        ws.Cells(fila, col_codigo).Value = None
+                        ws.Cells(fila, col_cantidad).Value = None
+
+                # Reintentable sin riesgo: limpiar una celda ya vacía no cambia nada.
+                _con_reintentos(_limpiar_celdas)
+
+                try:
+                    _con_reintentos(wb.Save)
+                except Exception as exc:
+                    raise ExcelBloqueadoError(f"No se pudo guardar (¿está en uso en otro lado?): {exc}") from exc
+            finally:
+                try:
+                    _con_reintentos(lambda: wb.Close(SaveChanges=False), intentos=5, espera=2.0)
+                except Exception:
+                    logger.exception("No se pudo cerrar el libro de Excel limpiamente tras borrar_fila_oc_mp")
+        finally:
+            try:
+                _con_reintentos(excel.Quit, intentos=5, espera=2.0)
+            except Exception:
+                logger.exception(
+                    "No se pudo cerrar Excel limpiamente tras borrar_fila_oc_mp — puede quedar EXCEL.EXE huérfano"
+                )
+    finally:
+        pythoncom.CoUninitialize()

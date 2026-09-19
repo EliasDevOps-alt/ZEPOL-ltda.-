@@ -13,7 +13,7 @@ import { cn } from '@renderer/lib/utils'
 import { formatearFechaHora, formatearFechaHoraCompleta, hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
-type ModoFecha = 'dia' | 'mes'
+type ModoFecha = 'dia' | 'mes' | 'todos'
 type Pestana = 'entregados' | 'devueltos' | 'ingresados' | 'todos'
 type Filtro = 'pendientes' | 'completados' | 'todos'
 
@@ -76,7 +76,9 @@ export function RegistroSid() {
 
   function cambiarModoFecha(modo: ModoFecha) {
     setModoFecha(modo)
-    setFecha(modo === 'dia' ? hoyISO() : mesActualISO())
+    if (modo === 'dia') setFecha(hoyISO())
+    else if (modo === 'mes') setFecha(mesActualISO())
+    else setFecha('')
   }
 
   const pedidos = useQuery({
@@ -126,7 +128,7 @@ export function RegistroSid() {
       mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
     }
     return mapa
-  }, [devoluciones.data])
+  }, [devolucionesEnRango])
 
   // Material fabricado en la OT entrando a almacén — con pedido ya asignado o
   // todavía como pendiente suelto (ver crear_pendiente_libre). Un pendiente
@@ -346,14 +348,28 @@ export function RegistroSid() {
               >
                 Mes
               </button>
+              <button
+                type="button"
+                onClick={() => cambiarModoFecha('todos')}
+                className={cn(
+                  'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                  modoFecha === 'todos'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                Todos
+              </button>
             </div>
 
-            <Input
-              type={modoFecha === 'dia' ? 'date' : 'month'}
-              value={fecha}
-              onChange={(e) => setFecha(e.target.value)}
-              className="w-auto"
-            />
+            {modoFecha !== 'todos' && (
+              <Input
+                type={modoFecha === 'dia' ? 'date' : 'month'}
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                className="w-auto"
+              />
+            )}
 
             {(q || fecha) && (
               <button

@@ -51,13 +51,16 @@ def _revisar_una_vez(ultimo_estado: Optional[EstadoArchivo]) -> Optional[EstadoA
             logger.exception("Vigilante Excel OC-MP: fallo al sincronizar, se reintenta en el próximo chequeo")
             return ultimo_estado
 
-        if resultado["nuevas"] or resultado["actualizadas"]:
+        if resultado["nuevas"] or resultado["actualizadas"] or resultado["eliminadas"]:
             logger.info(
-                "Vigilante Excel OC-MP: %d OT nueva(s) importada(s) (%s), %d OT actualizada(s) (%s)",
+                "Vigilante Excel OC-MP: %d OT nueva(s) importada(s) (%s), %d OT actualizada(s) (%s), "
+                "%d OT ausente(s) del Excel procesada(s) (%s)",
                 len(resultado["nuevas"]),
                 ", ".join(resultado["nuevas"]) or "-",
                 len(resultado["actualizadas"]),
                 ", ".join(resultado["actualizadas"]) or "-",
+                len(resultado["eliminadas"]),
+                ", ".join(resultado["eliminadas"]) or "-",
             )
         return estado_actual
     finally:
