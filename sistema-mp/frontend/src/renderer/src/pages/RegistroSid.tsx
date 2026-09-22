@@ -652,7 +652,7 @@ function BloqueIngresoMaterial({
         <CeldaCopiable texto={ordenados[0].codigo_mp} />
         {ordenados[0].ot_material_id == null && (
           <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-            SID ingreso · sin registro de entrega
+            SID ingreso
           </span>
         )}
       </p>

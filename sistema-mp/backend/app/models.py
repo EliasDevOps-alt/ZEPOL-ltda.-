@@ -301,6 +301,14 @@ class OtMaterialPendiente(Base):
     codigo_mp: Mapped[str] = mapped_column(String(50))
     material_id: Mapped[Optional[int]] = mapped_column(ForeignKey("materiales.id"))
     cantidad_requerida: Mapped[Optional[float]] = mapped_column(Numeric(10, 2))
+    # TRUE = creado desde "Registrar ingreso" (Registrar Devolución) para un
+    # material que la OT no pedía de ninguna forma — no vino del Excel, así
+    # que no tiene que aparecer en la tarjeta de "pendientes de asignar" de
+    # Registrar Entrega (eso lo confundía con algo que la OT sí pidió y que
+    # hay que promover). Sigue existiendo para más tandas de ingreso y para
+    # Registro SID; si más adelante hay que entregarlo a un proceso, se usa
+    # "Entregar un material que la OT no tiene", sin relación con esto.
+    origen_libre: Mapped[bool] = mapped_column(Boolean, server_default="false", default=False)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot: Mapped["OrdenTrabajo"] = relationship(back_populates="pendientes")

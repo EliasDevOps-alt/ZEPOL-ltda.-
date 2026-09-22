@@ -49,6 +49,7 @@ def _serializar_pendiente(p: OtMaterialPendiente) -> schemas.OtMaterialPendiente
         es_tinta=p.material.es_tinta if p.material is not None else False,
         materias_primas=[mp.material.codigo_mp for mp in p.materias_primas],
         total_ingresado=total_ingresado_pendiente(p),
+        origen_libre=p.origen_libre,
     )
 
 

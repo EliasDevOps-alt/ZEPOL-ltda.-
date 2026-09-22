@@ -458,6 +458,20 @@ export function Historial() {
     return mapa
   }, [devoluciones.data])
 
+  // Ingresos de material fabricado que todavía no tienen pedido asignado
+  // (ver "Registrar ingreso" en Registrar Devolución) — sin esto, un ingreso
+  // así quedaba completamente invisible en Historial, igual que pasaba antes
+  // con Registro SID (ver RegistroSid.tsx, "Ingresados"/"Todos"). Se agrupan
+  // por OT y, dentro, por material.
+  const ingresosSueltosPorOt = useMemo(() => {
+    const mapa = new Map<string, Devolucion[]>()
+    for (const d of devoluciones.data ?? []) {
+      if (!d.es_ingreso_produccion || d.ot_material_id != null) continue
+      mapa.set(d.numero_ot, [...(mapa.get(d.numero_ot) ?? []), d])
+    }
+    return mapa
+  }, [devoluciones.data])
+
   function buscar(e: FormEvent) {
     e.preventDefault()
     ordenes.refetch()
@@ -497,6 +511,9 @@ export function Historial() {
       <div className="flex flex-col gap-8">
         {ordenes.data?.map((ot) => {
           const pedidos = consumoPorOt.get(ot.numero_ot) ?? []
+          const sueltos = ingresosSueltosPorOt.get(ot.numero_ot) ?? []
+          const sueltosPorMaterial = new Map<number, Devolucion[]>()
+          for (const d of sueltos) sueltosPorMaterial.set(d.material_id, [...(sueltosPorMaterial.get(d.material_id) ?? []), d])
           return (
             <div key={ot.id}>
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2 border-b border-border pb-2">
@@ -512,11 +529,41 @@ export function Historial() {
                 </p>
               </div>
 
-              {pedidos.length === 0 && (
+              {pedidos.length === 0 && sueltos.length === 0 && (
                 <p className="text-sm text-muted-foreground">Esta OT todavía no tiene materiales entregados.</p>
               )}
 
               <div className="flex flex-col gap-4">
+                {[...sueltosPorMaterial.values()].map((movimientos) => (
+                  <Card key={`suelto-${movimientos[0].material_id}`}>
+                    <CardHeader>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CardTitle className="text-base">{movimientos[0].codigo_mp}</CardTitle>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                          material fabricado
+                        </span>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                        <PackageX className="h-3.5 w-3.5" />
+                        Ingresos ({movimientos.length})
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {movimientos.map((d) => (
+                          <FilaDevolucion
+                            key={d.id}
+                            devolucion={d}
+                            pedidoUnidad={d.unidad}
+                            materiales={materiales.data ?? []}
+                            materialOptions={materialOptions}
+                            onCambiado={alCorregirMovimiento}
+                          />
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
                 {pedidos.map((pedido) => {
                   const susEntregas = entregasPorPedido.get(pedido.ot_material_id) ?? []
                   const susDevoluciones = devolucionesPorPedido.get(pedido.ot_material_id) ?? []

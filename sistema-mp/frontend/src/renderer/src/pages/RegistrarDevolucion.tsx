@@ -205,39 +205,29 @@ function PendienteIngresoCard({
 }
 
 /** Contraparte de EntregaLibreForm (Registrar Entrega) — un material
- * fabricado que entra a almacén. Nunca crea un pedido/pendiente si el
- * material YA está en la OT de cualquier forma:
- * 1. Un pendiente sin resolver con otro código (ej. el Excel pide
- *    "LDPE40670" y producción entrega LDPE-3) — se le asigna el material,
- *    sin tocar su código de Excel ni la fila del Excel.
- * 2. Un pedido real ya asignado a un proceso (típicamente materia prima
- *    entregada a un proceso como Extrusión, y lo que sale de ahí vuelve
- *    como ingreso) — el ingreso va contra ESE pedido.
- * 3. Recién si no es ninguno de los dos ("Es un material nuevo"), crea un
- *    pendiente suelto — mismo caso que EntregaLibreForm del lado de
- *    Registrar Entrega, pero sin proceso ni máquina a propósito: esto es
- *    producción → almacén, y almacén no tiene máquinas.
- * El backend hace la misma verificación (ver
- * ordenes_controller.resolver_ingreso_libre) — el Select de acá es solo
- * para no tener que escribir el material dos veces cuando ya se sabe a
- * cuál pendiente sin resolver corresponde; "Es un material nuevo" pasa
- * igual por ese resolver, así que tampoco duplica un pedido real. */
+ * fabricado que entra a almacén. Es solo un registro: material + cantidad,
+ * sin preguntar nada más. Si el material ya es un pedido real de esta OT
+ * (típicamente materia prima ya entregada y promovida a un proceso), el
+ * backend lo detecta y registra el ingreso contra ESE pedido en vez de
+ * crear uno nuevo (ver ordenes_controller.resolver_ingreso_libre) — pero
+ * eso pasa solo contra pedidos YA asignados a un proceso, nunca contra un
+ * pendiente del Excel sin resolver (ese se resuelve aparte, en Registrar
+ * Entrega, al promoverlo — no acá). Si no hay pedido real, crea un
+ * pendiente "suelto" que no vuelve a aparecer como si necesitara acción en
+ * Registrar Entrega (ver OtMaterialPendiente.origen_libre); para entregarlo
+ * después se usa "Entregar un material que la OT no tiene", sin relación
+ * con este ingreso. */
 function IngresoLibreForm({
   numeroOt,
   fecha,
   materiales,
   materialOptions,
-  pendientesSinResolver,
   onRegistrado
 }: {
   numeroOt: string
   fecha: string
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
-  // Materiales que la OT ya pide (vienen del Excel) pero cuyo código no
-  // coincide con ningún material del catálogo — ej. "LDPE40670", el código
-  // con que producción entrega algo que en almacén es LDPE-3.
-  pendientesSinResolver: OtMaterialPendiente[]
   onRegistrado: (devolucion: Devolucion) => void
 }) {
   const { apiBaseUrl } = useConfig()
@@ -246,47 +236,22 @@ function IngresoLibreForm({
 
   const [abierto, setAbierto] = useState(false)
   const [materialId, setMaterialId] = useState('')
-  // A qué material ya pedido en la OT corresponde este ingreso: el id de un
-  // pendiente sin resolver, "nuevo" (no está en la OT, o hay que dejar que
-  // el backend decida) o '' (todavía sin elegir). Con exactamente uno sin
-  // resolver se preselecciona; con varios se obliga a elegir, porque
-  // equivocarse asignaría el ingreso a otro pedido.
-  const [pendienteElegido, setPendienteElegido] = useState('')
   const [datos, setDatos] = useState<BobinasPedido>({ bobinas: [] })
   const [error, setError] = useState<string | null>(null)
 
   const material = materiales.find((m) => String(m.id) === materialId)
-  const eleccion =
-    pendienteElegido || (pendientesSinResolver.length === 1 ? String(pendientesSinResolver[0].id) : '')
 
   const registrar = useMutation({
     mutationFn: async () => {
-      const esPendienteSinResolver = eleccion && eleccion !== 'nuevo'
-      let pendienteId: number | null = null
-      let otMaterialId: number | null = null
-
-      if (esPendienteSinResolver) {
-        // El ingreso es de un material que la OT YA pide con otro código:
-        // se le asigna el material del catálogo a ese pendiente (sin tocar
-        // su código de Excel, su cantidad ni la fila del Excel).
-        pendienteId = Number(eleccion)
-        await api.asignarMaterialAPendiente(apiBaseUrl, token, pendienteId, Number(materialId))
-      } else {
-        // El backend reutiliza el pedido o pendiente que la OT YA tenga
-        // para este material (ej. ya entregado como materia prima a
-        // Extrusión) y solo crea uno nuevo si de verdad no existe.
-        const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
-        const resultado = await api.resolverIngresoLibre(apiBaseUrl, token, numeroOt, {
-          material_id: Number(materialId),
-          cantidad_requerida: cantidadTotal
-        })
-        otMaterialId = resultado.ot_material_id
-        pendienteId = resultado.pendiente_id
-      }
+      const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+      const resultado = await api.resolverIngresoLibre(apiBaseUrl, token, numeroOt, {
+        material_id: Number(materialId),
+        cantidad_requerida: cantidadTotal
+      })
 
       return api.registrarDevolucion(apiBaseUrl, token, {
-        ot_material_id: otMaterialId ?? undefined,
-        pendiente_id: pendienteId ?? undefined,
+        ot_material_id: resultado.ot_material_id ?? undefined,
+        pendiente_id: resultado.pendiente_id ?? undefined,
         material_id: Number(materialId),
         fecha,
         bobinas: pesosCargados(datos),
@@ -296,7 +261,6 @@ function IngresoLibreForm({
     onSuccess: (devolucion) => {
       setAbierto(false)
       setMaterialId('')
-      setPendienteElegido('')
       setDatos({ bobinas: [] })
       setError(null)
       onRegistrado(devolucion)
@@ -308,10 +272,6 @@ function IngresoLibreForm({
     e.preventDefault()
     if (!materialId) {
       setError('Elegí qué material está entrando a almacén')
-      return
-    }
-    if (pendientesSinResolver.length > 0 && !eleccion) {
-      setError('Elegí a qué material de la OT corresponde, o "Es un material nuevo"')
       return
     }
     if (pesosCargados(datos).length === 0 || hayPesoInvalido(datos)) {
@@ -334,9 +294,7 @@ function IngresoLibreForm({
   return (
     <form onSubmit={handleSubmit} className="mb-4 rounded-md border border-warning/40 bg-warning/5 p-4">
       <p className="mb-2 text-xs text-muted-foreground">
-        Para un material fabricado que entra a almacén — no es un sobrante. Si ya es un pedido de esta OT (por
-        ejemplo, materia prima entregada a un proceso), se registra contra ese mismo pedido en vez de crear uno
-        nuevo.
+        Para un material fabricado que entra a almacén — no es un sobrante.
       </p>
       <div className="flex flex-col gap-2">
         <Combobox
@@ -346,29 +304,6 @@ function IngresoLibreForm({
           placeholder="Buscar código MP..."
           emptyText="Sin materiales activos que coincidan"
         />
-        {pendientesSinResolver.length > 0 && (
-          <div className="flex flex-col gap-1">
-            <Label className="text-xs">¿Corresponde a un material que ya pide la OT?</Label>
-            <Select value={eleccion} onValueChange={setPendienteElegido}>
-              <SelectTrigger>
-                <SelectValue placeholder="Elegí uno..." />
-              </SelectTrigger>
-              <SelectContent>
-                {pendientesSinResolver.map((p) => (
-                  <SelectItem key={p.id} value={String(p.id)}>
-                    {p.codigo_mp}
-                    {p.cantidad_requerida != null ? ` — pedido: ${p.cantidad_requerida}` : ''}
-                  </SelectItem>
-                ))}
-                <SelectItem value="nuevo">Es un material nuevo (no está en la OT)</SelectItem>
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Ej.: el Excel pide LDPE40670 y producción entrega LDPE-3 — así queda asignado a ese pedido y no se
-              crea un material duplicado en Registrar Entrega.
-            </p>
-          </div>
-        )}
         <CampoCantidad
           unidad={material?.unidad ?? ''}
           usaBobinas={material?.usa_bobinas ?? true}
@@ -901,7 +836,6 @@ export function RegistrarDevolucion() {
                 fecha={fecha}
                 materiales={materiales.data ?? []}
                 materialOptions={materialOptions}
-                pendientesSinResolver={(pendientes.data ?? []).filter((p) => !p.es_tinta && p.material_id == null)}
                 onRegistrado={alRegistrarIngresoLibre}
               />
             </div>

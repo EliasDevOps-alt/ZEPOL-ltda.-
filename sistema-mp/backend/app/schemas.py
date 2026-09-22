@@ -193,6 +193,11 @@ class OtMaterialPendienteOut(BaseModel):
     material_id: Optional[int]
     cantidad_requerida: Optional[float]
     es_tinta: bool
+    # TRUE = no vino del Excel, se creó desde "Registrar ingreso" para un
+    # material que la OT no pedía de ninguna forma — el frontend lo usa para
+    # NO mostrarlo en la tarjeta de "pendientes de asignar" de Registrar
+    # Entrega (ver ordenes_controller.crear_pendiente_libre).
+    origen_libre: bool = False
     # Materia prima ya entregada para fabricar este material, mientras el
     # pendiente sigue sin proceso asignado. Códigos, para poder mostrarlos sin
     # otra consulta.

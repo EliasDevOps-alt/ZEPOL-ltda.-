@@ -1101,7 +1101,11 @@ def crear_pendiente_libre(
         return pendiente
 
     pendiente = OtMaterialPendiente(
-        ot_id=ot.id, codigo_mp=material.codigo_mp, material_id=material_id, cantidad_requerida=cantidad_requerida
+        ot_id=ot.id,
+        codigo_mp=material.codigo_mp,
+        material_id=material_id,
+        cantidad_requerida=cantidad_requerida,
+        origen_libre=True,
     )
     db.add(pendiente)
     db.commit()

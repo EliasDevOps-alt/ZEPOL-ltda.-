@@ -177,6 +177,10 @@ export interface OtMaterialPendiente {
   materias_primas: string[]
   // Cuánto de este material ya entró a almacén fabricado, sin pedido todavía.
   total_ingresado: number
+  // TRUE = no vino del Excel, se creó desde "Registrar ingreso" para un
+  // material que la OT no pedía de ninguna forma — no se muestra en la
+  // tarjeta de "pendientes de asignar" de Registrar Entrega.
+  origen_libre: boolean
 }
 
 export interface OtImportada {

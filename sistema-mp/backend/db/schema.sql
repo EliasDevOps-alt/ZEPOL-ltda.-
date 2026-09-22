@@ -220,6 +220,11 @@ CREATE TABLE ot_materiales_pendientes (
     codigo_mp           VARCHAR(50) NOT NULL,     -- tal cual viene del Excel
     material_id         INTEGER   REFERENCES materiales(id),  -- NULL si el código no calza con el catálogo
     cantidad_requerida  NUMERIC(10,2),
+    -- TRUE = creado desde "Registrar ingreso" (Registrar Devolución) para un
+    -- material que la OT no pedía de ninguna forma, no vino del Excel — no
+    -- tiene que aparecer en la tarjeta de "pendientes de asignar" de
+    -- Registrar Entrega (ver ordenes_controller.crear_pendiente_libre).
+    origen_libre        BOOLEAN   NOT NULL DEFAULT FALSE,
     creado_en           TIMESTAMP NOT NULL DEFAULT now()
 );
 -- ot_materiales se declara antes que esta tabla, así que su FK hacia acá va

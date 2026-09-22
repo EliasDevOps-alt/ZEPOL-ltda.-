@@ -31,7 +31,22 @@
   --color-accent-blue: #2f5fd1;
 }
 
+/* Sin esto, html/body/#root no tienen altura y se achican al tamaño del
+   contenido en vez de llenar la ventana — en una ventana más alta que el
+   contenido (PC de escritorio, pantallas grandes, portátiles con distinta
+   resolución) quedaba un espacio gris sin pintar debajo, con scroll de toda
+   la página en vez de solo el panel principal (ver Layout.tsx: el div raíz
+   usa h-screen y <main> ya tiene su propio overflow-y-auto — el scroll de
+   toda la página es lo que rompía eso). */
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
+  margin: 0;
+  overflow: hidden;
   background-color: var(--color-background);
   color: var(--color-foreground);
 }

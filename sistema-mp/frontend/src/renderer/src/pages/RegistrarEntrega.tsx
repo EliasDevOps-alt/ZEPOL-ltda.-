@@ -1039,6 +1039,18 @@ export function RegistrarEntrega() {
   // en planta — se registran en Crear OT, pero no aparecen aquí.
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
   const pendientesVisibles = useMemo(() => pendientes.data?.filter((p) => !p.es_tinta), [pendientes.data])
+  // Un pendiente "suelto" (creado desde "Registrar ingreso" en Registrar
+  // Devolución, ver crear_pendiente_libre) no vino del Excel y no representa
+  // algo que la OT pidió — mostrarlo en la tarjeta de "pendientes de
+  // asignar" lo hacía ver como si necesitara la misma promoción proceso +
+  // máquina que un pendiente real, cuando en realidad ya es un registro
+  // cerrado (se puede seguir sumando más tandas desde Registrar Devolución,
+  // o entregarlo aparte con "Entregar un material que la OT no tiene" — sin
+  // relación con esto).
+  const pendientesParaAsignar = useMemo(
+    () => pendientesVisibles?.filter((p) => !p.origen_libre),
+    [pendientesVisibles]
+  )
 
   const procesos = useQuery({ queryKey: ['procesos'], queryFn: () => api.listarProcesos(apiBaseUrl, token) })
   const materiales = useQuery({ queryKey: ['materiales'], queryFn: () => api.listarMateriales(apiBaseUrl, token) })
@@ -1383,7 +1395,7 @@ export function RegistrarEntrega() {
         </Card>
       )}
 
-      {pendientesVisibles && pendientesVisibles.length > 0 && (
+      {pendientesParaAsignar && pendientesParaAsignar.length > 0 && (
         <Card className="mb-6">
           <CardHeader>
             <CardTitle>Materiales pendientes de asignar (vienen del Excel)</CardTitle>
@@ -1397,7 +1409,7 @@ export function RegistrarEntrega() {
               <Label>Fecha</Label>
               <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} className="max-w-40" />
             </div>
-            {pendientesVisibles.map((pendiente) => (
+            {pendientesParaAsignar.map((pendiente) => (
               <PendienteCard
                 key={pendiente.id}
                 pendiente={pendiente}
