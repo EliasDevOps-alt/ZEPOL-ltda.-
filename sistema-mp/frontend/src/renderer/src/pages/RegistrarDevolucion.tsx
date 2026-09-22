@@ -216,12 +216,17 @@ function IngresoLibreForm({
   fecha,
   materiales,
   materialOptions,
+  pendientesSinResolver,
   onRegistrado
 }: {
   numeroOt: string
   fecha: string
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
+  // Materiales que la OT ya pide (vienen del Excel) pero cuyo código no
+  // coincide con ningún material del catálogo — ej. "LDPE40670", el código
+  // con que producción entrega algo que en almacén es LDPE-3.
+  pendientesSinResolver: OtMaterialPendiente[]
   onRegistrado: (devolucion: Devolucion) => void
 }) {
   const { apiBaseUrl } = useConfig()
@@ -230,20 +235,39 @@ function IngresoLibreForm({
 
   const [abierto, setAbierto] = useState(false)
   const [materialId, setMaterialId] = useState('')
+  // A qué material ya pedido en la OT corresponde este ingreso: el id de un
+  // pendiente, "nuevo" (no está en la OT) o '' (todavía sin elegir). Con
+  // exactamente uno sin resolver se preselecciona; con varios se obliga a
+  // elegir, porque equivocarse asignaría el ingreso a otro pedido.
+  const [pendienteElegido, setPendienteElegido] = useState('')
   const [datos, setDatos] = useState<BobinasPedido>({ bobinas: [] })
   const [error, setError] = useState<string | null>(null)
 
   const material = materiales.find((m) => String(m.id) === materialId)
+  const eleccion =
+    pendienteElegido || (pendientesSinResolver.length === 1 ? String(pendientesSinResolver[0].id) : '')
 
   const registrar = useMutation({
     mutationFn: async () => {
-      const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
-      const pendiente = await api.crearPendienteLibre(apiBaseUrl, token, numeroOt, {
-        material_id: Number(materialId),
-        cantidad_requerida: cantidadTotal
-      })
+      let pendienteId: number
+      if (eleccion && eleccion !== 'nuevo') {
+        // El ingreso es de un material que la OT YA pide con otro código:
+        // se le asigna el material del catálogo a ese pendiente (sin tocar
+        // su código de Excel, su cantidad ni la fila del Excel) en vez de
+        // crear uno duplicado, que después aparecía como un material más en
+        // Registrar Entrega.
+        pendienteId = Number(eleccion)
+        await api.asignarMaterialAPendiente(apiBaseUrl, token, pendienteId, Number(materialId))
+      } else {
+        const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+        const pendiente = await api.crearPendienteLibre(apiBaseUrl, token, numeroOt, {
+          material_id: Number(materialId),
+          cantidad_requerida: cantidadTotal
+        })
+        pendienteId = pendiente.id
+      }
       return api.registrarDevolucion(apiBaseUrl, token, {
-        pendiente_id: pendiente.id,
+        pendiente_id: pendienteId,
         material_id: Number(materialId),
         fecha,
         bobinas: pesosCargados(datos),
@@ -253,6 +277,7 @@ function IngresoLibreForm({
     onSuccess: (devolucion) => {
       setAbierto(false)
       setMaterialId('')
+      setPendienteElegido('')
       setDatos({ bobinas: [] })
       setError(null)
       onRegistrado(devolucion)
@@ -264,6 +289,10 @@ function IngresoLibreForm({
     e.preventDefault()
     if (!materialId) {
       setError('Elegí qué material está entrando a almacén')
+      return
+    }
+    if (pendientesSinResolver.length > 0 && !eleccion) {
+      setError('Elegí a qué material de la OT corresponde, o "Es un material nuevo"')
       return
     }
     if (pesosCargados(datos).length === 0 || hayPesoInvalido(datos)) {
@@ -296,6 +325,29 @@ function IngresoLibreForm({
           placeholder="Buscar código MP..."
           emptyText="Sin materiales activos que coincidan"
         />
+        {pendientesSinResolver.length > 0 && (
+          <div className="flex flex-col gap-1">
+            <Label className="text-xs">¿Corresponde a un material que ya pide la OT?</Label>
+            <Select value={eleccion} onValueChange={setPendienteElegido}>
+              <SelectTrigger>
+                <SelectValue placeholder="Elegí uno..." />
+              </SelectTrigger>
+              <SelectContent>
+                {pendientesSinResolver.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.codigo_mp}
+                    {p.cantidad_requerida != null ? ` — pedido: ${p.cantidad_requerida}` : ''}
+                  </SelectItem>
+                ))}
+                <SelectItem value="nuevo">Es un material nuevo (no está en la OT)</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Ej.: el Excel pide LDPE40670 y producción entrega LDPE-3 — así queda asignado a ese pedido y no se
+              crea un material duplicado en Registrar Entrega.
+            </p>
+          </div>
+        )}
         <CampoCantidad
           unidad={material?.unidad ?? ''}
           usaBobinas={material?.usa_bobinas ?? true}
@@ -828,6 +880,7 @@ export function RegistrarDevolucion() {
                 fecha={fecha}
                 materiales={materiales.data ?? []}
                 materialOptions={materialOptions}
+                pendientesSinResolver={(pendientes.data ?? []).filter((p) => !p.es_tinta && p.material_id == null)}
                 onRegistrado={alRegistrarIngresoLibre}
               />
             </div>

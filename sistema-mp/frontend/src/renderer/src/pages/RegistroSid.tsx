@@ -144,6 +144,37 @@ export function RegistroSid() {
     for (const d of ingresosEnRango) mapa.set(d.numero_ot, [...(mapa.get(d.numero_ot) ?? []), d])
     return mapa
   }, [ingresosEnRango])
+
+  // Los ingresos sin pedido (pendiente suelto) tampoco salen en /consumo, así
+  // que en "Todos" se cuelgan de la tarjeta de su OT aparte de los pedidos. Los
+  // que sí tienen pedido ya se muestran dentro de la fila de ese material.
+  const ingresosSueltos = useMemo(() => ingresos.filter((d) => d.ot_material_id == null), [ingresos])
+  const ingresosSueltosPorOt = useMemo(() => {
+    const mapa = new Map<string, Devolucion[]>()
+    for (const d of ingresosSueltos) {
+      if (desde && !(d.fecha >= desde && d.fecha <= hasta)) continue
+      mapa.set(d.numero_ot, [...(mapa.get(d.numero_ot) ?? []), d])
+    }
+    return mapa
+  }, [ingresosSueltos, desde, hasta])
+  // Completo se mide sobre toda la historia, no sobre el rango elegido — igual
+  // que en el resto de las pestañas.
+  const ingresosSueltosCompletoPorOt = useMemo(() => {
+    const mapa = new Map<string, boolean>()
+    for (const d of ingresosSueltos) mapa.set(d.numero_ot, (mapa.get(d.numero_ot) ?? true) && d.sid_completado)
+    return mapa
+  }, [ingresosSueltos])
+
+  // Todas las devoluciones de cada pedido sin el filtro de fecha — para que el
+  // "Completo/Pendiente" de cada sección no dependa del día que se está viendo.
+  const devolucionesTodasPorPedido = useMemo(() => {
+    const mapa = new Map<number, Devolucion[]>()
+    for (const d of devoluciones.data ?? []) {
+      if (d.ot_material_id == null) continue
+      mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
+    }
+    return mapa
+  }, [devoluciones.data])
   // Completo = TODOS los ingresos de esa OT (de toda la historia, no solo los
   // del rango de fecha elegido) ya tienen su check — mismo criterio que
   // entregados/devueltos.
@@ -270,13 +301,43 @@ export function RegistroSid() {
       }
       mapa.get(p.numero_ot)!.push(p)
     }
+    // En "Todos", una OT que solo tiene ingresos sin pedido (nada en /consumo)
+    // también tiene que aparecer — si no, esos ingresos quedaban visibles solo
+    // en la pestaña "Ingresados".
+    if (pestana === 'todos') {
+      const needle = q.trim().toLowerCase()
+      for (const numeroOt of ingresosSueltosPorOt.keys()) {
+        if (mapa.has(numeroOt)) continue
+        if (needle && !numeroOt.toLowerCase().includes(needle)) continue
+        const completoSueltos = ingresosSueltosCompletoPorOt.get(numeroOt) ?? false
+        if (filtro === 'completados' && !completoSueltos) continue
+        if (filtro === 'pendientes' && completoSueltos) continue
+        mapa.set(numeroOt, [])
+        orden.push(numeroOt)
+      }
+    }
     return orden.map((numeroOt) => {
       const todosVisiblesDeLaOt = visiblesPorOt.get(numeroOt) ?? []
       const todosPresentes = todosVisiblesDeLaOt.length === (totalPorOt.get(numeroOt) ?? 0)
       const todosCompletados = todosVisiblesDeLaOt.every((p) => estaCompletado(p, pestana))
-      return { numeroOt, pedidos: mapa.get(numeroOt)!, completo: todosPresentes && todosCompletados }
+      const sueltosCompletos = pestana === 'todos' ? (ingresosSueltosCompletoPorOt.get(numeroOt) ?? true) : true
+      return {
+        numeroOt,
+        pedidos: mapa.get(numeroOt)!,
+        completo: todosPresentes && todosCompletados && sueltosCompletos,
+        ingresosSueltos: pestana === 'todos' ? (ingresosSueltosPorOt.get(numeroOt) ?? []) : []
+      }
     })
-  }, [filtrados, visiblesPorOt, totalPorOt, pestana])
+  }, [
+    filtrados,
+    visiblesPorOt,
+    totalPorOt,
+    pestana,
+    q,
+    filtro,
+    ingresosSueltosPorOt,
+    ingresosSueltosCompletoPorOt
+  ])
 
   return (
     <div>
@@ -418,10 +479,12 @@ export function RegistroSid() {
                 key={grupo.numeroOt}
                 numeroOt={grupo.numeroOt}
                 pedidos={grupo.pedidos}
+                ingresosSueltos={grupo.ingresosSueltos}
                 completo={grupo.completo}
                 pestana={pestana}
                 entregasPorPedido={entregasPorPedido}
                 devolucionesPorPedido={devolucionesPorPedido}
+                devolucionesTodasPorPedido={devolucionesTodasPorPedido}
                 marcarEntregaSid={marcarEntregaSid}
                 marcarDevolucionSid={marcarDevolucionSid}
               />
@@ -436,22 +499,36 @@ type MutacionSid = ReturnType<typeof useMutation<Entrega | Devolucion, unknown, 
 function GrupoOt({
   numeroOt,
   pedidos,
+  ingresosSueltos,
   completo,
   pestana,
   entregasPorPedido,
   devolucionesPorPedido,
+  devolucionesTodasPorPedido,
   marcarEntregaSid,
   marcarDevolucionSid
 }: {
   numeroOt: string
   pedidos: Consumo[]
+  // Ingresos de esta OT que no pasaron por ningún pedido (solo en "Todos").
+  ingresosSueltos: Devolucion[]
   completo: boolean
   pestana: Pestana
   entregasPorPedido: Map<number, Entrega[]>
   devolucionesPorPedido: Map<number, Devolucion[]>
+  devolucionesTodasPorPedido: Map<number, Devolucion[]>
   marcarEntregaSid: MutacionSid
   marcarDevolucionSid: MutacionSid
 }) {
+  const ingresosSueltosPorMaterial = useMemo(() => {
+    const mapa = new Map<number, Devolucion[]>()
+    for (const d of ingresosSueltos) mapa.set(d.material_id, [...(mapa.get(d.material_id) ?? []), d])
+    return [...mapa.values()].map((movs) => [...movs].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id))
+  }, [ingresosSueltos])
+  // Una OT que solo tiene ingresos sin pedido no tiene fila de pedido de donde
+  // sacar el cliente.
+  const clienteSueltos = pedidos.length === 0 ? (ingresosSueltos[0]?.cliente ?? null) : null
+
   return (
     <Card>
       <CardContent className="flex flex-col gap-4 pt-6">
@@ -467,6 +544,13 @@ function GrupoOt({
           </span>
         </div>
 
+        {clienteSueltos && (
+          <div>
+            <p className="text-xs text-muted-foreground">Cliente</p>
+            <CeldaCopiable texto={clienteSueltos} />
+          </div>
+        )}
+
         <div className="flex flex-col divide-y divide-border">
           {pedidos.map((p) => (
             <FilaMaterial
@@ -475,7 +559,15 @@ function GrupoOt({
               pestana={pestana}
               susEntregas={entregasPorPedido.get(p.ot_material_id) ?? []}
               susDevoluciones={devolucionesPorPedido.get(p.ot_material_id) ?? []}
+              todasSusDevoluciones={devolucionesTodasPorPedido.get(p.ot_material_id) ?? []}
               marcarEntregaSid={marcarEntregaSid}
+              marcarDevolucionSid={marcarDevolucionSid}
+            />
+          ))}
+          {ingresosSueltosPorMaterial.map((ordenados) => (
+            <BloqueIngresoMaterial
+              key={`suelto-${ordenados[0].material_id}`}
+              ordenados={ordenados}
               marcarDevolucionSid={marcarDevolucionSid}
             />
           ))}
@@ -533,38 +625,56 @@ function GrupoOtIngresos({
 
         <div className="flex flex-col divide-y divide-border">
           {porMaterial.map((ordenados) => (
-            <div key={ordenados[0].material_id} className="py-3 first:pt-0 last:pb-0">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
-                <CeldaCopiable texto={ordenados[0].codigo_mp} />
-                {ordenados[0].ot_material_id == null && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
-                    ingreso almacén · sin registro de entrega
-                  </span>
-                )}
-              </p>
-              <SeccionSid titulo="Ingreso a almacén" completado={ordenados.every((d) => d.sid_completado)}>
-                {ordenados.map((d) => (
-                  <MovimientoRow
-                    key={d.id}
-                    fecha={formatearFechaHora(d.fecha, d.hora)}
-                    etiqueta={null}
-                    cantidad={d.total_devuelto}
-                    unidad={d.unidad}
-                    usaBobinas={d.usa_bobinas}
-                    bobinas={d.bobinas}
-                    usuario={d.usuario}
-                    completado={d.sid_completado}
-                    sidCompletadoEn={d.sid_completado_en}
-                    cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
-                    onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
-                  />
-                ))}
-              </SeccionSid>
-            </div>
+            <BloqueIngresoMaterial
+              key={ordenados[0].material_id}
+              ordenados={ordenados}
+              marcarDevolucionSid={marcarDevolucionSid}
+            />
           ))}
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+// Un material con sus ingresos que no pasaron por ningún pedido: el código
+// arriba y, debajo, su "SID de ingreso" con un check por cada registro.
+function BloqueIngresoMaterial({
+  ordenados,
+  marcarDevolucionSid
+}: {
+  ordenados: Devolucion[]
+  marcarDevolucionSid: MutacionSid
+}) {
+  return (
+    <div className="py-3 first:pt-0 last:pb-0">
+      <p className="mb-2 flex items-center gap-1.5 text-sm font-medium">
+        <CeldaCopiable texto={ordenados[0].codigo_mp} />
+        {ordenados[0].ot_material_id == null && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning">
+            SID ingreso · sin registro de entrega
+          </span>
+        )}
+      </p>
+      <SeccionSid titulo="SID de ingreso" completado={ordenados.every((d) => d.sid_completado)}>
+        {ordenados.map((d) => (
+          <MovimientoRow
+            key={d.id}
+            fecha={formatearFechaHora(d.fecha, d.hora)}
+            etiqueta={null}
+            cantidad={d.total_devuelto}
+            unidad={d.unidad}
+            usaBobinas={d.usa_bobinas}
+            bobinas={d.bobinas}
+            usuario={d.usuario}
+            completado={d.sid_completado}
+            sidCompletadoEn={d.sid_completado_en}
+            cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
+            onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
+          />
+        ))}
+      </SeccionSid>
+    </div>
   )
 }
 
@@ -573,13 +683,17 @@ function FilaMaterial({
   pestana,
   susEntregas,
   susDevoluciones,
+  todasSusDevoluciones,
   marcarEntregaSid,
   marcarDevolucionSid
 }: {
   pedido: Consumo
   pestana: Pestana
   susEntregas: Entrega[]
+  // Las del rango de fecha elegido (lo que se lista) y todas las del pedido
+  // (para que el Completo/Pendiente de cada sección no dependa del día visto).
   susDevoluciones: Devolucion[]
+  todasSusDevoluciones: Devolucion[]
   marcarEntregaSid: MutacionSid
   marcarDevolucionSid: MutacionSid
 }) {
@@ -591,6 +705,14 @@ function FilaMaterial({
     () => [...susDevoluciones].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id),
     [susDevoluciones]
   )
+  // Un ingreso (material fabricado que entra a almacén) tiene su propio
+  // trámite, distinto del de un sobrante que se devuelve: van en secciones
+  // aparte. La de ingreso solo existe si hay alguno que mostrar, para no
+  // agregar una caja vacía a los materiales que nunca tuvieron ingresos.
+  const ingresosOrdenados = devolucionesOrdenadas.filter((d) => d.es_ingreso_produccion)
+  const sobrantesOrdenados = devolucionesOrdenadas.filter((d) => !d.es_ingreso_produccion)
+  const todosIngresos = todasSusDevoluciones.filter((d) => d.es_ingreso_produccion)
+  const todosSobrantes = todasSusDevoluciones.filter((d) => !d.es_ingreso_produccion)
 
   const seccionEntrega = (
     <SeccionSid titulo="SID de entrega" completado={entregasOrdenadas.length > 0 ? entregaCompleta(pedido) : null}>
@@ -620,19 +742,39 @@ function FilaMaterial({
     </SeccionSid>
   )
 
+  const seccionIngreso =
+    ingresosOrdenados.length > 0 ? (
+      <SeccionSid titulo="SID de ingreso" completado={todosIngresos.every((d) => d.sid_completado)}>
+        {ingresosOrdenados.map((d) => (
+          <MovimientoRow
+            key={d.id}
+            fecha={formatearFechaHora(d.fecha, d.hora)}
+            etiqueta={null}
+            cantidad={d.total_devuelto}
+            unidad={pedido.unidad}
+            usaBobinas={d.usa_bobinas}
+            bobinas={d.bobinas}
+            usuario={d.usuario}
+            completado={d.sid_completado}
+            sidCompletadoEn={d.sid_completado_en}
+            cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
+            onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
+          />
+        ))}
+      </SeccionSid>
+    ) : null
+
   const seccionDevolucion = (
     <SeccionSid
       titulo="SID de devolución"
-      completado={devolucionesOrdenadas.length > 0 ? devolucionCompleta(pedido) : null}
+      completado={sobrantesOrdenados.length > 0 ? todosSobrantes.every((d) => d.sid_completado) : null}
     >
-      {devolucionesOrdenadas.map((d) => (
+      {sobrantesOrdenados.map((d) => (
         <MovimientoRow
           key={d.id}
           fecha={formatearFechaHora(d.fecha, d.hora)}
           etiqueta={
-            d.es_ingreso_produccion ? (
-              <span className="text-warning">Ingreso a almacén</span>
-            ) : d.codigo_mp !== pedido.codigo_mp ? (
+            d.codigo_mp !== pedido.codigo_mp ? (
               <span className="text-warning">
                 {d.codigo_mp} (pedido: {pedido.codigo_mp})
               </span>
@@ -649,7 +791,7 @@ function FilaMaterial({
           onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
         />
       ))}
-      {devolucionesOrdenadas.length === 0 && <p className="text-xs text-muted-foreground">Sin registros.</p>}
+      {sobrantesOrdenados.length === 0 && <p className="text-xs text-muted-foreground">Sin registros.</p>}
     </SeccionSid>
   )
 
@@ -691,7 +833,7 @@ function FilaMaterial({
         </div>
         {pedido.total_ingresado > 0 && (
           <div>
-            <p className="text-xs text-muted-foreground">Ingresó a almacén (fabricado)</p>
+            <p className="text-xs text-muted-foreground">Cantidad ingresada (fabricado)</p>
             <CeldaCopiable texto={`${pedido.total_ingresado} ${pedido.unidad}`} />
           </div>
         )}
@@ -702,14 +844,22 @@ function FilaMaterial({
           pestaña para ver los dos trámites del mismo material. En Entregados/
           Devueltos se muestra solo la columna correspondiente, a todo el ancho. */}
       {pestana === 'todos' ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        // Sin ingreso queda exactamente como antes (dos columnas). Con
+        // ingreso son tres (entrega | ingreso | devolución) solo en pantallas
+        // anchas; en las angostas van apiladas como filas para que ninguna
+        // quede apretada.
+        <div className={cn('grid grid-cols-1 gap-4', seccionIngreso ? 'xl:grid-cols-3' : 'sm:grid-cols-2')}>
           <div>{seccionEntrega}</div>
+          {seccionIngreso && <div>{seccionIngreso}</div>}
           <div>{seccionDevolucion}</div>
         </div>
       ) : pestana === 'entregados' ? (
         seccionEntrega
       ) : (
-        seccionDevolucion
+        <div className="flex flex-col gap-3">
+          {seccionIngreso}
+          {seccionDevolucion}
+        </div>
       )}
     </div>
   )

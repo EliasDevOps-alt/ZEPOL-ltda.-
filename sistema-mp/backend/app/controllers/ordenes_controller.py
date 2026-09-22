@@ -1137,6 +1137,27 @@ def actualizar_pendiente(
     return pendiente
 
 
+def asignar_material_a_pendiente(db: Session, pendiente_id: int, material_id: int) -> OtMaterialPendiente:
+    """Le dice a un pendiente que todavía no coincide con el catálogo (ej.
+    "LDPE40670", el código con que producción entrega lo que en almacén es
+    LDPE-3) a qué material corresponde — lo usa el ingreso a almacén de
+    Registrar Devolución. Solo la PRIMERA resolución (material_id todavía
+    vacío), y a propósito NO sincroniza con el Excel: el código del cliente
+    ("LDPE40670") tiene que seguir tal cual en su fila, a diferencia de
+    actualizar_pendiente, que sí reescribe la fila y además exige el módulo
+    de Crear OT (quien registra devoluciones puede no tenerlo)."""
+    pendiente = _obtener_pendiente(db, pendiente_id)
+    if pendiente.material_id is not None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Este material de la OT ya tiene un material asignado")
+    material = db.get(Material, material_id)
+    if material is None:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Material no encontrado")
+    pendiente.material_id = material.id
+    db.commit()
+    db.refresh(pendiente)
+    return pendiente
+
+
 def eliminar_pendiente(db: Session, pendiente_id: int) -> None:
     pendiente = _obtener_pendiente(db, pendiente_id)
     _bloquear_si_pendiente_tiene_movimientos(pendiente)

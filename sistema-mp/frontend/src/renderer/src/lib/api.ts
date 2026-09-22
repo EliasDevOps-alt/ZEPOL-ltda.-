@@ -293,6 +293,16 @@ export function editarPendiente(baseUrl: string, token: string, pendienteId: num
   })
 }
 
+// Le asigna el material del catálogo a un pendiente sin resolver, sin tocar el
+// Excel (ver ordenes_controller.asignar_material_a_pendiente).
+export function asignarMaterialAPendiente(baseUrl: string, token: string, pendienteId: number, materialId: number) {
+  return request<OtMaterialPendiente>(baseUrl, `/ordenes-trabajo/pendientes/${pendienteId}/asignar-material`, {
+    method: 'POST',
+    token,
+    body: { material_id: materialId }
+  })
+}
+
 export function eliminarPendiente(baseUrl: string, token: string, pendienteId: number) {
   return request<void>(baseUrl, `/ot-materiales-pendientes/${pendienteId}`, { method: 'DELETE', token })
 }

@@ -215,6 +215,18 @@ def crear_pendiente_libre(numero_ot: str, data: schemas.MaterialPedidoIn, db: Se
 
 
 @router.post(
+    "/pendientes/{pendiente_id}/asignar-material",
+    response_model=schemas.OtMaterialPendienteOut,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
+def asignar_material_a_pendiente(pendiente_id: int, data: schemas.AsignarMaterialIn, db: Session = Depends(get_db)):
+    """Asigna el material del catálogo a un pendiente sin resolver (ingreso a
+    almacén de algo que el Excel pide con otro código). No toca el Excel."""
+    pendiente = ordenes_controller.asignar_material_a_pendiente(db, pendiente_id, data.material_id)
+    return _serializar_pendiente(pendiente)
+
+
+@router.post(
     "/{numero_ot}/reintentar-excel",
     response_model=schemas.OtDetalleOut,
     dependencies=[Depends(security.requiere_modulo("crear_ot"))],

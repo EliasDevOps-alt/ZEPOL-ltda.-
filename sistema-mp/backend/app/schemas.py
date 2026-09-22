@@ -220,6 +220,10 @@ class OtDetalleCreate(CamposComercialesOt):
     uso_interno: bool = False
 
 
+class AsignarMaterialIn(BaseModel):
+    material_id: int
+
+
 class SiguienteOtSinNumeroOut(BaseModel):
     numero_ot: str
 

@@ -359,7 +359,6 @@ export function DetalleOt() {
   const [otPadre, setOtPadre] = useState('')
   const [errorFuelle, setErrorFuelle] = useState<string | null>(null)
   const [cliente, setCliente] = useState('')
-  const [diseno, setDiseno] = useState('')
   // Uso interno: material que la empresa fabrica para sí misma, sin cliente
   // real detrás — pasa raramente. Solo se puede elegir al crear la OT (ver
   // OtDetalleCreate.uso_interno); una vez guardada, se muestra como dato
@@ -446,9 +445,13 @@ export function DetalleOt() {
     setDatosExcel(null)
     setComparacion(null)
     setCliente(detalle.cliente ?? '')
-    setDiseno(detalle.diseno ?? '')
     setUsoInterno(detalle.uso_interno)
-    setComerciales(comercialesDesdeApi(detalle))
+    // La "Descripción" de pantalla es descripcion_producto (la columna del
+    // Excel); las OT viejas solo tenían diseno, así que se usa de respaldo.
+    setComerciales({
+      ...comercialesDesdeApi(detalle),
+      descripcion_producto: detalle.descripcion_producto ?? detalle.diseno ?? ''
+    })
     setProcesosExistentes(detalle.procesos)
     setPendientesExistentes(detalle.pendientes)
     setMaterialesForm([filaMaterialVacia()])
@@ -495,13 +498,14 @@ export function DetalleOt() {
       const numeroPadreNormalizado = otPadre.trim().toUpperCase()
       setNumeroOt(`F-${numeroPadreNormalizado}`)
       if (resultado.origen === 'bd' && resultado.bd) {
+        const descripcionPadre = resultado.bd.descripcion_producto ?? resultado.bd.diseno ?? ''
         setCliente(resultado.bd.cliente ?? '')
-        setDiseno(resultado.bd.diseno ?? '')
+        setComerciales((c) => ({ ...c, descripcion_producto: descripcionPadre }))
         setErrorFuelle(null)
       } else if (resultado.origen === 'excel' && resultado.excel) {
-        // El Excel no tiene diseño (nunca fue una columna de "oc mp") — solo
-        // se copia el cliente, el diseño queda para completar a mano.
+        const descripcionPadre = resultado.excel.descripcion_producto ?? ''
         setCliente(resultado.excel.cliente ?? '')
+        setComerciales((c) => ({ ...c, descripcion_producto: descripcionPadre }))
         setErrorFuelle(null)
       } else {
         setErrorFuelle(`No se encontró la OT ${otPadre} — completá cliente y diseño a mano.`)
@@ -585,7 +589,9 @@ export function DetalleOt() {
       api.guardarDetalleOt(apiBaseUrl, token, {
         numero_ot: numeroOt,
         cliente: cliente || null,
-        diseno: diseno || null,
+        // diseno se mantiene igual a la descripción para que el resto de las
+        // pantallas (que muestran diseno como "Descripción") no queden vacías.
+        diseno: comerciales.descripcion_producto || null,
         uso_interno: usoInterno,
         ...comercialesParaApi(comerciales),
         materiales: materialesForm
@@ -1155,7 +1161,10 @@ export function DetalleOt() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label>Descripción</Label>
-                <Input value={diseno} onChange={(e) => setDiseno(e.target.value)} />
+                <Input
+                  value={comerciales.descripcion_producto}
+                  onChange={(e) => setComerciales({ ...comerciales, descripcion_producto: e.target.value })}
+                />
               </div>
             </div>
 
@@ -1241,13 +1250,6 @@ export function DetalleOt() {
                       type="date"
                       value={comerciales.fecha_entrega}
                       onChange={(e) => setComerciales({ ...comerciales, fecha_entrega: e.target.value })}
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1.5 sm:col-span-2">
-                    <Label className="text-xs">Descripción</Label>
-                    <Input
-                      value={comerciales.descripcion_producto}
-                      onChange={(e) => setComerciales({ ...comerciales, descripcion_producto: e.target.value })}
                     />
                   </div>
                   <div className="flex flex-col gap-1.5">
