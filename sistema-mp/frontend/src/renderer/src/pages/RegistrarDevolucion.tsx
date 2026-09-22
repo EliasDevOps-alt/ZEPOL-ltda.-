@@ -205,12 +205,23 @@ function PendienteIngresoCard({
 }
 
 /** Contraparte de EntregaLibreForm (Registrar Entrega) — un material
- * fabricado que entra a almacén sin que nadie haya cargado antes en la OT
- * que hacía falta. Crea (o reutiliza) un pendiente suelto y registra el
- * ingreso contra él en el mismo paso. Sin proceso ni máquina a propósito —
- * esto es producción → almacén, y almacén no tiene máquinas; eso se
- * resuelve recién cuando el material sale hacia producción, en Registrar
- * Entrega. */
+ * fabricado que entra a almacén. Nunca crea un pedido/pendiente si el
+ * material YA está en la OT de cualquier forma:
+ * 1. Un pendiente sin resolver con otro código (ej. el Excel pide
+ *    "LDPE40670" y producción entrega LDPE-3) — se le asigna el material,
+ *    sin tocar su código de Excel ni la fila del Excel.
+ * 2. Un pedido real ya asignado a un proceso (típicamente materia prima
+ *    entregada a un proceso como Extrusión, y lo que sale de ahí vuelve
+ *    como ingreso) — el ingreso va contra ESE pedido.
+ * 3. Recién si no es ninguno de los dos ("Es un material nuevo"), crea un
+ *    pendiente suelto — mismo caso que EntregaLibreForm del lado de
+ *    Registrar Entrega, pero sin proceso ni máquina a propósito: esto es
+ *    producción → almacén, y almacén no tiene máquinas.
+ * El backend hace la misma verificación (ver
+ * ordenes_controller.resolver_ingreso_libre) — el Select de acá es solo
+ * para no tener que escribir el material dos veces cuando ya se sabe a
+ * cuál pendiente sin resolver corresponde; "Es un material nuevo" pasa
+ * igual por ese resolver, así que tampoco duplica un pedido real. */
 function IngresoLibreForm({
   numeroOt,
   fecha,
@@ -236,9 +247,10 @@ function IngresoLibreForm({
   const [abierto, setAbierto] = useState(false)
   const [materialId, setMaterialId] = useState('')
   // A qué material ya pedido en la OT corresponde este ingreso: el id de un
-  // pendiente, "nuevo" (no está en la OT) o '' (todavía sin elegir). Con
-  // exactamente uno sin resolver se preselecciona; con varios se obliga a
-  // elegir, porque equivocarse asignaría el ingreso a otro pedido.
+  // pendiente sin resolver, "nuevo" (no está en la OT, o hay que dejar que
+  // el backend decida) o '' (todavía sin elegir). Con exactamente uno sin
+  // resolver se preselecciona; con varios se obliga a elegir, porque
+  // equivocarse asignaría el ingreso a otro pedido.
   const [pendienteElegido, setPendienteElegido] = useState('')
   const [datos, setDatos] = useState<BobinasPedido>({ bobinas: [] })
   const [error, setError] = useState<string | null>(null)
@@ -249,25 +261,32 @@ function IngresoLibreForm({
 
   const registrar = useMutation({
     mutationFn: async () => {
-      let pendienteId: number
-      if (eleccion && eleccion !== 'nuevo') {
+      const esPendienteSinResolver = eleccion && eleccion !== 'nuevo'
+      let pendienteId: number | null = null
+      let otMaterialId: number | null = null
+
+      if (esPendienteSinResolver) {
         // El ingreso es de un material que la OT YA pide con otro código:
         // se le asigna el material del catálogo a ese pendiente (sin tocar
-        // su código de Excel, su cantidad ni la fila del Excel) en vez de
-        // crear uno duplicado, que después aparecía como un material más en
-        // Registrar Entrega.
+        // su código de Excel, su cantidad ni la fila del Excel).
         pendienteId = Number(eleccion)
         await api.asignarMaterialAPendiente(apiBaseUrl, token, pendienteId, Number(materialId))
       } else {
+        // El backend reutiliza el pedido o pendiente que la OT YA tenga
+        // para este material (ej. ya entregado como materia prima a
+        // Extrusión) y solo crea uno nuevo si de verdad no existe.
         const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
-        const pendiente = await api.crearPendienteLibre(apiBaseUrl, token, numeroOt, {
+        const resultado = await api.resolverIngresoLibre(apiBaseUrl, token, numeroOt, {
           material_id: Number(materialId),
           cantidad_requerida: cantidadTotal
         })
-        pendienteId = pendiente.id
+        otMaterialId = resultado.ot_material_id
+        pendienteId = resultado.pendiente_id
       }
+
       return api.registrarDevolucion(apiBaseUrl, token, {
-        pendiente_id: pendienteId,
+        ot_material_id: otMaterialId ?? undefined,
+        pendiente_id: pendienteId ?? undefined,
         material_id: Number(materialId),
         fecha,
         bobinas: pesosCargados(datos),
@@ -315,7 +334,9 @@ function IngresoLibreForm({
   return (
     <form onSubmit={handleSubmit} className="mb-4 rounded-md border border-warning/40 bg-warning/5 p-4">
       <p className="mb-2 text-xs text-muted-foreground">
-        Para un material fabricado que todavía no está cargado en esta OT — entra a almacén, no es un sobrante.
+        Para un material fabricado que entra a almacén — no es un sobrante. Si ya es un pedido de esta OT (por
+        ejemplo, materia prima entregada a un proceso), se registra contra ese mismo pedido en vez de crear uno
+        nuevo.
       </p>
       <div className="flex flex-col gap-2">
         <Combobox

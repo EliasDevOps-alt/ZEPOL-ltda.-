@@ -224,6 +224,13 @@ class AsignarMaterialIn(BaseModel):
     material_id: int
 
 
+class ResolverIngresoLibreOut(BaseModel):
+    """Exactamente uno de los dos — ver ordenes_controller.resolver_ingreso_libre."""
+
+    ot_material_id: Optional[int] = None
+    pendiente_id: Optional[int] = None
+
+
 class SiguienteOtSinNumeroOut(BaseModel):
     numero_ot: str
 

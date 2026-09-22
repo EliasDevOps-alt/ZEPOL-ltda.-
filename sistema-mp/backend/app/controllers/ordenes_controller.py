@@ -1042,6 +1042,39 @@ def listar_pendientes(db: Session, numero_ot: str) -> List[OtMaterialPendiente]:
     ).all()
 
 
+def resolver_ingreso_libre(
+    db: Session, numero_ot: str, material_id: int, cantidad_requerida: Optional[float]
+) -> Dict[str, Any]:
+    """Dónde tiene que registrarse un ingreso a almacén "libre" (Registrar
+    Devolución → Registrar ingreso) para este material — nunca crea uno
+    nuevo si el material YA está en la OT de cualquier forma:
+
+    1. Ya es un pedido real (OtMaterial, con proceso/máquina asignados) —
+       típicamente porque se le entregó como materia prima a un proceso (ej.
+       LDPE-3 entregado a Extrusión para fabricar otra cosa) y ahora entra a
+       almacén lo que se fabricó. Se devuelve ese ot_material_id: iba contra
+       él antes de que existiera este resolver, este llamaba directo a
+       crear_pendiente_libre, que solo mira OtMaterialPendiente y no
+       encontraba este caso — terminaba creando un pendiente aparte que,
+       promovido, aparecía como un LDPE-3 DUPLICADO en Registrar Entrega
+       (caso real, 2026-09-22).
+    2. Ya es un pendiente (sin proceso todavía) — se reutiliza (ver
+       crear_pendiente_libre).
+    3. Si no es ninguno de los dos, recién ahí se crea un pendiente nuevo.
+    """
+    ot = obtener_detalle(db, numero_ot)
+    if ot is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "OT no encontrada")
+
+    for ot_proceso in ot.procesos:
+        for ot_material in ot_proceso.materiales:
+            if ot_material.material_id == material_id:
+                return {"ot_material_id": ot_material.id, "pendiente_id": None}
+
+    pendiente = crear_pendiente_libre(db, numero_ot, material_id, cantidad_requerida)
+    return {"ot_material_id": None, "pendiente_id": pendiente.id}
+
+
 def crear_pendiente_libre(
     db: Session, numero_ot: str, material_id: int, cantidad_requerida: Optional[float]
 ) -> OtMaterialPendiente:

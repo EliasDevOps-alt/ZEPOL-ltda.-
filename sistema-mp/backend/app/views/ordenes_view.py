@@ -215,6 +215,18 @@ def crear_pendiente_libre(numero_ot: str, data: schemas.MaterialPedidoIn, db: Se
 
 
 @router.post(
+    "/{numero_ot}/ingreso-libre",
+    response_model=schemas.ResolverIngresoLibreOut,
+    dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],
+)
+def resolver_ingreso_libre(numero_ot: str, data: schemas.MaterialPedidoIn, db: Session = Depends(get_db)):
+    """Dónde registrar un ingreso 'libre' para este material — reutiliza el
+    pedido o pendiente que la OT YA tenga para él (nunca crea uno nuevo si
+    ya existe, ver ordenes_controller.resolver_ingreso_libre)."""
+    return ordenes_controller.resolver_ingreso_libre(db, numero_ot, data.material_id, data.cantidad_requerida)
+
+
+@router.post(
     "/pendientes/{pendiente_id}/asignar-material",
     response_model=schemas.OtMaterialPendienteOut,
     dependencies=[Depends(security.requiere_modulo("registrar_devolucion"))],

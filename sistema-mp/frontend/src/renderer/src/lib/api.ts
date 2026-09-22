@@ -293,6 +293,17 @@ export function editarPendiente(baseUrl: string, token: string, pendienteId: num
   })
 }
 
+// Dónde registrar un ingreso "libre" para este material — el backend
+// reutiliza el pedido o pendiente que la OT YA tenga para él (nunca crea uno
+// nuevo si ya existe, ver ordenes_controller.resolver_ingreso_libre).
+export function resolverIngresoLibre(baseUrl: string, token: string, numeroOt: string, data: MaterialPedidoIn) {
+  return request<{ ot_material_id: number | null; pendiente_id: number | null }>(
+    baseUrl,
+    `/ordenes-trabajo/${encodeURIComponent(numeroOt)}/ingreso-libre`,
+    { method: 'POST', token, body: data }
+  )
+}
+
 // Le asigna el material del catálogo a un pendiente sin resolver, sin tocar el
 // Excel (ver ordenes_controller.asignar_material_a_pendiente).
 export function asignarMaterialAPendiente(baseUrl: string, token: string, pendienteId: number, materialId: number) {
