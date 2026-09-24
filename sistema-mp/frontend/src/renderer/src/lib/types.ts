@@ -467,6 +467,11 @@ export interface Devolucion {
   // RegistroSid.tsx, pestaña "Ingresados").
   numero_ot: string
   cliente: string | null
+  // Máquina del pedido del que vuelve el material. null cuando la devolución
+  // cuelga de un pendiente suelto (todavía sin proceso/máquina asignados).
+  maquina: string | null
+  // Proceso del pedido — misma regla que `maquina`.
+  proceso: string | null
   material_id: number
   codigo_mp: string
   unidad: string
@@ -536,3 +541,23 @@ export interface Consumo {
   material_sustituido: boolean
 }
 
+
+// Una OT con entregas y todos sus movimientos (entregas, devoluciones,
+// ingresos) ya registrados en el SID — lo que lista el módulo Reportes.
+// "Terminada" se calcula en el backend (reportes_controller), no es un estado
+// guardado en la base.
+export interface OtTerminada {
+  numero_ot: string
+  cliente: string | null
+  // Casi siempre null: el diseño no se carga en la práctica. El formulario
+  // impreso deja el campo en blanco para escribirlo a mano.
+  diseno: string | null
+  // Lo que se imprime en el campo DISEÑO del formulario (el diseño casi nunca
+  // está cargado; la descripción sí).
+  descripcion_producto: string | null
+  pedidos: number
+  fecha_creacion: string | null
+  // Fecha del último movimiento = cuándo terminó realmente la OT.
+  ultima_fecha: string | null
+  total_movimientos: number
+}

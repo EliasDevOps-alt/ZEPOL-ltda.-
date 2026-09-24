@@ -568,6 +568,12 @@ class DevolucionOut(BaseModel):
     # este campo directamente, sin pasar por un pedido.
     numero_ot: str
     cliente: Optional[str]
+    # Máquina del pedido del que vuelve el material. None cuando la devolución
+    # cuelga de un pendiente suelto (todavía sin proceso/máquina asignados).
+    maquina: Optional[str] = None
+    # Proceso del pedido (la máquina pertenece a un solo proceso); mismo criterio
+    # que `maquina`: None si cuelga de un pendiente suelto.
+    proceso: Optional[str] = None
     material_id: int
     codigo_mp: str
     unidad: str
@@ -660,3 +666,28 @@ class PedidoMaterialOut(BaseModel):
 class ConsumoOut(PedidoMaterialOut):
     estado_sid: str
     sid_devolucion_completado: bool
+
+
+# ---------------------------------------------------------------------------
+# Reportes
+# ---------------------------------------------------------------------------
+
+
+class OtTerminadaOut(BaseModel):
+    """Una OT con entregas y todos sus movimientos ya registrados en el SID — ver
+    reportes_controller.listar_ots_terminadas."""
+
+    numero_ot: str
+    cliente: Optional[str]
+    # Casi siempre vacío: el diseño no se carga en la práctica (22 de ~2000 OT
+    # lo tienen). El formulario impreso deja el campo en blanco para escribirlo
+    # a mano cuando falta.
+    diseno: Optional[str]
+    # Es lo que se imprime en el campo DISEÑO del formulario: el diseño casi
+    # nunca está cargado pero la descripción del producto sí (2053 de 2075 OT).
+    descripcion_producto: Optional[str] = None
+    pedidos: int
+    fecha_creacion: Optional[datetime]
+    # Fecha del último movimiento = cuándo terminó realmente la OT.
+    ultima_fecha: Optional[date]
+    total_movimientos: int

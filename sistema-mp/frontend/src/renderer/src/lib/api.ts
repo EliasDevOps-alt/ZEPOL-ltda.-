@@ -31,6 +31,7 @@ import type {
   OtExcelNueva,
   OtImportada,
   OtMaterialPendiente,
+  OtTerminada,
   Proceso,
   PromoverPendienteIn,
   PromoverPendienteOut,
@@ -151,6 +152,17 @@ export function moverPedido(baseUrl: string, token: string, otMaterialId: number
     token,
     body: data
   })
+}
+
+// OT con todos sus movimientos ya en el SID, para el módulo Reportes. El filtro de
+// fechas va contra la fecha del último movimiento (cuándo terminó la OT), no
+// contra la de creación.
+export function listarOtsTerminadas(baseUrl: string, token: string, desde?: string, hasta?: string) {
+  const params = new URLSearchParams()
+  if (desde) params.set('desde', desde)
+  if (hasta) params.set('hasta', hasta)
+  const qs = params.toString() ? `?${params}` : ''
+  return request<OtTerminada[]>(baseUrl, `/reportes/ots-terminadas${qs}`, { token })
 }
 
 export function registrarDevolucion(baseUrl: string, token: string, data: DevolucionCreate) {

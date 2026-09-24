@@ -58,12 +58,14 @@ def marcar_devolucion_sid(db: Session, devolucion_id: int, completado: bool) -> 
     devolucion = db.get(Devolucion, devolucion_id)
     if devolucion is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
-    if devolucion.ot_material_id is None:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ese material todavía no tiene pedido asignado")
     devolucion.sid_completado = completado
     devolucion.sid_completado_en = datetime.now() if completado else None
     db.flush()
-    recalcular_sid_devolucion(db, devolucion.ot_material)
+    # Un ingreso a almacén suelto (registrado contra un pendiente, sin pedido)
+    # también tiene su propio SID que tramitar, pero no hay un pedido cuyo
+    # estado agregado recalcular: el check de ese movimiento es todo.
+    if devolucion.ot_material is not None:
+        recalcular_sid_devolucion(db, devolucion.ot_material)
     db.commit()
     db.refresh(devolucion)
     return devolucion

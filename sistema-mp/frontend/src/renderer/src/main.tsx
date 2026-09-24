@@ -6,7 +6,10 @@ import { ConfigProvider } from './lib/ConfigContext'
 import { AuthProvider } from './lib/AuthContext'
 import { ConfirmProvider } from './components/ConfirmProvider'
 import App from './App'
+import { evitarCambioDeNumeroConLaRueda } from './lib/ruedaEnCamposNumericos'
 import './index.css'
+
+evitarCambioDeNumeroConLaRueda()
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } }

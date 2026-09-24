@@ -26,6 +26,16 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         pendiente_id=devolucion.ot_material_pendiente_id,
         numero_ot=ot.numero_ot,
         cliente=ot.cliente,
+        maquina=(
+            devolucion.ot_material.ot_proceso.maquina.nombre
+            if devolucion.ot_material is not None
+            else None
+        ),
+        proceso=(
+            devolucion.ot_material.ot_proceso.proceso.nombre
+            if devolucion.ot_material is not None
+            else None
+        ),
         material_id=devolucion.material_id,
         codigo_mp=devolucion.material.codigo_mp,
         unidad=devolucion.material.unidad,

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import { join } from 'path'
-import { readFileSync, writeFileSync, existsSync } from 'fs'
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import log from 'electron-log/main'
 
@@ -41,6 +41,62 @@ function createWindow(): void {
   } else {
     win.loadFile(join(__dirname, '../renderer/index.html'))
   }
+}
+
+// Exportación del formulario de Producto Terminado.
+//
+// El renderer arma el HTML (lib/formularioPt.ts) y lo manda entero: así la
+// vista previa, el PDF y el Word salen todos del mismo HTML y no pueden
+// desincronizarse. Acá solo se imprime o se guarda.
+async function exportarFormularioPdf(html: string, nombreSugerido: string): Promise<string | null> {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Guardar formulario como PDF',
+    defaultPath: join(app.getPath('documents'), `${nombreSugerido}.pdf`),
+    filters: [{ name: 'PDF', extensions: ['pdf'] }]
+  })
+  if (canceled || !filePath) return null
+
+  // printToPDF necesita una ventana que ya haya cargado el HTML. Va por archivo
+  // temporal y no por data: URL porque el logo va embebido en base64 y el HTML
+  // completo supera lo que conviene meter en una URL.
+  const rutaTemporal = join(app.getPath('temp'), `zepol-formulario-${Date.now()}.html`)
+  writeFileSync(rutaTemporal, html, 'utf-8')
+  const ventana = new BrowserWindow({ show: false, webPreferences: { sandbox: false } })
+  try {
+    await ventana.loadFile(rutaTemporal)
+    const pdf = await ventana.webContents.printToPDF({
+      pageSize: 'Letter',
+      printBackground: true,
+      // Respeta el @page del HTML (carta + márgenes), que es donde está
+      // definido el tamaño real del formulario.
+      preferCSSPageSize: true
+    })
+    writeFileSync(filePath, pdf)
+    return filePath
+  } finally {
+    ventana.destroy()
+    try {
+      unlinkSync(rutaTemporal)
+    } catch {
+      // Un temporal que no se pudo borrar no justifica romper la exportación.
+    }
+  }
+}
+
+async function exportarFormularioWord(
+  documento: string,
+  nombreSugerido: string
+): Promise<string | null> {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Guardar formulario como Word',
+    defaultPath: join(app.getPath('documents'), `${nombreSugerido}.doc`),
+    filters: [{ name: 'Documento de Word', extensions: ['doc'] }]
+  })
+  if (canceled || !filePath) return null
+  // Va tal cual, sin BOM: el documento es MHTML y cualquier byte antes de
+  // "MIME-Version:" rompe la cabecera. El charset viaja dentro del MIME.
+  writeFileSync(filePath, documento, 'utf-8')
+  return filePath
 }
 
 const UNA_HORA_MS = 60 * 60 * 1000
@@ -161,6 +217,14 @@ app.whenReady().then(() => {
     return resultado.filePaths[0]
   })
   ipcMain.handle('updates:buscar', () => buscarActualizacionManual())
+  ipcMain.handle(
+    'formulario:exportarPdf',
+    (_event, html: string, nombreSugerido: string) => exportarFormularioPdf(html, nombreSugerido)
+  )
+  ipcMain.handle(
+    'formulario:exportarWord',
+    (_event, html: string, nombreSugerido: string) => exportarFormularioWord(html, nombreSugerido)
+  )
 
   createWindow()
   iniciarAutoUpdate()

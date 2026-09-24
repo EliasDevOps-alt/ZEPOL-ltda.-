@@ -11,6 +11,8 @@ import { Materiales } from './pages/Materiales'
 import { Maquinas } from './pages/Maquinas'
 import { ConfiguracionExcel } from './pages/ConfiguracionExcel'
 import { RegistroSid } from './pages/RegistroSid'
+import { ProductoTerminado } from './pages/ProductoTerminado'
+import { Reportes } from './pages/Reportes'
 import { Historial } from './pages/Historial'
 import { DetalleOt } from './pages/DetalleOt'
 import { ListadoOt } from './pages/ListadoOt'
@@ -106,6 +108,8 @@ export default function App() {
             </RutaConAcceso>
           }
         />
+        <Route path="producto-terminado" element={<ProductoTerminado />} />
+        <Route path="reportes" element={<Reportes />} />
         <Route
           path="crear-ot"
           element={

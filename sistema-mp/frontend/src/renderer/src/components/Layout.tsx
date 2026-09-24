@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'framer-motion'
 import {
   BadgeCheck,
   ChevronDown,
+  ClipboardCheck,
   ClipboardList,
   Cog,
   FileEdit,
@@ -16,6 +17,7 @@ import {
   List,
   LogOut,
   Menu,
+  PackageSearch,
   Users
 } from 'lucide-react'
 import { cn } from '@renderer/lib/utils'
@@ -50,6 +52,8 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX, modulo: 'registrar_devolucion' },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
   { to: '/sid', label: 'Registro SID', icon: BadgeCheck, modulo: 'registro_sid' },
+  { to: '/producto-terminado', label: 'Producto Terminado', icon: PackageSearch },
+  { to: '/reportes', label: 'Reportes', icon: ClipboardCheck },
   { to: '/materiales', label: 'Materiales', icon: Boxes, modulo: 'materiales' },
   { to: '/maquinas', label: 'Máquinas', icon: Cog, modulo: 'maquinas' },
   { to: '/configuracion/excel', label: 'Excel OC-MP', icon: FileSpreadsheet, modulo: 'excel_oc_mp' },
