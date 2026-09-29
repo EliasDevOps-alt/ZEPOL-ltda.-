@@ -342,6 +342,18 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
     """Busca numero_ot en la hoja 'oc mp' y devuelve sus datos, o None si no
     se encuentra la OT o el archivo no está accesible. Ver el docstring de
     _procesar_fila_oc_mp para cómo se fusionan las filas repetidas."""
+    try:
+        return leer_oc_mp_estricto(db, numero_ot)
+    except ExcelLecturaError:
+        return None
+
+
+def leer_oc_mp_estricto(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
+    """Como leer_oc_mp, pero distingue "la OT no está en el Excel" (None) de
+    "el Excel no se pudo leer" (ExcelLecturaError) — para quien guarda algo
+    según la respuesta y no puede confundir una cosa con la otra (ver
+    producto_terminado_controller.abrir). Sin ruta configurada no hay Excel
+    que leer: None, igual que si la OT no estuviera."""
     ruta = obtener_ruta_configurada(db)
     if not ruta:
         logger.warning("No hay ruta configurada para el Excel OC-MP")
@@ -349,7 +361,9 @@ def leer_oc_mp(db: Session, numero_ot: str) -> Optional[Dict[str, Any]]:
 
     ws = _abrir_hoja(ruta, obtener_password_configurada(db))
     if ws is None:
-        return None
+        raise ExcelLecturaError(
+            "No se pudo abrir el Excel OC-MP (revisa que el archivo exista, la contraseña, o que no esté dañado)"
+        )
 
     objetivo = numero_ot.strip()
     resultado: Optional[Dict[str, Any]] = None

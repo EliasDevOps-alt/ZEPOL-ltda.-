@@ -126,7 +126,19 @@ def abrir(db: Session, numero_ot: str) -> ProductoTerminado:
     if ot.producto_terminado is not None:
         return ot.producto_terminado
 
-    datos_excel = excel_oc_mp.leer_oc_mp(db, ot.numero_ot)
+    # Estricto a propósito: si el Excel no se puede leer en este momento
+    # (archivo bloqueado, red caída), guardar los datos de la propia OT como
+    # si no estuviera en el Excel dejaría para siempre un solo producto y un
+    # total incompleto en una OT de varios productos. Mejor avisar y que se
+    # reintente.
+    try:
+        datos_excel = excel_oc_mp.leer_oc_mp_estricto(db, ot.numero_ot)
+    except excel_oc_mp.ExcelLecturaError:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "No se pudo leer el Excel OC-MP para traer los productos de esta OT. "
+            "Intenta de nuevo en un momento (puede estar abierto o bloqueado en otra PC).",
+        )
     if datos_excel is None:
         datos_excel = datos_desde_ot(ot)
     producto_terminado = sincronizar_desde_excel(db, ot, datos_excel)
