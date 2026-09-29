@@ -52,7 +52,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/devolucion', label: 'Registrar Devolución', icon: PackageX, modulo: 'registrar_devolucion' },
   { to: '/consulta', label: 'Consultar OT', icon: ClipboardList },
   { to: '/sid', label: 'Registro SID', icon: BadgeCheck, modulo: 'registro_sid' },
-  { to: '/producto-terminado', label: 'Producto Terminado', icon: PackageSearch },
+  { to: '/producto-terminado', label: 'Producto Terminado', icon: PackageSearch, modulo: 'producto_terminado' },
   { to: '/reportes', label: 'Reportes', icon: ClipboardCheck },
   { to: '/materiales', label: 'Materiales', icon: Boxes, modulo: 'materiales' },
   { to: '/maquinas', label: 'Máquinas', icon: Cog, modulo: 'maquinas' },

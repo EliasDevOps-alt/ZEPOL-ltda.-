@@ -189,6 +189,7 @@ class OrdenTrabajo(Base):
 
     procesos: Mapped[List["OtProceso"]] = relationship(back_populates="ot")
     pendientes: Mapped[List["OtMaterialPendiente"]] = relationship(back_populates="ot")
+    producto_terminado: Mapped[Optional["ProductoTerminado"]] = relationship(back_populates="ot")
 
 
 class OtProceso(Base):
@@ -451,3 +452,87 @@ class DevolucionBobina(Base):
     cantidad: Mapped[float] = mapped_column(Numeric(10, 3))
 
     devolucion: Mapped["Devolucion"] = relationship(back_populates="bobinas")
+
+
+class ProductoTerminado(Base):
+    """Una OT dentro del módulo de Producto Terminado. Los ítems y el total
+    salen del Excel OC-MP cuando se abre la OT acá por primera vez (ver
+    producto_terminado_controller.abrir). pedido_total y
+    ProductoTerminadoItem.total quedan como los escribe el Excel — en MILLAR
+    es el número en miles; la conversión a unidades reales se hace al
+    calcular, no al guardar."""
+
+    __tablename__ = "productos_terminados"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ot_id: Mapped[int] = mapped_column(ForeignKey("ordenes_trabajo.id", ondelete="CASCADE"), unique=True)
+    # 'KG' | 'BOLSAS' | 'MILLAR'. None = "Med." del Excel no reconocida,
+    # falta confirmarla a mano antes de poder pesar.
+    unidad: Mapped[Optional[str]] = mapped_column(String(10))
+    medida_excel: Mapped[Optional[str]] = mapped_column(String(20))
+    pedido_total: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
+    # Se elige a mano en la pantalla (Bs, $us u otra): la OT no la guarda.
+    moneda: Mapped[Optional[str]] = mapped_column(String(20))
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    ot: Mapped["OrdenTrabajo"] = relationship(back_populates="producto_terminado")
+    items: Mapped[List["ProductoTerminadoItem"]] = relationship(
+        back_populates="producto_terminado",
+        cascade="all, delete-orphan",
+        order_by="ProductoTerminadoItem.numero",
+    )
+    # Sin cascade de borrado a propósito: un pesaje nunca se borra por arrastre.
+    pesajes: Mapped[List["PesajePt"]] = relationship(
+        back_populates="producto_terminado", order_by="PesajePt.numero"
+    )
+
+
+class ProductoTerminadoItem(Base):
+    """Un ITEM del formulario (ITEM 1..5): código, descripción y el total de
+    ese producto. Solo informativo — el pesaje va contra el pedido_total de
+    toda la OT, sin distinguir de qué ítem es cada bobina o paquete."""
+
+    __tablename__ = "producto_terminado_items"
+    __table_args__ = (UniqueConstraint("producto_terminado_id", "numero"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    producto_terminado_id: Mapped[int] = mapped_column(
+        ForeignKey("productos_terminados.id", ondelete="CASCADE")
+    )
+    numero: Mapped[int]
+    codigo_producto: Mapped[Optional[str]] = mapped_column(String(50))
+    descripcion_producto: Mapped[Optional[str]] = mapped_column(String(255))
+    total: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
+
+    producto_terminado: Mapped["ProductoTerminado"] = relationship(back_populates="items")
+
+
+class PesajePt(Base):
+    """Un pesado individual — una bobina o un paquete, con su etiqueta.
+
+    El To, el Kg acumulado, el Pq/Bo del día y el % del formulario en papel
+    no se guardan: se calculan sumando estas filas (agrupadas por fecha).
+    cantidad es el número de bolsas del paquete, en unidades aunque la OT sea
+    en MILLAR (así se cuenta en planta), y es None cuando la unidad es KG."""
+
+    __tablename__ = "pesajes_pt"
+    __table_args__ = (UniqueConstraint("producto_terminado_id", "numero"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    producto_terminado_id: Mapped[int] = mapped_column(ForeignKey("productos_terminados.id"))
+    # N° BOB/PAQ de la etiqueta: correlativo dentro de la OT.
+    numero: Mapped[int]
+    fecha: Mapped[date] = mapped_column(Date)
+    hora: Mapped[time] = mapped_column(Time, server_default=func.current_time())
+    peso_bruto: Mapped[float] = mapped_column(Numeric(10, 3))
+    tara: Mapped[float] = mapped_column(Numeric(10, 3), default=0)
+    cantidad: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
+    usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
+    creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    # Quién lo corrigió y cuándo — mismo criterio que Entrega.editado_por_id.
+    editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
+    editado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    producto_terminado: Mapped["ProductoTerminado"] = relationship(back_populates="pesajes")
+    usuario: Mapped["Usuario"] = relationship(foreign_keys="PesajePt.usuario_id")
+    editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="PesajePt.editado_por_id")

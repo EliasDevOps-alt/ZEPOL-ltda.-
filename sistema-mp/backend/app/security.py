@@ -60,6 +60,7 @@ MODULOS_RESTRINGIBLES = {
     "materiales",
     "maquinas",
     "excel_oc_mp",
+    "producto_terminado",
 }
 
 

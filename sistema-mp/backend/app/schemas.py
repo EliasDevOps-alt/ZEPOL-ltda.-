@@ -691,3 +691,105 @@ class OtTerminadaOut(BaseModel):
     # Fecha del último movimiento = cuándo terminó realmente la OT.
     ultima_fecha: Optional[date]
     total_movimientos: int
+
+
+# ---------------------------------------------------------------------------
+# Producto terminado
+# ---------------------------------------------------------------------------
+
+
+class ProductoTerminadoItemOut(BaseModel):
+    """Un ITEM del formulario. total va como en el Excel (en MILLAR, en miles)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    numero: int
+    codigo_producto: Optional[str]
+    descripcion_producto: Optional[str]
+    total: Optional[float]
+
+
+class ProductoTerminadoOut(BaseModel):
+    """Una OT en Producto Terminado: los datos de la OT que van en el
+    formulario más los ítems y el pedido total leídos del Excel."""
+
+    numero_ot: str
+    cliente: Optional[str]
+    vendedor: Optional[str]
+    ciudad: Optional[str]
+    fecha_pedido: Optional[date]
+    fecha_entrega: Optional[date]
+    # Tipo de producción tal como está en el Excel: R (repetición), N (nuevo),
+    # Rc-Arte (repetición con cambio de estructura) — y variantes escritas a mano.
+    tipo_trabajo: Optional[str]
+    # 'KG' | 'BOLSAS' | 'MILLAR', o None si "Med." no se reconoció y hay que
+    # confirmarla (PUT /producto-terminado/{numero_ot}/unidad).
+    unidad: Optional[str]
+    medida_excel: Optional[str]
+    # Como en el Excel (en MILLAR, en miles) — lo que se imprime.
+    pedido_total: Optional[float]
+    # En unidades reales (bolsas o kg) — contra esto se calcula el avance.
+    pedido_total_real: Optional[float]
+    moneda: Optional[str]
+    items: List[ProductoTerminadoItemOut]
+
+
+class ConfirmarUnidadPtIn(BaseModel):
+    unidad: str
+
+
+class MonedaPtIn(BaseModel):
+    # None o "" = sin moneda (se deja en blanco para escribirla a mano).
+    moneda: Optional[str] = Field(default=None, max_length=20)
+
+
+class PesajePtCreate(BaseModel):
+    fecha: date
+    peso_bruto: float = Field(gt=0)
+    tara: float = Field(default=0, ge=0)
+    # Bolsas del paquete, en unidades (también en una OT en MILLAR). Sin
+    # cantidad en KG.
+    cantidad: Optional[float] = Field(default=None, gt=0)
+
+
+class PesajePtOut(BaseModel):
+    id: int
+    # N° BOB/PAQ de la etiqueta.
+    numero: int
+    fecha: date
+    hora: time
+    peso_bruto: float
+    tara: float
+    peso_neto: float
+    # Bolsas del paquete, en unidades; None en KG.
+    cantidad: Optional[float]
+    # Inicial del usuario que pesó — lo que va en PESADOR / Per.
+    pesador: str
+    pesador_nombre: str
+    # Quién lo corrigió y cuándo; None si nunca se editó.
+    editado_por: Optional[str] = None
+    editado_en: Optional[datetime] = None
+
+
+class DiaPesajePtOut(BaseModel):
+    """Una "tanda" del formulario en papel: todo lo pesado en un día."""
+
+    fecha: date
+    # Pq (bolsas/millar) o Bo (kg): cuántos paquetes o bobinas se pesaron.
+    paquetes: int
+    # To del día: bolsas en BOLSAS/MILLAR, peso neto en KG.
+    to: float
+    kg: float
+    pesadores: List[str]
+    to_acumulado: float
+    # Sin redondear; None si falta el pedido total o la unidad.
+    porcentaje_acumulado: Optional[float]
+
+
+class PesajesPtOut(BaseModel):
+    pesajes: List[PesajePtOut]
+    dias: List[DiaPesajePtOut]
+    total_to: float
+    total_kg: float
+    total_paquetes: int
+    porcentaje: Optional[float]

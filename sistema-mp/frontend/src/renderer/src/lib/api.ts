@@ -32,6 +32,11 @@ import type {
   OtImportada,
   OtMaterialPendiente,
   OtTerminada,
+  PesajePt,
+  PesajePtCreate,
+  PesajesPt,
+  ProductoTerminado,
+  UnidadPt,
   Proceso,
   PromoverPendienteIn,
   PromoverPendienteOut,
@@ -163,6 +168,55 @@ export function listarOtsTerminadas(baseUrl: string, token: string, desde?: stri
   if (hasta) params.set('hasta', hasta)
   const qs = params.toString() ? `?${params}` : ''
   return request<OtTerminada[]>(baseUrl, `/reportes/ots-terminadas${qs}`, { token })
+}
+
+// Idempotente: la primera vez lee los ítems y el total del Excel OC-MP y los
+// guarda; las siguientes devuelve lo ya guardado.
+export function abrirProductoTerminado(baseUrl: string, token: string, numeroOt: string) {
+  return request<ProductoTerminado>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function confirmarUnidadPt(baseUrl: string, token: string, numeroOt: string, unidad: UnidadPt) {
+  return request<ProductoTerminado>(
+    baseUrl,
+    `/producto-terminado/${encodeURIComponent(numeroOt)}/unidad`,
+    { method: 'PUT', token, body: { unidad } }
+  )
+}
+
+export function fijarMonedaPt(baseUrl: string, token: string, numeroOt: string, moneda: string | null) {
+  return request<ProductoTerminado>(
+    baseUrl,
+    `/producto-terminado/${encodeURIComponent(numeroOt)}/moneda`,
+    { method: 'PUT', token, body: { moneda } }
+  )
+}
+
+export function listarPesajesPt(baseUrl: string, token: string, numeroOt: string) {
+  return request<PesajesPt>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/pesajes`, { token })
+}
+
+export function registrarPesajePt(baseUrl: string, token: string, numeroOt: string, data: PesajePtCreate) {
+  return request<PesajePt>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/pesajes`, {
+    method: 'POST',
+    token,
+    body: data
+  })
+}
+
+export function editarPesajePt(baseUrl: string, token: string, pesajeId: number, data: PesajePtCreate) {
+  return request<PesajePt>(baseUrl, `/producto-terminado/pesajes/${pesajeId}`, {
+    method: 'PATCH',
+    token,
+    body: data
+  })
+}
+
+export function eliminarPesajePt(baseUrl: string, token: string, pesajeId: number) {
+  return request<void>(baseUrl, `/producto-terminado/pesajes/${pesajeId}`, { method: 'DELETE', token })
 }
 
 export function registrarDevolucion(baseUrl: string, token: string, data: DevolucionCreate) {

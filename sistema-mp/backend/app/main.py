@@ -19,6 +19,7 @@ from .views import (
     maquinas_view,
     materiales_view,
     ordenes_view,
+    producto_terminado_view,
     reportes_view,
     usuarios_view,
 )
@@ -40,6 +41,7 @@ app.include_router(catalogos_view.router)
 app.include_router(entregas_view.router)
 app.include_router(devoluciones_view.router)
 app.include_router(reportes_view.router)
+app.include_router(producto_terminado_view.router)
 app.include_router(consumo_view.router)
 app.include_router(materiales_view.router)
 app.include_router(maquinas_view.router)

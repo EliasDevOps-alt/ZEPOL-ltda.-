@@ -369,3 +369,37 @@ número más alto que el que tienen instalado las estaciones ahora mismo
 (revisa qué versión quedó instalada — la 1.0.0 que se generó durante esta
 instalación), espera a que una estación revise (o ciérrala y ábrela de
 nuevo), y confirma que aparece el diálogo de actualización.
+
+## 12. Actualizar el servidor cuando la versión trae cambios de base de datos
+
+Algunas versiones, no todas, agregan tablas o columnas nuevas. En esas, además
+de publicar el instalador (sección 11), hay que actualizar el código del
+backend en el servidor y su base **antes** de que las estaciones usen la
+versión nueva. Si no, la app nueva le pide al servidor cosas que todavía no
+existen.
+
+Por SSH desde tu laptop (`ssh zepol`), o en una consola del servidor:
+
+```powershell
+cd C:\Users\Almacen\zepol\ZEPOL-ltda.-
+git pull
+cd sistema-mp\backend
+.venv\Scripts\python.exe scripts\<script de la versión>.py
+```
+
+Después reinicia el backend (ver "Dejarlo corriendo permanentemente": tarea
+programada "Zepol Backend"), y comprueba que `http://<ip-servidor>:8000/health`
+responda.
+
+**Versión 1.0.12 (Producto Terminado):**
+
+1. `scripts\migrar_producto_terminado.py`: crea las tablas
+   `productos_terminados`, `producto_terminado_items` y `pesajes_pt`. Se puede
+   correr más de una vez sin problema.
+2. `scripts\cargar_producto_terminado.py`: carga los productos, el Pedido
+   Total y la unidad de todas las OT que ya están en la base, leyendo el Excel
+   OC-MP una sola vez (~15 s). **Tiene que correrse desde una sesión donde se
+   vea el Excel**. Si la ruta configurada es una unidad mapeada (`Z:\...`),
+   eso es la sesión de escritorio del servidor, no una sesión SSH. Si no se
+   corre, igual funciona: cada OT lee sus productos del Excel la primera vez
+   que alguien la abre en Producto Terminado.

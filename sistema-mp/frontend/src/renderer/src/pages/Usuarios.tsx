@@ -19,6 +19,7 @@ const MODULOS: { value: Modulo; label: string }[] = [
   { value: 'registrar_entrega', label: 'Registrar Entrega' },
   { value: 'registrar_devolucion', label: 'Registrar Devolución' },
   { value: 'registro_sid', label: 'Registro SID' },
+  { value: 'producto_terminado', label: 'Producto Terminado' },
   { value: 'materiales', label: 'Materiales' },
   { value: 'maquinas', label: 'Máquinas' },
   { value: 'excel_oc_mp', label: 'Excel OC-MP' }

@@ -346,6 +346,62 @@ CREATE TABLE devolucion_bobinas (
 );
 
 -- ============================================================
+-- Producto terminado (formulario P-LOG-001-F-04 y pesaje de PT)
+-- ============================================================
+
+-- Una fila por OT que entró al módulo de Producto Terminado. Los productos
+-- y el total salen del Excel OC-MP en el momento en que se abre (no se
+-- vuelven a releer solos). pedido_total y los total de cada ítem se guardan
+-- TAL COMO los escribe el Excel: en MILLAR es el número en miles (27.00 =
+-- 27000 bolsas); la conversión se hace al calcular, ver
+-- producto_terminado_controller.
+CREATE TABLE productos_terminados (
+    id            SERIAL PRIMARY KEY,
+    ot_id         INTEGER       NOT NULL UNIQUE REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
+    -- NULL = la columna "Med." del Excel no se reconoció y alguien tiene que
+    -- confirmar la unidad a mano antes de pesar.
+    unidad        VARCHAR(10)   CHECK (unidad IN ('KG', 'BOLSAS', 'MILLAR')),
+    medida_excel  VARCHAR(20),
+    pedido_total  NUMERIC(14,3),
+    -- Se elige a mano en la pantalla (Bs, $us u otra): la OT no la guarda.
+    moneda        VARCHAR(20),
+    creado_en     TIMESTAMP     NOT NULL DEFAULT now()
+);
+
+CREATE TABLE producto_terminado_items (
+    id                     SERIAL PRIMARY KEY,
+    producto_terminado_id  INTEGER       NOT NULL REFERENCES productos_terminados(id) ON DELETE CASCADE,
+    numero                 SMALLINT      NOT NULL CHECK (numero > 0),
+    codigo_producto        VARCHAR(50),
+    descripcion_producto   VARCHAR(255),
+    total                  NUMERIC(14,3),
+    UNIQUE (producto_terminado_id, numero)
+);
+
+-- Un pesado individual (una bobina o un paquete). Sin ON DELETE CASCADE a
+-- propósito: borrar una OT con pesajes tiene que fallar, no llevárselos.
+CREATE TABLE pesajes_pt (
+    id                     SERIAL PRIMARY KEY,
+    producto_terminado_id  INTEGER       NOT NULL REFERENCES productos_terminados(id),
+    -- N° BOB/PAQ de la etiqueta: correlativo dentro de la OT.
+    numero                 INTEGER       NOT NULL CHECK (numero > 0),
+    fecha                  DATE          NOT NULL,
+    hora                   TIME          NOT NULL DEFAULT current_time,
+    peso_bruto             NUMERIC(10,3) NOT NULL CHECK (peso_bruto > 0),
+    tara                   NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (tara >= 0),
+    -- Solo BOLSAS/MILLAR (NULL en KG). Bolsas del paquete, en unidades,
+    -- también cuando el pedido está en millares.
+    cantidad               NUMERIC(14,3) CHECK (cantidad > 0),
+    usuario_id             INTEGER       NOT NULL REFERENCES usuarios(id),
+    creado_en              TIMESTAMP     NOT NULL DEFAULT now(),
+    -- Quién lo corrigió y cuándo (mismo criterio que entregas.editado_por_id).
+    editado_por_id         INTEGER       REFERENCES usuarios(id),
+    editado_en             TIMESTAMP,
+    UNIQUE (producto_terminado_id, numero),
+    CHECK (tara < peso_bruto)
+);
+
+-- ============================================================
 -- Vista de consumo neto por pedido (material dentro de una OT+proceso)
 -- ============================================================
 

@@ -631,6 +631,11 @@ def aplicar_cambios_excel(
 
     _eliminar_materiales_removidos_del_excel(db, ot, datos_excel)
 
+    # Import local: producto_terminado_controller importa este módulo.
+    from . import producto_terminado_controller
+
+    producto_terminado_controller.sincronizar_desde_excel(db, ot, datos_excel)
+
     db.commit()
     db.refresh(ot)
     return ot
@@ -810,6 +815,8 @@ def _ot_sin_movimientos_reales(ot: OrdenTrabajo) -> bool:
     for pendiente in ot.pendientes:
         if pendiente.materias_primas or pendiente.ingresos:
             return False
+    if ot.producto_terminado is not None and ot.producto_terminado.pesajes:
+        return False
     return True
 
 
@@ -842,6 +849,12 @@ def _borrar_estructura_ot(db: Session, ot: OrdenTrabajo) -> None:
         for ingreso in list(pendiente.ingresos):
             db.delete(ingreso)
         db.delete(pendiente)
+
+    # Solo llega acá sin pesajes (eliminar_ot y _ot_sin_movimientos_reales lo
+    # chequean antes); los ítems se van con él por el cascade.
+    if ot.producto_terminado is not None:
+        db.delete(ot.producto_terminado)
+        db.flush()
 
     db.delete(ot)
 
@@ -945,6 +958,11 @@ def eliminar_ot(db: Session, numero_ot: str, borrar_excel: bool = False) -> Dict
             "Esta OT ya tiene movimientos con el SID registrado — no se puede eliminar. "
             f"Desmarcalos primero en Registro SID (fijate en esa fecha): {detalle}",
         )
+    if ot.producto_terminado is not None and ot.producto_terminado.pesajes:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "Esta OT ya tiene pesajes de producto terminado registrados — no se puede eliminar.",
+        )
 
     numero_ot_normalizado = ot.numero_ot
     _borrar_estructura_ot(db, ot)
@@ -1027,6 +1045,11 @@ def guardar_desde_excel(
                 cantidad_requerida=material_excel["cantidad_requerida"],
             )
         )
+
+    # Import local: producto_terminado_controller importa este módulo.
+    from . import producto_terminado_controller
+
+    producto_terminado_controller.sincronizar_desde_excel(db, ot, datos)
 
     db.commit()
     db.refresh(ot)

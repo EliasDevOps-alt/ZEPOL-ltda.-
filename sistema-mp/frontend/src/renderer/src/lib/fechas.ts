@@ -50,6 +50,13 @@ export function formatearFechaHora(fechaISO: string, horaISO: string): string {
   return `${dia}/${mes}/${anio} ${horaISO.slice(0, 5)}`
 }
 
+/** 'YYYY-MM-DD' a 'DD/MM/YYYY', con split por la misma razón que
+ * formatearFechaHora. */
+export function formatearFecha(fechaISO: string): string {
+  const [anio, mes, dia] = fechaISO.split('-')
+  return `${dia}/${mes}/${anio}`
+}
+
 /** Timestamp completo (fecha_creacion, editado_en, creado_en) a
  * 'DD/MM/YYYY HH:MM'. Estos sí llevan 'T' y sin offset, así que
  * `new Date(...)` los interpreta en hora local del navegador — que es la

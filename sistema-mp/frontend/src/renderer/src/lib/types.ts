@@ -9,6 +9,7 @@ export type Modulo =
   | 'materiales'
   | 'maquinas'
   | 'excel_oc_mp'
+  | 'producto_terminado'
 
 export interface Usuario {
   id: number
@@ -560,4 +561,86 @@ export interface OtTerminada {
   // Fecha del último movimiento = cuándo terminó realmente la OT.
   ultima_fecha: string | null
   total_movimientos: number
+}
+
+export type UnidadPt = 'KG' | 'BOLSAS' | 'MILLAR'
+
+export interface ProductoTerminadoItem {
+  numero: number
+  codigo_producto: string | null
+  descripcion_producto: string | null
+  // Como en el Excel: en MILLAR va en miles.
+  total: number | null
+}
+
+export interface ProductoTerminado {
+  numero_ot: string
+  cliente: string | null
+  vendedor: string | null
+  ciudad: string | null
+  fecha_pedido: string | null
+  fecha_entrega: string | null
+  // R / N / Rc-Arte, tal como está en el Excel.
+  tipo_trabajo: string | null
+  // null = "Med." del Excel no se reconoció: hay que confirmarla a mano.
+  unidad: UnidadPt | null
+  medida_excel: string | null
+  // Como en el Excel (en MILLAR, en miles) — lo que se imprime.
+  pedido_total: number | null
+  // En unidades reales — contra esto se calcula el avance.
+  pedido_total_real: number | null
+  // Elegida a mano (Bs, $us u otra): la OT no la guarda.
+  moneda: string | null
+  items: ProductoTerminadoItem[]
+}
+
+export interface PesajePtCreate {
+  fecha: string
+  peso_bruto: number
+  tara: number
+  // Bolsas del paquete, en unidades (también en una OT en MILLAR). Sin
+  // cantidad en KG.
+  cantidad: number | null
+}
+
+export interface PesajePt {
+  id: number
+  // N° BOB/PAQ de la etiqueta.
+  numero: number
+  fecha: string
+  hora: string
+  peso_bruto: number
+  tara: number
+  peso_neto: number
+  // Bolsas del paquete, en unidades; null en KG.
+  cantidad: number | null
+  // Inicial del usuario que pesó.
+  pesador: string
+  pesador_nombre: string
+  // Quién lo corrigió y cuándo; null si nunca se editó.
+  editado_por: string | null
+  editado_en: string | null
+}
+
+/** Una "tanda" del formulario en papel: todo lo pesado en un día. */
+export interface DiaPesajePt {
+  fecha: string
+  // Pq (bolsas/millar) o Bo (kg).
+  paquetes: number
+  // Bolsas en BOLSAS/MILLAR; peso neto en KG.
+  to: number
+  kg: number
+  pesadores: string[]
+  to_acumulado: number
+  // Sin redondear (se redondea al mostrar, 40.5 → 41 como en el papel).
+  porcentaje_acumulado: number | null
+}
+
+export interface PesajesPt {
+  pesajes: PesajePt[]
+  dias: DiaPesajePt[]
+  total_to: number
+  total_kg: number
+  total_paquetes: number
+  porcentaje: number | null
 }

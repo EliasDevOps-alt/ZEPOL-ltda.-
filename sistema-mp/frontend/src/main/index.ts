@@ -25,6 +25,8 @@ function writeConfig(config: AppConfig): void {
   writeFileSync(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf-8')
 }
 
+let ventanaPrincipal: BrowserWindow | null = null
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1200,
@@ -34,6 +36,10 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false
     }
+  })
+  ventanaPrincipal = win
+  win.on('closed', () => {
+    if (ventanaPrincipal === win) ventanaPrincipal = null
   })
 
   if (process.env['ELECTRON_RENDERER_URL']) {
@@ -178,19 +184,23 @@ function iniciarAutoUpdate(): void {
   autoUpdater.autoInstallOnAppQuit = true
 
   autoUpdater.on('update-downloaded', () => {
-    dialog
-      .showMessageBox({
-        type: 'info',
-        title: 'Actualización disponible',
-        message: 'Hay una nueva versión de ZEPOL Control MP lista para instalar.',
-        detail: 'Guarda cualquier cambio pendiente. La app se cerrará y reabrirá ya actualizada.',
-        buttons: ['Actualizar ahora', 'Más tarde'],
-        defaultId: 0,
-        cancelId: 1
-      })
-      .then((resultado) => {
-        if (resultado.response === 0) autoUpdater.quitAndInstall()
-      })
+    // Con la ventana como padre el aviso queda encima de la app; sin padre
+    // podía quedar oculto detrás y nadie sabía que había algo por confirmar.
+    const opciones = {
+      type: 'info' as const,
+      title: 'Actualización disponible',
+      message: 'Hay una nueva versión de ZEPOL Control MP lista para instalar.',
+      detail: 'Guarda cualquier cambio pendiente. La app se cerrará y reabrirá ya actualizada.',
+      buttons: ['Actualizar ahora', 'Más tarde'],
+      defaultId: 0,
+      cancelId: 1
+    }
+    const aviso = ventanaPrincipal
+      ? dialog.showMessageBox(ventanaPrincipal, opciones)
+      : dialog.showMessageBox(opciones)
+    aviso.then((resultado) => {
+      if (resultado.response === 0) autoUpdater.quitAndInstall()
+    })
   })
 
   autoUpdater.on('error', (err) => {
@@ -201,7 +211,29 @@ function iniciarAutoUpdate(): void {
   setInterval(revisarActualizaciones, UNA_HORA_MS)
 }
 
+// Una sola instancia. Sin esto, cada vez que alguien reabría la app mientras la
+// anterior seguía colgada o arrancando se apilaba otra (en una PC llegaron a
+// juntarse ~40 procesos), y cada una intentaba descargar/instalar la
+// actualización a la vez: el instalador se quedaba esperando que se cerraran.
+const esLaUnicaInstancia = app.requestSingleInstanceLock()
+if (!esLaUnicaInstancia) app.quit()
+
+app.on('second-instance', () => {
+  // Si la app quedó abierta pero sin ventana (pasó en una PC: el usuario
+  // hacía clic y "no abría nada"), la segunda instancia se cierra sola por el
+  // bloqueo de arriba — sin esto, tampoco aparecería nada. Se crea la ventana
+  // de nuevo en la instancia que sí está viva.
+  if (!ventanaPrincipal) {
+    if (app.isReady()) createWindow()
+    return
+  }
+  if (ventanaPrincipal.isMinimized()) ventanaPrincipal.restore()
+  ventanaPrincipal.show()
+  ventanaPrincipal.focus()
+})
+
 app.whenReady().then(() => {
+  if (!esLaUnicaInstancia) return
   ipcMain.handle('config:get', () => readConfig())
   ipcMain.handle('config:set', (_event, config: AppConfig) => {
     writeConfig(config)

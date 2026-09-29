@@ -234,15 +234,33 @@ def _procesar_fila_oc_mp(row: tuple, resultado: Optional[Dict[str, Any]], numero
     vienen repetidos idénticos en ambas filas — es el total de la OT entera,
     no de cada producto — así que esos se dejan como están, de la primera
     fila. Descripción y código sí difieren fila por fila, así que se
-    concatenan para no perder ninguno."""
+    concatenan para no perder ninguno.
+
+    Ojo con total_ot: lo de arriba (total repetido idéntico) resultó ser
+    falso para el total. Cada fila es un producto con SU PROPIO total, aunque
+    los números coincidan: 218773 es Canela 150 / Pimienta 75 / Jengibre 75
+    (300), y 220196 es Quinua 125 / Trigo 125 (250, no 125 — confirmado por
+    Elias). En el Excel se ve porque pt_usd de cada fila es pu_usd × el total
+    de ESA fila, y los materiales (cargados solo en la primera fila) alcanzan
+    para la suma, no para uno solo. Por eso cada fila se guarda como un ítem
+    en "productos" (ITEM 1..5 del formulario de Producto Terminado) y
+    total_ot es la suma de los ítems (_total_ot_de_productos)."""
     materiales_fila: List[Dict[str, Any]] = []
     for col_codigo, col_cantidad in COLS_MATERIALES:
         codigo = _texto(_valor(row, col_codigo))
         if codigo:
             materiales_fila.append({"codigo_mp": codigo, "cantidad_requerida": _numero(_valor(row, col_cantidad))})
 
+    producto_fila = {
+        "codigo_producto": _texto(_valor(row, COL_CODIGO_PRODUCTO)),
+        "descripcion_producto": _texto(_valor(row, COL_DESCRIPCION)),
+        "total": _numero(_valor(row, COL_TOTAL_OT)),
+    }
+    tiene_producto = any(v is not None for v in producto_fila.values())
+
     if resultado is None:
         return {
+            "productos": [producto_fila] if tiene_producto else [],
             "numero_ot": numero_ot,
             "fecha_seguimiento_mp": _fecha(_valor(row, COL_FECHA_SEGUIMIENTO)),
             "alm": _texto(_valor(row, COL_ALM)),
@@ -275,7 +293,23 @@ def _procesar_fila_oc_mp(row: tuple, resultado: Optional[Dict[str, Any]], numero
         valor = _texto(_valor(row, col))
         if valor and valor != resultado[campo] and valor not in (resultado[campo] or "").split(" / "):
             resultado[campo] = f"{resultado[campo]} / {valor}" if resultado[campo] else valor
+    # Una fila idéntica (mismo código, descripción y total) es la misma pieza
+    # repetida — ej. la fila extra de una OT con más de 6 materiales — no un
+    # producto más.
+    if tiene_producto and producto_fila not in resultado["productos"]:
+        resultado["productos"].append(producto_fila)
+    resultado["total_ot"] = _total_ot_de_productos(resultado["productos"])
     return resultado
+
+
+def _total_ot_de_productos(productos: List[Dict[str, Any]]) -> Optional[float]:
+    """Total del pedido de una OT: la suma del total de cada producto (una
+    fila de 'oc mp' por producto). Siempre se suma, aunque dos productos
+    pidan lo mismo (220196: 125 + 125 = 250). Solo una fila repetida entera
+    —mismo código, descripción y total— cuenta una vez, y eso ya lo filtra
+    _procesar_fila_oc_mp al armar "productos"."""
+    totales = [p["total"] for p in productos if p["total"] is not None]
+    return sum(totales) if totales else None
 
 
 def leer_todas_oc_mp(db: Session) -> Dict[str, Dict[str, Any]]:

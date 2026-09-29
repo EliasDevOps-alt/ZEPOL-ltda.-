@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ClipboardCheck, FileText, Loader2, Printer, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -18,6 +18,7 @@ import {
   type DatosOtFormularioMp
 } from '@renderer/lib/formularioMp'
 import type { OtTerminada } from '@renderer/lib/types'
+import { VisorHojas } from '@renderer/components/VisorHojas'
 
 // Carta horizontal a 96dpi, para dibujar las hojas en la vista previa.
 const PAGINA_ANCHO_PX = Math.round((MEDIDAS_FORMULARIO_MP.anchoPt * 96) / 72)
@@ -267,8 +268,6 @@ function FormularioMp({
   const { sesion } = useAuth()
   const token = sesion!.token
   const [estado, setEstado] = useState<EstadoExport>({ tipo: 'inactivo' })
-  const contenedorRef = useRef<HTMLDivElement>(null)
-  const [escala, setEscala] = useState(1)
 
   const movimientos = useQuery({
     queryKey: ['reporte-movimientos', numerosOt],
@@ -307,18 +306,6 @@ function FormularioMp({
   )
   const hojas = Math.max(1, Math.ceil(bloques.length / MEDIDAS_FORMULARIO_MP.bloquesPorPagina))
   const altoPreviaPx = hojas * PAGINA_ALTO_PX + (hojas - 1) * SEPARACION_PX
-
-  useLayoutEffect(() => {
-    const contenedor = contenedorRef.current
-    if (!contenedor) return
-    // El padding del contenedor no cuenta para el ancho útil de la hoja.
-    const medir = (): void =>
-      setEscala(Math.min(1, (contenedor.clientWidth - 16) / PAGINA_ANCHO_PX))
-    medir()
-    const observador = new ResizeObserver(medir)
-    observador.observe(contenedor)
-    return () => observador.disconnect()
-  }, [movimientos.data])
 
   const exportando = estado.tipo === 'exportando'
 
@@ -408,22 +395,15 @@ function FormularioMp({
             </p>
           )}
 
-          <div ref={contenedorRef} className="overflow-hidden rounded-md bg-muted p-2">
-            <div style={{ height: altoPreviaPx * escala }}>
-              <iframe
-                title="Vista previa del formulario"
-                srcDoc={htmlPantalla}
-                scrolling="no"
-                style={{
-                  width: PAGINA_ANCHO_PX,
-                  height: altoPreviaPx,
-                  border: 0,
-                  transform: `scale(${escala})`,
-                  transformOrigin: 'top left'
-                }}
-              />
-            </div>
-          </div>
+          {/* Las hojas ya vienen dibujadas dentro del HTML de pantalla (todas en
+              un solo documento), así que el visor va sin marco propio. */}
+          <VisorHojas
+            hojas={[htmlPantalla]}
+            anchoPx={PAGINA_ANCHO_PX}
+            altoPx={altoPreviaPx}
+            conMarco={false}
+            titulo="Vista previa del formulario"
+          />
         </CardContent>
       </Card>
     </div>

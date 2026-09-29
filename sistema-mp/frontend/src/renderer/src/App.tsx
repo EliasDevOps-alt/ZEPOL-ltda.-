@@ -6,11 +6,11 @@ import { Login } from './pages/Login'
 import { Layout } from './components/Layout'
 import { RegistrarEntrega } from './pages/RegistrarEntrega'
 import { RegistrarDevolucion } from './pages/RegistrarDevolucion'
-import { Consulta } from './pages/Consulta'
 import { Materiales } from './pages/Materiales'
 import { Maquinas } from './pages/Maquinas'
 import { ConfiguracionExcel } from './pages/ConfiguracionExcel'
 import { RegistroSid } from './pages/RegistroSid'
+import { Consulta } from './pages/Consulta'
 import { ProductoTerminado } from './pages/ProductoTerminado'
 import { Reportes } from './pages/Reportes'
 import { Historial } from './pages/Historial'
@@ -67,7 +67,6 @@ export default function App() {
             </RutaConAcceso>
           }
         />
-        <Route path="consulta" element={<Consulta />} />
         <Route
           path="materiales"
           element={
@@ -108,7 +107,17 @@ export default function App() {
             </RutaConAcceso>
           }
         />
-        <Route path="producto-terminado" element={<ProductoTerminado />} />
+        <Route path="consulta" element={<Consulta />} />
+        <Route
+          path="producto-terminado"
+          element={
+            <RutaConAcceso modulo="producto_terminado">
+              <ProductoTerminado />
+            </RutaConAcceso>
+          }
+        />
+        {/* El registro de pesaje ahora es una pestaña de Producto Terminado. */}
+        <Route path="producto-terminado/pesaje" element={<Navigate to="/producto-terminado" replace />} />
         <Route path="reportes" element={<Reportes />} />
         <Route
           path="crear-ot"
