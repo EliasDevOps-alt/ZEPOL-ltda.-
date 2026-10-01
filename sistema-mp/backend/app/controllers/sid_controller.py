@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..models import Devolucion, Entrega, EstadoSid, OtMaterial
+from ..models import Devolucion, Entrega, EstadoSid, OtMaterial, Usuario
 
 NOMBRE_PENDIENTE = "PENDIENTE"
 NOMBRE_COMPLETADO = "COMPLETADO"
@@ -32,12 +32,13 @@ def recalcular_estado_entrega(db: Session, ot_material: OtMaterial) -> None:
     ot_material.estado_sid_id = _estado_por_nombre(db, NOMBRE_COMPLETADO if completo else NOMBRE_PENDIENTE).id
 
 
-def marcar_entrega_sid(db: Session, entrega_id: int, completado: bool) -> Entrega:
+def marcar_entrega_sid(db: Session, usuario: Usuario, entrega_id: int, completado: bool) -> Entrega:
     entrega = db.get(Entrega, entrega_id)
     if entrega is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Entrega no encontrada")
     entrega.sid_completado = completado
     entrega.sid_completado_en = datetime.now() if completado else None
+    entrega.sid_completado_por_id = usuario.id if completado else None
     db.flush()
     recalcular_estado_entrega(db, entrega.ot_material)
     db.commit()
@@ -54,12 +55,13 @@ def recalcular_sid_devolucion(db: Session, ot_material: OtMaterial) -> None:
     ot_material.sid_devolucion_completado = bool(devoluciones) and all(d.sid_completado for d in devoluciones)
 
 
-def marcar_devolucion_sid(db: Session, devolucion_id: int, completado: bool) -> Devolucion:
+def marcar_devolucion_sid(db: Session, usuario: Usuario, devolucion_id: int, completado: bool) -> Devolucion:
     devolucion = db.get(Devolucion, devolucion_id)
     if devolucion is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Devolución no encontrada")
     devolucion.sid_completado = completado
     devolucion.sid_completado_en = datetime.now() if completado else None
+    devolucion.sid_completado_por_id = usuario.id if completado else None
     db.flush()
     # Un ingreso a almacén suelto (registrado contra un pendiente, sin pedido)
     # también tiene su propio SID que tramitar, pero no hay un pedido cuyo

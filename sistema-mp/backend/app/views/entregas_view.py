@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas, security
 from ..controllers import entregas_controller, sid_controller
-from ..controllers.pedidos_controller import materiales_entregados_pedido, total_entregado_pedido
+from ..controllers.pedidos_controller import materiales_entregados_pedido, sumar_cantidades, total_entregado_pedido
 from ..database import get_db
 from ..models import Entrega, OtMaterial, Usuario
 
@@ -36,7 +36,7 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         fecha=entrega.fecha,
         hora=entrega.hora,
         bobinas=[float(b.cantidad) for b in sorted(entrega.bobinas, key=lambda b: b.numero)],
-        total_entregado=sum(float(b.cantidad) for b in entrega.bobinas),
+        total_entregado=sumar_cantidades(b.cantidad for b in entrega.bobinas),
         cantidad_requerida=float(ot_material.cantidad_requerida) if ot_material.cantidad_requerida else None,
         total_entregado_pedido=total_entregado_pedido(ot_material),
         material_entregado_id=entrega.material_id,
@@ -45,6 +45,7 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         usa_bobinas=entrega.material.usa_bobinas,
         sid_completado=entrega.sid_completado,
         sid_completado_en=entrega.sid_completado_en,
+        sid_completado_por=entrega.sid_completado_por.inicial if entrega.sid_completado_por else None,
         observacion=entrega.observacion,
         pedido_creado=pedido_creado,
         editado_por=entrega.editado_por.inicial if entrega.editado_por else None,
@@ -78,8 +79,12 @@ def listar_entregas(numero_ot: Optional[str] = None, db: Session = Depends(get_d
     response_model=schemas.EntregaOut,
     dependencies=[Depends(security.requiere_modulo("registro_sid"))],
 )
-def marcar_sid_completado(entrega_id: int, db: Session = Depends(get_db)):
-    entrega = sid_controller.marcar_entrega_sid(db, entrega_id, True)
+def marcar_sid_completado(
+    entrega_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    entrega = sid_controller.marcar_entrega_sid(db, usuario, entrega_id, True)
     return _serializar(entrega)
 
 
@@ -88,8 +93,12 @@ def marcar_sid_completado(entrega_id: int, db: Session = Depends(get_db)):
     response_model=schemas.EntregaOut,
     dependencies=[Depends(security.requiere_modulo("registro_sid"))],
 )
-def marcar_sid_pendiente(entrega_id: int, db: Session = Depends(get_db)):
-    entrega = sid_controller.marcar_entrega_sid(db, entrega_id, False)
+def marcar_sid_pendiente(
+    entrega_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    entrega = sid_controller.marcar_entrega_sid(db, usuario, entrega_id, False)
     return _serializar(entrega)
 
 

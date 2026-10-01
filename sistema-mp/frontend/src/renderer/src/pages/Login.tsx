@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { motion } from 'framer-motion'
 import { RefreshCw, Settings2 } from 'lucide-react'
@@ -12,6 +12,40 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
+import type { UsuarioLogin } from '@renderer/lib/types'
+
+// La lista de usuarios casi nunca cambia, así que se guarda en esta PC y se
+// muestra al instante al abrir la app; mientras tanto se pide la lista
+// actualizada al servidor y se reemplaza apenas llega. Todo el acceso al
+// almacenamiento va con try/catch: si no está disponible, simplemente se
+// espera al servidor como antes.
+const CLAVE_USUARIOS = 'zepol.login.usuarios'
+const CLAVE_ULTIMO = 'zepol.login.ultimo'
+
+function leerUsuariosGuardados(url: string): UsuarioLogin[] | undefined {
+  try {
+    const crudo = localStorage.getItem(`${CLAVE_USUARIOS}:${url}`)
+    return crudo ? (JSON.parse(crudo) as UsuarioLogin[]) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function guardarUsuarios(url: string, lista: UsuarioLogin[]): void {
+  try {
+    localStorage.setItem(`${CLAVE_USUARIOS}:${url}`, JSON.stringify(lista))
+  } catch {
+    // Sin almacenamiento: se sigue funcionando sin caché.
+  }
+}
+
+function leerUltimoUsuario(): string {
+  try {
+    return localStorage.getItem(CLAVE_ULTIMO) ?? ''
+  } catch {
+    return ''
+  }
+}
 
 export function Login() {
   const { iniciarSesion } = useAuth()
@@ -19,9 +53,20 @@ export function Login() {
   const usuarios = useQuery({
     queryKey: ['usuarios-login', apiBaseUrl],
     queryFn: () => api.listarUsuariosLogin(apiBaseUrl),
-    enabled: loaded
+    enabled: loaded,
+    // Lo guardado se muestra ya, pero cuenta como viejo (updatedAt = 0): la
+    // consulta real se lanza igual apenas arranca y lo reemplaza.
+    initialData: () => leerUsuariosGuardados(apiBaseUrl),
+    initialDataUpdatedAt: 0,
+    // Si la primera conexión se cuelga, reintenta rápido (cada 0,8 s) en vez
+    // de esperar el tiempo largo por defecto.
+    retry: 3,
+    retryDelay: 800
   })
-  const [inicial, setInicial] = useState('')
+  useEffect(() => {
+    if (usuarios.isSuccess && usuarios.data && !usuarios.isPlaceholderData) guardarUsuarios(apiBaseUrl, usuarios.data)
+  }, [usuarios.isSuccess, usuarios.data, usuarios.isPlaceholderData, apiBaseUrl])
+  const [inicial, setInicial] = useState(leerUltimoUsuario)
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [cargando, setCargando] = useState(false)
@@ -54,6 +99,11 @@ export function Login() {
     setCargando(true)
     try {
       await iniciarSesion(inicial, password)
+      try {
+        localStorage.setItem(CLAVE_ULTIMO, inicial)
+      } catch {
+        // Solo es una comodidad.
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'No se pudo conectar con el servidor')
     } finally {
@@ -87,7 +137,7 @@ export function Login() {
                 <Label>Usuario</Label>
                 <Select value={inicial} onValueChange={setInicial}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecciona tu nombre" />
+                    <SelectValue placeholder={usuarios.isFetching && !usuarios.data ? 'Conectando con el servidor...' : 'Selecciona tu nombre'} />
                   </SelectTrigger>
                   <SelectContent>
                     {usuarios.data?.map((u) => (

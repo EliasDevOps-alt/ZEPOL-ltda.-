@@ -1,5 +1,5 @@
 import type { FormEvent } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -41,6 +41,38 @@ export function Consulta() {
     enabled: !!otBuscada
   })
 
+  // Los ingresos a almacén de un material fabricado que todavía no tiene
+  // pedido (ver "Registrar ingreso" en Registrar Devolución) no existen en
+  // /consumo, así que se piden aparte y se suman como filas propias.
+  const devoluciones = useQuery({
+    queryKey: ['devoluciones-consulta', otBuscada],
+    queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada
+  })
+
+  const ingresosSueltos = useMemo(() => {
+    const porMaterial = new Map<
+      number,
+      { material_id: number; codigo_mp: string; unidad: string; total: number; todoEnSid: boolean }
+    >()
+    for (const d of devoluciones.data ?? []) {
+      if (!d.es_ingreso_produccion || d.ot_material_id != null) continue
+      const actual = porMaterial.get(d.material_id)
+      porMaterial.set(d.material_id, {
+        material_id: d.material_id,
+        codigo_mp: d.codigo_mp,
+        unidad: d.unidad,
+        total: (actual?.total ?? 0) + d.total_devuelto,
+        todoEnSid: (actual?.todoEnSid ?? true) && d.sid_completado
+      })
+    }
+    return [...porMaterial.values()]
+  }, [devoluciones.data])
+
+  const filasConsumo = consumo.data ?? []
+  const hayFilas = filasConsumo.length > 0 || ingresosSueltos.length > 0
+  const cabecera = filasConsumo[0] ?? (devoluciones.data ?? []).find((d) => d.es_ingreso_produccion)
+
   function buscar(e: FormEvent) {
     e.preventDefault()
     setOtBuscada(numeroOt)
@@ -68,15 +100,15 @@ export function Consulta() {
         </CardContent>
       </Card>
 
-      {consumo.isSuccess && consumo.data.length === 0 && (
+      {consumo.isSuccess && devoluciones.isSuccess && !hayFilas && (
         <p className="text-sm text-muted-foreground">No hay movimientos para esa OT.</p>
       )}
 
-      {consumo.data && consumo.data.length > 0 && (
+      {hayFilas && cabecera && (
         <Card>
           <CardContent className="p-6 pb-0 text-sm text-muted-foreground">
-            {consumo.data[0].cliente ?? 'Sin cliente'}
-            {consumo.data[0].diseno ? ` · Descripción: ${consumo.data[0].diseno}` : ''}
+            {cabecera.cliente ?? 'Sin cliente'}
+            {'diseno' in cabecera && cabecera.diseno ? ` · Descripción: ${cabecera.diseno}` : ''}
           </CardContent>
           <CardContent className="overflow-x-auto p-0">
             <table className="w-full text-sm">
@@ -88,13 +120,14 @@ export function Consulta() {
                   <th className="p-3 text-right">Requerido</th>
                   <th className="p-3 text-right">Entregado</th>
                   <th className="p-3 text-right">Devuelto</th>
+                  <th className="p-3 text-right">Ingresó a almacén</th>
                   <th className="p-3 text-right">Consumo neto</th>
                   <th className="p-3">Avance</th>
                   <th className="p-3">Estado SID</th>
                 </tr>
               </thead>
               <tbody>
-                {consumo.data.map((row) => (
+                {filasConsumo.map((row) => (
                   <tr key={row.ot_material_id} className="border-b border-border last:border-0">
                     <td className="p-3">{row.proceso}</td>
                     <td className="p-3">{row.maquina}</td>
@@ -108,6 +141,9 @@ export function Consulta() {
                     <td className="p-3 text-right">
                       {row.total_devuelto} {row.unidad}
                     </td>
+                    <td className="p-3 text-right">
+                      {row.total_ingresado > 0 ? `${row.total_ingresado} ${row.unidad}` : '—'}
+                    </td>
                     <td className="p-3 text-right font-medium">
                       {row.consumo_neto} {row.unidad}
                     </td>
@@ -115,6 +151,27 @@ export function Consulta() {
                       <BadgeEstado estado={row.estado_entrega} />
                     </td>
                     <td className="p-3 text-muted-foreground">{row.estado_sid}</td>
+                  </tr>
+                ))}
+                {ingresosSueltos.map((ing) => (
+                  <tr key={`ingreso-${ing.material_id}`} className="border-b border-border last:border-0">
+                    <td className="p-3 text-muted-foreground">—</td>
+                    <td className="p-3 text-muted-foreground">—</td>
+                    <td className="p-3">
+                      {ing.codigo_mp}
+                      <span className="ml-2 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                        material fabricado
+                      </span>
+                    </td>
+                    <td className="p-3 text-right text-muted-foreground">—</td>
+                    <td className="p-3 text-right text-muted-foreground">—</td>
+                    <td className="p-3 text-right text-muted-foreground">—</td>
+                    <td className="p-3 text-right">
+                      {ing.total} {ing.unidad}
+                    </td>
+                    <td className="p-3 text-right text-muted-foreground">—</td>
+                    <td className="p-3 text-muted-foreground">—</td>
+                    <td className="p-3 text-muted-foreground">{ing.todoEnSid ? 'COMPLETADO' : 'PENDIENTE'}</td>
                   </tr>
                 ))}
               </tbody>

@@ -397,6 +397,8 @@ export interface Entrega {
   sid_completado: boolean
   // Cuándo se marcó el check de arriba — null mientras no está marcado.
   sid_completado_en: string | null
+  // Inicial de quien marcó el SID (null si no se sabe, p. ej. marcado antes de guardar este dato).
+  sid_completado_por: string | null
   observacion: string | null
   // ot_material_id/proceso/codigo_mp de arriba son los del pedido donde
   // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
@@ -475,6 +477,7 @@ export interface Devolucion {
   proceso: string | null
   material_id: number
   codigo_mp: string
+  descripcion?: string | null
   unidad: string
   usuario: string
   fecha: string
@@ -486,6 +489,8 @@ export interface Devolucion {
   sid_completado: boolean
   // Cuándo se marcó el check de arriba — null mientras no está marcado.
   sid_completado_en: string | null
+  // Inicial de quien marcó el SID (null si no se sabe, p. ej. marcado antes de guardar este dato).
+  sid_completado_por: string | null
   es_ingreso_produccion: boolean
   // Quién la corrigió por última vez y cuándo — ver Entrega.editado_por.
   editado_por: string | null

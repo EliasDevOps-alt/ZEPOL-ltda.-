@@ -15,7 +15,13 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { formatearFechaHora, formatearFechaHoraCompleta } from '@renderer/lib/fechas'
+import {
+  formatearFechaHora,
+  formatearFechaHoraCompleta,
+  hoyISO,
+  mesActualISO,
+  ultimoDiaDelMes
+} from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, Proceso } from '@renderer/lib/types'
 
 const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
@@ -385,6 +391,15 @@ function FilaDevolucion({
   )
 }
 
+type ModoFecha = 'dia' | 'mes' | 'anio' | 'todos'
+
+const MODOS_FECHA: { valor: ModoFecha; etiqueta: string }[] = [
+  { valor: 'dia', etiqueta: 'Día' },
+  { valor: 'mes', etiqueta: 'Mes' },
+  { valor: 'anio', etiqueta: 'Año' },
+  { valor: 'todos', etiqueta: 'Todos' }
+]
+
 export function Historial() {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -392,6 +407,32 @@ export function Historial() {
   const queryClient = useQueryClient()
 
   const [q, setQ] = useState('')
+  // Arranca en el mes actual para no volcar todo el historial al entrar. El
+  // filtro es por la fecha de cada MOVIMIENTO (entrega/devolución/ingreso),
+  // no por la de creación de la OT: una OT vieja que recibió material este
+  // mes tiene que aparecer en este mes.
+  const [modoFecha, setModoFecha] = useState<ModoFecha>('mes')
+  const [fecha, setFecha] = useState(mesActualISO())
+
+  const { desde, hasta } = useMemo(() => {
+    if (!fecha) return { desde: '', hasta: '' }
+    if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
+    if (modoFecha === 'mes') return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
+    return { desde: `${fecha}-01-01`, hasta: `${fecha}-12-31` }
+  }, [modoFecha, fecha])
+  const filtrandoPorFecha = modoFecha !== 'todos' && desde !== ''
+
+  function cambiarModoFecha(modo: ModoFecha) {
+    setModoFecha(modo)
+    if (modo === 'dia') setFecha(hoyISO())
+    else if (modo === 'mes') setFecha(mesActualISO())
+    else if (modo === 'anio') setFecha(hoyISO().slice(0, 4))
+    else setFecha('')
+  }
+
+  function enRango(fechaMovimiento: string): boolean {
+    return !filtrandoPorFecha || (fechaMovimiento >= desde && fechaMovimiento <= hasta)
+  }
 
   const ordenes = useQuery({
     queryKey: ['ordenes-trabajo', q],
@@ -441,10 +482,12 @@ export function Historial() {
   const entregasPorPedido = useMemo(() => {
     const mapa = new Map<number, typeof entregas.data>()
     for (const e of entregas.data ?? []) {
+      if (!enRango(e.fecha)) continue
       mapa.set(e.ot_material_id, [...(mapa.get(e.ot_material_id) ?? []), e])
     }
     return mapa
-  }, [entregas.data])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entregas.data, desde, hasta, filtrandoPorFecha])
 
   // Un ingreso a almacén puede no tener pedido todavía (el material se fabricó
   // pero aún no salió hacia ningún proceso). Esos no se agrupan acá: aparecen
@@ -452,11 +495,12 @@ export function Historial() {
   const devolucionesPorPedido = useMemo(() => {
     const mapa = new Map<number, typeof devoluciones.data>()
     for (const d of devoluciones.data ?? []) {
-      if (d.ot_material_id == null) continue
+      if (d.ot_material_id == null || !enRango(d.fecha)) continue
       mapa.set(d.ot_material_id, [...(mapa.get(d.ot_material_id) ?? []), d])
     }
     return mapa
-  }, [devoluciones.data])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devoluciones.data, desde, hasta, filtrandoPorFecha])
 
   // Ingresos de material fabricado que todavía no tienen pedido asignado
   // (ver "Registrar ingreso" en Registrar Devolución) — sin esto, un ingreso
@@ -466,11 +510,30 @@ export function Historial() {
   const ingresosSueltosPorOt = useMemo(() => {
     const mapa = new Map<string, Devolucion[]>()
     for (const d of devoluciones.data ?? []) {
-      if (!d.es_ingreso_produccion || d.ot_material_id != null) continue
+      if (!d.es_ingreso_produccion || d.ot_material_id != null || !enRango(d.fecha)) continue
       mapa.set(d.numero_ot, [...(mapa.get(d.numero_ot) ?? []), d])
     }
     return mapa
-  }, [devoluciones.data])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [devoluciones.data, desde, hasta, filtrandoPorFecha])
+
+  // Pedidos de la OT que se muestran: con filtro de fecha, solo los que tienen
+  // algún movimiento dentro del período (sus totales siguen siendo los reales
+  // de todo el pedido, no los del período).
+  function pedidosVisibles(numeroOt: string): Consumo[] {
+    const todos = consumoPorOt.get(numeroOt) ?? []
+    if (!filtrandoPorFecha) return todos
+    return todos.filter(
+      (p) => entregasPorPedido.has(p.ot_material_id) || devolucionesPorPedido.has(p.ot_material_id)
+    )
+  }
+
+  const ordenesVisibles = (ordenes.data ?? []).filter(
+    (ot) =>
+      !filtrandoPorFecha ||
+      pedidosVisibles(ot.numero_ot).length > 0 ||
+      (ingresosSueltosPorOt.get(ot.numero_ot) ?? []).length > 0
+  )
 
   function buscar(e: FormEvent) {
     e.preventDefault()
@@ -489,6 +552,46 @@ export function Historial() {
               <Search className="h-4 w-4" />
             </Button>
           </form>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
+            <div className="inline-flex rounded-full bg-muted p-1">
+              {MODOS_FECHA.map((m) => (
+                <button
+                  key={m.valor}
+                  type="button"
+                  onClick={() => cambiarModoFecha(m.valor)}
+                  className={cn(
+                    'rounded-full px-4 py-1.5 text-sm font-medium transition-colors',
+                    modoFecha === m.valor
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:text-foreground'
+                  )}
+                >
+                  {m.etiqueta}
+                </button>
+              ))}
+            </div>
+
+            {modoFecha === 'anio' ? (
+              <Input
+                type="number"
+                min={2000}
+                max={2100}
+                value={fecha}
+                onChange={(e) => setFecha(e.target.value)}
+                className="w-28"
+              />
+            ) : (
+              modoFecha !== 'todos' && (
+                <Input
+                  type={modoFecha === 'dia' ? 'date' : 'month'}
+                  value={fecha}
+                  onChange={(e) => setFecha(e.target.value)}
+                  className="w-auto"
+                />
+              )
+            )}
+          </div>
         </CardContent>
       </Card>
 
@@ -507,10 +610,15 @@ export function Historial() {
       {ordenes.data && ordenes.data.length === 0 && (
         <p className="text-sm text-muted-foreground">Sin órdenes de trabajo todavía.</p>
       )}
+      {ordenes.data && ordenes.data.length > 0 && ordenesVisibles.length === 0 && !consumo.isLoading && !entregas.isLoading && (
+        <p className="text-sm text-muted-foreground">
+          No hay entregas ni devoluciones en este período. Probá con otro día, mes o año, o elegí Todos.
+        </p>
+      )}
 
       <div className="flex flex-col gap-8">
-        {ordenes.data?.map((ot) => {
-          const pedidos = consumoPorOt.get(ot.numero_ot) ?? []
+        {ordenesVisibles.map((ot) => {
+          const pedidos = pedidosVisibles(ot.numero_ot)
           const sueltos = ingresosSueltosPorOt.get(ot.numero_ot) ?? []
           const sueltosPorMaterial = new Map<number, Devolucion[]>()
           for (const d of sueltos) sueltosPorMaterial.set(d.material_id, [...(sueltosPorMaterial.get(d.material_id) ?? []), d])

@@ -74,6 +74,26 @@ def health():
 # apretar "Comparar con Excel" -- ver excel_watcher.py para el detalle de
 # por qué es seguro hacerlo sin supervisión.
 @app.on_event("startup")
+async def calentar_base_de_datos() -> None:
+    """Abre la primera conexión a Postgres al arrancar, para que la primera
+    persona en abrir la app no pague el costo de conectar (ni de importar el
+    resto de las tablas) justo en la pantalla de Login."""
+    from sqlalchemy import select
+
+    from .database import SessionLocal
+    from .models import Usuario
+
+    def _calentar() -> None:
+        with SessionLocal() as db:
+            db.scalars(select(Usuario).limit(1)).all()
+
+    try:
+        await asyncio.to_thread(_calentar)
+    except Exception:
+        pass  # si falla, la primera petición real lo vuelve a intentar y muestra el error
+
+
+@app.on_event("startup")
 async def iniciar_vigilante_excel() -> None:
     app.state.tarea_vigilante_excel = asyncio.create_task(bucle_vigilancia_excel())
 

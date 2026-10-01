@@ -403,3 +403,13 @@ responda.
    eso es la sesión de escritorio del servidor, no una sesión SSH. Si no se
    corre, igual funciona: cada OT lee sus productos del Excel la primera vez
    que alguien la abre en Producto Terminado.
+
+**Versión 1.0.13 (quién marcó el SID, tabla en Registro SID, login más rápido):**
+
+1. `scripts\migrar_sid_completado_por.py`: agrega la columna
+   `sid_completado_por_id` a `entregas` y `devoluciones`. **Hay que correrlo
+   ANTES de reiniciar el backend**: con el código nuevo y sin la columna,
+   Entregas y Devoluciones fallan. Se puede correr más de una vez. Los SID que
+   ya estaban marcados quedan sin usuario (solo se ve la hora).
+2. Reiniciar el backend y publicar el instalador de la 1.0.13 en `updates\`.
+

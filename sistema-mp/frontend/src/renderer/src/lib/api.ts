@@ -53,7 +53,7 @@ export class ApiError extends Error {}
 async function request<T>(
   baseUrl: string,
   path: string,
-  options: { method?: string; token?: string | null; body?: unknown } = {}
+  options: { method?: string; token?: string | null; body?: unknown; signal?: AbortSignal } = {}
 ): Promise<T> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (options.token) headers.Authorization = `Bearer ${options.token}`
@@ -61,7 +61,8 @@ async function request<T>(
   const res = await fetch(`${baseUrl}${path}`, {
     method: options.method ?? 'GET',
     headers,
-    body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+    body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    signal: options.signal
   })
 
   if (!res.ok) {
@@ -83,7 +84,10 @@ export function login(baseUrl: string, inicial: string, password: string) {
 // Público a propósito — se pide antes de iniciar sesión, para el selector
 // de usuario en Login.
 export function listarUsuariosLogin(baseUrl: string) {
-  return request<UsuarioLogin[]>(baseUrl, '/auth/usuarios')
+  // Con tiempo límite: si la primera conexión se cuelga (red lenta, servidor
+  // recién despertando), se corta y se reintenta enseguida en vez de dejar la
+  // pantalla esperando sin decir nada.
+  return request<UsuarioLogin[]>(baseUrl, '/auth/usuarios', { signal: AbortSignal.timeout(5000) })
 }
 
 export function listarUsuarios(baseUrl: string, token: string) {

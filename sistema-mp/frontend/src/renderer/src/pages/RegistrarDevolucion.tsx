@@ -14,7 +14,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
-import { cn } from '@renderer/lib/utils'
+import { cn, redondearPeso } from '@renderer/lib/utils'
 import { hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, OtMaterialPendiente } from '@renderer/lib/types'
 
@@ -243,7 +243,7 @@ function IngresoLibreForm({
 
   const registrar = useMutation({
     mutationFn: async () => {
-      const cantidadTotal = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+      const cantidadTotal = redondearPeso(datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0))
       const resultado = await api.resolverIngresoLibre(apiBaseUrl, token, numeroOt, {
         material_id: Number(materialId),
         cantidad_requerida: cantidadTotal
@@ -456,7 +456,8 @@ function PedidoDevolucionCard({
             : 0
         const unidad = seleccionado?.unidad ?? pedido.unidad
         const usaBobinas = seleccionado?.usa_bobinas ?? pedido.usa_bobinas
-        const excedeDisponible = entrada.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0) > disponible
+        const excedeDisponible =
+          redondearPeso(entrada.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)) > disponible
 
         return (
           <div key={indice} className={indice > 0 ? 'mt-3 border-t border-border pt-3' : ''}>

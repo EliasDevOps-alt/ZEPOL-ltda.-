@@ -11,7 +11,11 @@ DATABASE_URL = os.environ.get(
     "postgresql+psycopg://zepol:zepol@localhost:5432/zepol_mp",
 )
 
-engine = create_engine(DATABASE_URL)
+# pool_pre_ping: antes de usar una conexión del pool verifica que siga viva.
+# Sin esto, una conexión que Postgres cerró por inactividad (típico: el
+# servidor sin uso toda la noche) hacía fallar o demorar la primera petición
+# del día, justo la de la pantalla de Login.
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 

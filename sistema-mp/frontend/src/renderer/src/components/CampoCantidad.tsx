@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
+import { redondearPeso } from '@renderer/lib/utils'
 
 export interface BobinasPedido {
   bobinas: string[]
@@ -36,7 +37,7 @@ export function CampoCantidad({
   datos: BobinasPedido
   onChange: (datos: BobinasPedido) => void
 }) {
-  const total = datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)
+  const total = redondearPeso(datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0))
   const sufijo = requerido === undefined ? '' : requerido ? ' (obligatorio)' : ' (opcional)'
 
   if (!usaBobinas) {

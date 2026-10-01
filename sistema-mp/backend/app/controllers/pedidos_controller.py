@@ -1,26 +1,34 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from decimal import Decimal
+from typing import Any, Dict, Iterable, List
 
 from ..models import OtMaterial, OtMaterialPendiente
+
+
+def sumar_cantidades(valores: Iterable[Any]) -> float:
+    """Suma pesos/cantidades en decimal exacto y recién al final pasa a float.
+    Sumar floats daba cosas como 10.22 + 12.66 = 22.880000000000003, que se
+    mostraba tal cual en pantalla aunque nadie hubiera tipeado eso."""
+    return float(sum((Decimal(str(v)) for v in valores), Decimal(0)))
 
 
 def total_ingresado_pendiente(pendiente: OtMaterialPendiente) -> float:
     """Material fabricado que ya entró a almacén para un material que todavía
     no tiene pedido — ver Devolucion.ot_material_pendiente_id."""
-    return sum(float(b.cantidad) for ingreso in pendiente.ingresos for b in ingreso.bobinas)
+    return sumar_cantidades(b.cantidad for ingreso in pendiente.ingresos for b in ingreso.bobinas)
 
 
 def total_entregado_pedido(ot_material: OtMaterial) -> float:
-    return sum(float(b.cantidad) for entrega in ot_material.entregas for b in entrega.bobinas)
+    return sumar_cantidades(b.cantidad for entrega in ot_material.entregas for b in entrega.bobinas)
 
 
 def total_devuelto_pedido(ot_material: OtMaterial) -> float:
     """Solo sobrantes. El material fabricado que entró a almacén se cuenta
     aparte (ver Devolucion.es_ingreso_produccion) porque nunca se había
     entregado: sumarlo acá restaría de más en el consumo neto."""
-    return sum(
-        float(b.cantidad)
+    return sumar_cantidades(
+        b.cantidad
         for devolucion in ot_material.devoluciones
         if not devolucion.es_ingreso_produccion
         for b in devolucion.bobinas
@@ -28,8 +36,8 @@ def total_devuelto_pedido(ot_material: OtMaterial) -> float:
 
 
 def total_entregado_material(ot_material: OtMaterial, material_id: int) -> float:
-    return sum(
-        float(b.cantidad)
+    return sumar_cantidades(
+        b.cantidad
         for entrega in ot_material.entregas
         if entrega.material_id == material_id
         for b in entrega.bobinas
@@ -37,8 +45,8 @@ def total_entregado_material(ot_material: OtMaterial, material_id: int) -> float
 
 
 def total_devuelto_material(ot_material: OtMaterial, material_id: int) -> float:
-    return sum(
-        float(b.cantidad)
+    return sumar_cantidades(
+        b.cantidad
         for devolucion in ot_material.devoluciones
         if devolucion.material_id == material_id and not devolucion.es_ingreso_produccion
         for b in devolucion.bobinas
@@ -67,7 +75,7 @@ def materiales_entregados_pedido(ot_material: OtMaterial) -> List[Dict[str, Any]
                 "usa_bobinas": material.usa_bobinas,
                 "total_entregado": entregado,
                 "total_devuelto": devuelto,
-                "disponible": entregado - devuelto,
+                "disponible": round(entregado - devuelto, 3),
             }
         )
     return resultado

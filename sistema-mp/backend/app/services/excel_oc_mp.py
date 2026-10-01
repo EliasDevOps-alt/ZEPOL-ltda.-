@@ -434,22 +434,108 @@ def _valor_com(v: Any) -> Any:
 
 
 FILA_BUSQUEDA_MAX = FILA_DATOS_INICIO + 4000
-_RPC_E_SERVERCALL_RETRYLATER = -2147418111
+_RPC_E_CALL_REJECTED = -2147418111  # 'la llamada fue rechazada por el destinatario'
+_RPC_E_SERVERCALL_RETRYLATER = -2147417846
+_CODIGOS_EXCEL_OCUPADO = (_RPC_E_CALL_REJECTED, _RPC_E_SERVERCALL_RETRYLATER)
+
+
+def _excel_ocupado(exc: Exception) -> bool:
+    args = getattr(exc, "args", ())
+    return bool(args) and args[0] in _CODIGOS_EXCEL_OCUPADO
 
 
 def _con_reintentos(fn: Any, intentos: int = 12, espera: float = 2.0) -> Any:
-    """Reintenta una llamada COM que falla con RPC_E_SERVERCALL_RETRYLATER
-    ('la llamada fue rechazada por el destinatario') — pasa cuando Excel
-    está ocupado, típicamente recalculando un libro grande justo después de
-    abrirlo; no significa que el archivo esté bloqueado por otra sesión."""
+    """Reintenta una llamada COM que falla con RPC_E_CALL_REJECTED o
+    RPC_E_SERVERCALL_RETRYLATER ('la llamada fue rechazada por el
+    destinatario') — pasa cuando Excel está ocupado, típicamente arrancando o
+    recalculando un libro grande justo después de abrirlo; no significa que el
+    archivo esté bloqueado por otra sesión."""
     for intento in range(intentos):
         try:
             return fn()
         except Exception as exc:
-            args = getattr(exc, "args", ())
-            if not args or args[0] != _RPC_E_SERVERCALL_RETRYLATER or intento == intentos - 1:
+            if not _excel_ocupado(exc) or intento == intentos - 1:
                 raise
             time.sleep(espera)
+
+
+def _pid_de_excel(excel: Any) -> Optional[int]:
+    """PID del proceso EXCEL.EXE que respalda esta instancia COM (para poder
+    terminarlo si Quit no lo logra). Best-effort: None si no se puede saber."""
+    try:
+        import win32process
+
+        hwnd = _con_reintentos(lambda: excel.Hwnd, intentos=5, espera=1.0)
+        return win32process.GetWindowThreadProcessId(hwnd)[1]
+    except Exception:
+        logger.exception("No se pudo obtener el PID de Excel")
+        return None
+
+
+def _esperar_o_terminar_proceso(pid: Optional[int], espera_seg: float = 5.0) -> None:
+    """Espera a que el proceso termine solo tras Quit; si sigue vivo, lo mata.
+    Solo se usa con el PID de la instancia que abrimos nosotros."""
+    if not pid:
+        return
+    try:
+        import win32api
+        import win32con
+        import win32event
+
+        handle = win32api.OpenProcess(win32con.SYNCHRONIZE | win32con.PROCESS_TERMINATE, False, pid)
+    except Exception:
+        return  # ya no existe
+    try:
+        if win32event.WaitForSingleObject(handle, int(espera_seg * 1000)) == win32event.WAIT_TIMEOUT:
+            logger.warning("EXCEL.EXE (pid %s) no terminó tras Quit — se termina a la fuerza", pid)
+            win32api.TerminateProcess(handle, 1)
+    finally:
+        win32api.CloseHandle(handle)
+
+
+def _cerrar_excel(excel: Any, pid: Optional[int], contexto: str) -> None:
+    """Quit con reintentos y, si Excel sigue ocupado/colgado, termina su
+    proceso — para no dejar EXCEL.EXE huérfano (que luego hace fallar las
+    escrituras siguientes con 'llamada rechazada')."""
+    try:
+        _con_reintentos(excel.Quit, intentos=5, espera=2.0)
+    except Exception:
+        logger.exception("No se pudo cerrar Excel limpiamente tras %s", contexto)
+    _esperar_o_terminar_proceso(pid)
+
+
+def _iniciar_excel(contexto: str) -> tuple:
+    """Arranca una instancia de Excel lista para usar y devuelve (excel, pid).
+    Justo después de DispatchEx, Excel todavía está arrancando y rechaza las
+    llamadas COM entrantes — antes las propiedades Visible/DisplayAlerts se
+    seteaban sin reintentos y eso hacía fallar la escritura con el error crudo
+    'la llamada fue rechazada por el destinatario'. Si una instancia no se
+    recupera, se descarta (y se termina su proceso) y se prueba con una nueva."""
+    import win32com.client
+
+    ultimo_error: Optional[Exception] = None
+    for intento in range(3):
+        excel = None
+        pid = None
+        try:
+            excel = win32com.client.DispatchEx("Excel.Application")
+            pid = _pid_de_excel(excel)
+            _con_reintentos(lambda: setattr(excel, "Visible", False))
+            _con_reintentos(lambda: setattr(excel, "DisplayAlerts", False))
+            # El libro tiene vínculos a fuentes externas — sin esto, Excel
+            # muestra un diálogo pidiendo actualizarlos o no que
+            # DisplayAlerts=False NO suprime y que puede forzar la ventana a
+            # hacerse visible aunque Visible=False.
+            _con_reintentos(lambda: setattr(excel, "AskToUpdateLinks", False))
+            return excel, pid
+        except Exception as exc:
+            ultimo_error = exc
+            if excel is not None:
+                _cerrar_excel(excel, pid, contexto)
+            if not _excel_ocupado(exc) and excel is not None:
+                break
+            time.sleep(2.0)
+    raise ExcelEscrituraError(f"No se pudo iniciar Excel: {ultimo_error}") from ultimo_error
 
 
 def _fila_tiene_datos(valores_fila: Any) -> bool:
@@ -554,7 +640,6 @@ def escribir_oc_mp(
     password = obtener_password_configurada(db)
 
     import pythoncom
-    import win32com.client
 
     # COM se inicializa por hilo, no por proceso. Esta función corre dentro
     # de FastAPI, que atiende cada request en un hilo del pool — sin esto,
@@ -563,20 +648,10 @@ def escribir_oc_mp(
     # mismo código corrido como script suelto (un solo hilo) nunca lo sufre.
     pythoncom.CoInitialize()
     try:
-        try:
-            excel = win32com.client.DispatchEx("Excel.Application")
-        except Exception as exc:
-            raise ExcelEscrituraError(f"No se pudo iniciar Excel: {exc}") from exc
-
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        # El libro tiene vínculos a fuentes externas — sin esto, Excel muestra
-        # un diálogo pidiendo actualizarlos o no que DisplayAlerts=False NO
-        # suprime (es un caso aparte) y que, al necesitar respuesta sí o sí,
-        # puede forzar la ventana a hacerse visible aunque Visible=False.
-        # UpdateLinks=0 en Open() además evita tocar esos vínculos (no traer
-        # datos "frescos" de otro archivo solo por escribir una fila nueva).
-        excel.AskToUpdateLinks = False
+        # UpdateLinks=0 en Open() además evita tocar los vínculos externos del
+        # libro (no traer datos "frescos" de otro archivo solo por escribir
+        # una fila nueva).
+        excel, excel_pid = _iniciar_excel("escribir_oc_mp")
         try:
             try:
                 wb = _con_reintentos(
@@ -664,12 +739,7 @@ def escribir_oc_mp(
                 except Exception:
                     logger.exception("No se pudo cerrar el libro de Excel limpiamente tras escribir_oc_mp")
         finally:
-            try:
-                _con_reintentos(excel.Quit, intentos=5, espera=2.0)
-            except Exception:
-                logger.exception(
-                    "No se pudo cerrar Excel limpiamente tras escribir_oc_mp — puede quedar EXCEL.EXE huérfano"
-                )
+            _cerrar_excel(excel, excel_pid, "escribir_oc_mp")
     finally:
         pythoncom.CoUninitialize()
 
@@ -697,18 +767,10 @@ def borrar_fila_oc_mp(db: Session, numero_ot: str) -> None:
     password = obtener_password_configurada(db)
 
     import pythoncom
-    import win32com.client
 
     pythoncom.CoInitialize()
     try:
-        try:
-            excel = win32com.client.DispatchEx("Excel.Application")
-        except Exception as exc:
-            raise ExcelEscrituraError(f"No se pudo iniciar Excel: {exc}") from exc
-
-        excel.Visible = False
-        excel.DisplayAlerts = False
-        excel.AskToUpdateLinks = False
+        excel, excel_pid = _iniciar_excel("borrar_fila_oc_mp")
         try:
             try:
                 wb = _con_reintentos(
@@ -759,11 +821,6 @@ def borrar_fila_oc_mp(db: Session, numero_ot: str) -> None:
                 except Exception:
                     logger.exception("No se pudo cerrar el libro de Excel limpiamente tras borrar_fila_oc_mp")
         finally:
-            try:
-                _con_reintentos(excel.Quit, intentos=5, espera=2.0)
-            except Exception:
-                logger.exception(
-                    "No se pudo cerrar Excel limpiamente tras borrar_fila_oc_mp — puede quedar EXCEL.EXE huérfano"
-                )
+            _cerrar_excel(excel, excel_pid, "borrar_fila_oc_mp")
     finally:
         pythoncom.CoUninitialize()

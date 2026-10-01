@@ -355,6 +355,9 @@ class Entrega(Base):
     # muestra en Registro SID como "Registro SID DD/MM/YYYY HH:MM" para saber
     # cuándo se tramitó, no solo que ya se tramitó (ver sid_controller).
     sid_completado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    # Quién marcó el check (null si no está marcado, o si se marcó antes de que
+    # se guardara este dato) — se muestra junto a la hora en Registro SID.
+    sid_completado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Quién corrigió esta entrega por última vez (y cuándo) — el personal de
     # planta no siempre tipea bien a la primera, así que a diferencia de casi
@@ -370,6 +373,7 @@ class Entrega(Base):
     ot_proceso: Mapped[Optional["OtProceso"]] = relationship()
     usuario: Mapped["Usuario"] = relationship(foreign_keys="Entrega.usuario_id")
     editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Entrega.editado_por_id")
+    sid_completado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Entrega.sid_completado_por_id")
     bobinas: Mapped[List["EntregaBobina"]] = relationship(back_populates="entrega", cascade="all, delete-orphan")
 
 
@@ -425,6 +429,7 @@ class Devolucion(Base):
     sid_completado: Mapped[bool] = mapped_column(Boolean, default=False)
     # Ver la nota equivalente en Entrega.sid_completado_en.
     sid_completado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
+    sid_completado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Ver la nota equivalente en Entrega.editado_por_id/editado_en.
     editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
@@ -437,6 +442,7 @@ class Devolucion(Base):
     material: Mapped["Material"] = relationship()
     usuario: Mapped["Usuario"] = relationship(foreign_keys="Devolucion.usuario_id")
     editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Devolucion.editado_por_id")
+    sid_completado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Devolucion.sid_completado_por_id")
     bobinas: Mapped[List["DevolucionBobina"]] = relationship(
         back_populates="devolucion", cascade="all, delete-orphan"
     )

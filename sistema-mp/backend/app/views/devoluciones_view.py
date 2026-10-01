@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .. import schemas, security
 from ..controllers import devoluciones_controller, sid_controller
-from ..controllers.pedidos_controller import total_devuelto_pedido, total_ingresado_pendiente
+from ..controllers.pedidos_controller import sumar_cantidades, total_devuelto_pedido, total_ingresado_pendiente
 from ..database import get_db
 from ..models import Devolucion, Usuario
 
@@ -38,12 +38,13 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         ),
         material_id=devolucion.material_id,
         codigo_mp=devolucion.material.codigo_mp,
+        descripcion=devolucion.material.descripcion,
         unidad=devolucion.material.unidad,
         usuario=devolucion.usuario.inicial,
         fecha=devolucion.fecha,
         hora=devolucion.hora,
         bobinas=[float(b.cantidad) for b in sorted(devolucion.bobinas, key=lambda b: b.numero)],
-        total_devuelto=sum(float(b.cantidad) for b in devolucion.bobinas),
+        total_devuelto=sumar_cantidades(b.cantidad for b in devolucion.bobinas),
         total_devuelto_pedido=(
             total_devuelto_pedido(devolucion.ot_material)
             if devolucion.ot_material is not None
@@ -52,6 +53,7 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         usa_bobinas=devolucion.material.usa_bobinas,
         sid_completado=devolucion.sid_completado,
         sid_completado_en=devolucion.sid_completado_en,
+        sid_completado_por=devolucion.sid_completado_por.inicial if devolucion.sid_completado_por else None,
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
         editado_por=devolucion.editado_por.inicial if devolucion.editado_por else None,
         editado_en=devolucion.editado_en,
@@ -78,8 +80,12 @@ def registrar_devolucion(
     response_model=schemas.DevolucionOut,
     dependencies=[Depends(security.requiere_modulo("registro_sid"))],
 )
-def marcar_sid_completado(devolucion_id: int, db: Session = Depends(get_db)):
-    devolucion = sid_controller.marcar_devolucion_sid(db, devolucion_id, True)
+def marcar_sid_completado(
+    devolucion_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    devolucion = sid_controller.marcar_devolucion_sid(db, usuario, devolucion_id, True)
     return _serializar(devolucion)
 
 
@@ -88,8 +94,12 @@ def marcar_sid_completado(devolucion_id: int, db: Session = Depends(get_db)):
     response_model=schemas.DevolucionOut,
     dependencies=[Depends(security.requiere_modulo("registro_sid"))],
 )
-def marcar_sid_pendiente(devolucion_id: int, db: Session = Depends(get_db)):
-    devolucion = sid_controller.marcar_devolucion_sid(db, devolucion_id, False)
+def marcar_sid_pendiente(
+    devolucion_id: int,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    devolucion = sid_controller.marcar_devolucion_sid(db, usuario, devolucion_id, False)
     return _serializar(devolucion)
 
 

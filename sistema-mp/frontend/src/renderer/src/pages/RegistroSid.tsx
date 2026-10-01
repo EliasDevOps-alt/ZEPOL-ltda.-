@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Beaker } from 'lucide-react'
+import { Beaker, LayoutGrid, Table2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent } from '@renderer/components/ui/card'
@@ -16,6 +16,38 @@ import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 type ModoFecha = 'dia' | 'mes' | 'todos'
 type Pestana = 'entregados' | 'devueltos' | 'ingresados' | 'todos'
 type Filtro = 'pendientes' | 'completados' | 'todos'
+type Vista = 'fichas' | 'tabla'
+
+const CLAVE_VISTA = 'zepol.sid.vista'
+
+// La vista elegida se recuerda en este equipo; si el almacenamiento no está
+// disponible simplemente se arranca en fichas.
+function vistaGuardada(): Vista {
+  try {
+    return localStorage.getItem(CLAVE_VISTA) === 'tabla' ? 'tabla' : 'fichas'
+  } catch {
+    return 'fichas'
+  }
+}
+
+// Una fila de la vista de tabla = un movimiento con su propio check de SID.
+interface FilaTabla {
+  clave: string
+  id: number
+  tipo: 'entrega' | 'devolucion' | 'ingreso'
+  numeroOt: string
+  cliente: string
+  descripcion: string
+  material: string
+  sustituido: boolean
+  cantidad: string
+  // Peso de cada bobina registrada (vacío si el material no se entrega en bobinas).
+  bobinas: number[]
+  fecha: string
+  completado: boolean
+  sidEn: string | null
+  sidPor: string | null
+}
 
 const PESTANAS: { valor: Pestana; etiqueta: string }[] = [
   { valor: 'entregados', etiqueta: 'Entregados' },
@@ -67,6 +99,16 @@ export function RegistroSid() {
   // historial apenas se entra a la pantalla.
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
+  const [vista, setVista] = useState<Vista>(vistaGuardada)
+
+  function cambiarVista(nueva: Vista) {
+    setVista(nueva)
+    try {
+      localStorage.setItem(CLAVE_VISTA, nueva)
+    } catch {
+      // Sin almacenamiento: la vista vale solo para esta sesión.
+    }
+  }
 
   const { desde, hasta } = useMemo(() => {
     if (!fecha) return { desde: '', hasta: '' }
@@ -339,6 +381,73 @@ export function RegistroSid() {
     ingresosSueltosCompletoPorOt
   ])
 
+  // Vista de tabla: se arma desde los mismos grupos que usan las fichas, así
+  // pestañas, buscador, filtro de estado y fechas se comportan igual en las
+  // dos vistas (y marcar un check no hace desaparecer la fila hasta que el
+  // pedido entero queda completo, igual que en las fichas).
+  const filasTabla = useMemo(() => {
+    const filas: FilaTabla[] = []
+    const ordenar = <T extends { fecha: string; id: number }>(lista: T[]) =>
+      [...lista].sort((a, b) => a.fecha.localeCompare(b.fecha) || a.id - b.id)
+    const deDevolucion = (d: Devolucion, unidad: string, pedido?: Consumo): FilaTabla => ({
+      clave: `d-${d.id}`,
+      id: d.id,
+      tipo: d.es_ingreso_produccion ? 'ingreso' : 'devolucion',
+      numeroOt: d.numero_ot,
+      cliente: d.cliente ?? '',
+      descripcion: d.descripcion ?? '',
+      material: d.codigo_mp,
+      sustituido: !!pedido && d.codigo_mp !== pedido.codigo_mp,
+      cantidad: `${d.total_devuelto} ${unidad}`,
+      bobinas: d.usa_bobinas ? d.bobinas : [],
+      fecha: formatearFechaHora(d.fecha, d.hora),
+      completado: d.sid_completado,
+      sidEn: d.sid_completado_en,
+      sidPor: d.sid_completado_por
+    })
+
+    if (pestana === 'ingresados') {
+      for (const g of gruposIngresos) {
+        for (const d of ordenar(g.movimientos)) filas.push(deDevolucion(d, d.unidad))
+      }
+      return filas
+    }
+
+    for (const g of grupos) {
+      for (const p of g.pedidos) {
+        if (pestana === 'entregados' || pestana === 'todos') {
+          for (const e of ordenar(entregasPorPedido.get(p.ot_material_id) ?? [])) {
+            filas.push({
+              clave: `e-${e.id}`,
+              id: e.id,
+              tipo: 'entrega',
+              numeroOt: p.numero_ot,
+              cliente: p.cliente ?? '',
+              descripcion: e.descripcion_entregado ?? '',
+              material: e.codigo_mp_entregado,
+              sustituido: e.codigo_mp_entregado !== p.codigo_mp,
+              cantidad: `${e.total_entregado} ${p.unidad}`,
+              bobinas: e.usa_bobinas ? e.bobinas : [],
+              fecha: formatearFechaHora(e.fecha, e.hora),
+              completado: e.sid_completado,
+              sidEn: e.sid_completado_en,
+              sidPor: e.sid_completado_por
+            })
+          }
+        }
+        if (pestana === 'devueltos' || pestana === 'todos') {
+          for (const d of ordenar(devolucionesPorPedido.get(p.ot_material_id) ?? [])) {
+            filas.push(deDevolucion(d, p.unidad, p))
+          }
+        }
+      }
+      for (const d of ordenar(g.ingresosSueltos)) filas.push(deDevolucion(d, d.unidad))
+    }
+    return filas
+  }, [pestana, grupos, gruposIngresos, entregasPorPedido, devolucionesPorPedido])
+
+  const hayResultados = pestana === 'ingresados' ? gruposIngresos.length > 0 : grupos.length > 0
+
   return (
     <div>
       <h1 className="mb-2 text-2xl font-semibold">Registro SID</h1>
@@ -368,7 +477,27 @@ export function RegistroSid() {
             <div className="flex flex-1 flex-col gap-1.5">
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por número de OT..." />
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
+              <div className="inline-flex rounded-md border border-border p-0.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={vista === 'fichas' ? 'default' : 'ghost'}
+                  onClick={() => cambiarVista('fichas')}
+                >
+                  <LayoutGrid className="h-4 w-4" />
+                  Fichas
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={vista === 'tabla' ? 'default' : 'ghost'}
+                  onClick={() => cambiarVista('tabla')}
+                >
+                  <Table2 className="h-4 w-4" />
+                  Tabla
+                </Button>
+              </div>
               {FILTROS.map((f) => (
                 <Button
                   key={f.valor}
@@ -463,7 +592,15 @@ export function RegistroSid() {
         : pedidos.isSuccess &&
           grupos.length === 0 && <p className="text-sm text-muted-foreground">No hay pedidos que coincidan con este filtro.</p>}
 
-      <div className="flex flex-col gap-4">
+      {vista === 'tabla' && hayResultados && (
+        <TablaSid
+          filas={filasTabla}
+          marcarEntregaSid={marcarEntregaSid}
+          marcarDevolucionSid={marcarDevolucionSid}
+        />
+      )}
+
+      <div className={cn('flex flex-col gap-4', vista === 'tabla' && 'hidden')}>
         {pestana === 'ingresados'
           ? gruposIngresos.map((grupo) => (
               <GrupoOtIngresos
@@ -495,6 +632,122 @@ export function RegistroSid() {
 }
 
 type MutacionSid = ReturnType<typeof useMutation<Entrega | Devolucion, unknown, { id: number; completado: boolean }>>
+
+const ETIQUETA_TIPO: Record<FilaTabla['tipo'], string> = {
+  entrega: 'Entrega',
+  devolucion: 'Devolución',
+  ingreso: 'Ingreso'
+}
+
+const ESTILO_TIPO: Record<FilaTabla['tipo'], string> = {
+  entrega: 'bg-primary/10 text-primary',
+  devolucion: 'bg-muted text-muted-foreground',
+  ingreso: 'bg-warning/10 text-warning'
+}
+
+// Pocas columnas y ancho fijo: nada de scroll horizontal. Cada dato largo se
+// recorta con "…" y se puede copiar con el ícono junto a él.
+function TablaSid({
+  filas,
+  marcarEntregaSid,
+  marcarDevolucionSid
+}: {
+  filas: FilaTabla[]
+  marcarEntregaSid: MutacionSid
+  marcarDevolucionSid: MutacionSid
+}) {
+  return (
+    <Card className="mb-4">
+      <CardContent className="p-0">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-border text-left text-xs text-muted-foreground">
+              <th className="w-px p-2 text-center">SID</th>
+              <th className="w-px p-2">OT</th>
+              <th className="w-[14%] p-2">Cliente</th>
+              <th className="w-[16%] p-2">Descripción</th>
+              <th className="w-px p-2">Material</th>
+              <th className="w-px p-2">Tipo</th>
+              <th className="w-px p-2 text-right">Cantidad</th>
+              <th className="p-2">Bobinas (peso de cada una)</th>
+              <th className="w-px p-2">Fecha</th>
+              <th className="w-px p-2">Registro SID</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filas.map((f, i) => {
+              const mutacion = f.tipo === 'entrega' ? marcarEntregaSid : marcarDevolucionSid
+              const cambiando = mutacion.isPending && mutacion.variables?.id === f.id
+              const nuevaOt = i > 0 && filas[i - 1].numeroOt !== f.numeroOt
+              return (
+                <tr
+                  key={f.clave}
+                  className={cn(
+                    'border-b border-border last:border-0',
+                    nuevaOt && 'border-t-2 border-t-border',
+                    f.completado && 'bg-success/5'
+                  )}
+                >
+                  <td className="p-2 text-center">
+                    <input
+                      type="checkbox"
+                      checked={f.completado}
+                      disabled={cambiando}
+                      onChange={(e) => mutacion.mutate({ id: f.id, completado: e.target.checked })}
+                    />
+                  </td>
+                  <td className="whitespace-nowrap p-2 font-medium">
+                    <CeldaCopiable texto={f.numeroOt} />
+                  </td>
+                  {/* Cliente y descripción son los únicos que se recortan con
+                      "…" (max-w-0 + ancho en %): el texto completo queda en el
+                      tooltip y se puede copiar con el ícono. */}
+                  <td className="max-w-0 p-2" title={f.cliente}>
+                    <CeldaCopiable texto={f.cliente} />
+                  </td>
+                  <td className="max-w-0 p-2" title={f.descripcion}>
+                    <CeldaCopiable texto={f.descripcion} />
+                  </td>
+                  <td className={cn('whitespace-nowrap p-2', f.sustituido && 'text-warning')}>
+                    <CeldaCopiable texto={f.material} />
+                  </td>
+                  <td className="whitespace-nowrap p-2">
+                    <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ESTILO_TIPO[f.tipo])}>
+                      {ETIQUETA_TIPO[f.tipo]}
+                    </span>
+                  </td>
+                  <td className="whitespace-nowrap p-2 text-right">
+                    <CeldaCopiable texto={f.cantidad} className="justify-end" />
+                  </td>
+                  {/* Todas las bobinas con su peso, sin recortar: si son 50, se
+                      muestran las 50 (la celda crece hacia abajo). */}
+                  <td className="p-2 text-xs">
+                    {f.bobinas.length > 0 ? (
+                      <>
+                        <span className="font-medium">
+                          {f.bobinas.length} {f.bobinas.length === 1 ? 'bobina' : 'bobinas'}:
+                        </span>{' '}
+                        <span className="break-words text-muted-foreground">{f.bobinas.join(' · ')}</span>
+                      </>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  <td className="whitespace-nowrap p-2 text-xs text-muted-foreground">{f.fecha}</td>
+                  <td className="whitespace-nowrap p-2 text-xs text-primary">
+                    {f.completado && f.sidEn
+                      ? `${formatearFechaHoraCompleta(f.sidEn)}${f.sidPor ? ` ${f.sidPor}` : ''}`
+                      : ''}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </CardContent>
+    </Card>
+  )
+}
 
 function GrupoOt({
   numeroOt,
@@ -669,6 +922,7 @@ function BloqueIngresoMaterial({
             usuario={d.usuario}
             completado={d.sid_completado}
             sidCompletadoEn={d.sid_completado_en}
+            sidCompletadoPor={d.sid_completado_por}
             cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
             onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
           />
@@ -734,6 +988,7 @@ function FilaMaterial({
           usuario={e.usuario}
           completado={e.sid_completado}
           sidCompletadoEn={e.sid_completado_en}
+          sidCompletadoPor={e.sid_completado_por}
           cambiando={marcarEntregaSid.isPending && marcarEntregaSid.variables?.id === e.id}
           onCambiar={(nuevo) => marcarEntregaSid.mutate({ id: e.id, completado: nuevo })}
         />
@@ -757,6 +1012,7 @@ function FilaMaterial({
             usuario={d.usuario}
             completado={d.sid_completado}
             sidCompletadoEn={d.sid_completado_en}
+            sidCompletadoPor={d.sid_completado_por}
             cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
             onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
           />
@@ -787,6 +1043,7 @@ function FilaMaterial({
           usuario={d.usuario}
           completado={d.sid_completado}
           sidCompletadoEn={d.sid_completado_en}
+            sidCompletadoPor={d.sid_completado_por}
           cambiando={marcarDevolucionSid.isPending && marcarDevolucionSid.variables?.id === d.id}
           onCambiar={(nuevo) => marcarDevolucionSid.mutate({ id: d.id, completado: nuevo })}
         />
@@ -910,6 +1167,7 @@ function MovimientoRow({
   usuario,
   completado,
   sidCompletadoEn,
+  sidCompletadoPor,
   cambiando,
   onCambiar
 }: {
@@ -922,6 +1180,7 @@ function MovimientoRow({
   usuario: string
   completado: boolean
   sidCompletadoEn: string | null
+  sidCompletadoPor: string | null
   cambiando: boolean
   onCambiar: (completado: boolean) => void
 }) {
@@ -953,7 +1212,10 @@ function MovimientoRow({
         </p>
       )}
       {completado && sidCompletadoEn && (
-        <p className="mt-1 pl-6 text-primary">Registro SID {formatearFechaHoraCompleta(sidCompletadoEn)}</p>
+        <p className="mt-1 pl-6 text-primary">
+          Registro SID {formatearFechaHoraCompleta(sidCompletadoEn)}
+          {sidCompletadoPor ? ` ${sidCompletadoPor}` : ''}
+        </p>
       )}
     </div>
   )

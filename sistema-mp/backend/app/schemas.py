@@ -512,6 +512,8 @@ class EntregaOut(BaseModel):
     usa_bobinas: bool
     sid_completado: bool
     sid_completado_en: Optional[datetime] = None
+    # Inicial del usuario que marcó el SID (None si no se sabe).
+    sid_completado_por: Optional[str] = None
     observacion: Optional[str] = None
     # ot_material_id/proceso/maquina/codigo_mp de arriba son los del pedido
     # donde REALMENTE quedó la entrega, que con como_materia_prima no es el
@@ -576,6 +578,7 @@ class DevolucionOut(BaseModel):
     proceso: Optional[str] = None
     material_id: int
     codigo_mp: str
+    descripcion: Optional[str] = None
     unidad: str
     usuario: str
     fecha: date
@@ -586,6 +589,8 @@ class DevolucionOut(BaseModel):
     usa_bobinas: bool
     sid_completado: bool
     sid_completado_en: Optional[datetime] = None
+    # Inicial del usuario que marcó el SID (None si no se sabe).
+    sid_completado_por: Optional[str] = None
     es_ingreso_produccion: bool
     # Quién la corrigió por última vez y cuándo — ver EntregaOut.editado_por.
     editado_por: Optional[str] = None

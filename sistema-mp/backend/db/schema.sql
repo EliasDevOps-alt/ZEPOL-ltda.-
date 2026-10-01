@@ -273,6 +273,9 @@ CREATE TABLE entregas (
     -- Cuándo se marcó el check de arriba (NULL mientras no está marcado) —
     -- se muestra en Registro SID como "Registro SID DD/MM/YYYY HH:MM".
     sid_completado_en TIMESTAMP,
+    -- Quién marcó el check (NULL si no está marcado, o si se marcó antes de que
+    -- se guardara este dato).
+    sid_completado_por_id INTEGER REFERENCES usuarios(id),
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     -- Quién corrigió esta entrega por última vez (y cuándo) — a diferencia de
     -- casi todo lo demás en el sistema, una entrega SÍ se puede corregir
@@ -329,6 +332,9 @@ CREATE TABLE devoluciones (
     sid_completado BOOLEAN   NOT NULL DEFAULT FALSE,
     -- Ver la nota equivalente en entregas.sid_completado_en.
     sid_completado_en TIMESTAMP,
+    -- Quién marcó el check (NULL si no está marcado, o si se marcó antes de que
+    -- se guardara este dato).
+    sid_completado_por_id INTEGER REFERENCES usuarios(id),
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     -- Ver la nota equivalente en entregas.editado_por_id/editado_en.
     editado_por_id INTEGER   REFERENCES usuarios(id),

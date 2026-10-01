@@ -1,5 +1,6 @@
 import { LOGO_ZEPOL_BASE64 } from './logoZepol'
 import { formatearFecha } from './fechas'
+import { redondearPeso } from './utils'
 import type { PesajesPt, ProductoTerminado, UnidadPt } from './types'
 import { altoFila, envolverEnMhtml, escaparHtml, URL_LOGO_MHTML } from './documentoWord'
 
@@ -363,8 +364,8 @@ function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean): BloqueDia[] 
         ...grupo.map((p): CeldaRegistro => ({ tipo: 'pesaje', peso: p.neto, cantidad: p.cantidad })),
         {
           tipo: 'subtotal',
-          peso: grupo.reduce((suma, p) => suma + p.neto, 0),
-          cantidad: conCantidad ? grupo.reduce((suma, p) => suma + (p.cantidad ?? 0), 0) : null
+          peso: redondearPeso(grupo.reduce((suma, p) => suma + p.neto, 0)),
+          cantidad: conCantidad ? redondearPeso(grupo.reduce((suma, p) => suma + (p.cantidad ?? 0), 0)) : null
         }
       ]
     })
@@ -420,8 +421,8 @@ function lineasRegistro(registros: RegistrosFormularioPt | undefined): Hoja[] {
         h.celdas[inicio + 1 + fila][columna + i] = c
         if (c.tipo === 'pesaje') {
           h.pesajes++
-          h.kgHoja += c.peso
-          h.toHoja += conCantidad ? (c.cantidad ?? 0) : c.peso
+          h.kgHoja = redondearPeso(h.kgHoja + c.peso)
+          h.toHoja = redondearPeso(h.toHoja + (conCantidad ? (c.cantidad ?? 0) : c.peso))
         }
       })
       const resumen = bloque.celdas.findIndex((c) => c.tipo === 'resumen')

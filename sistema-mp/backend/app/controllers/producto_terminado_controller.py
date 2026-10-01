@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from ..models import OrdenTrabajo, PesajePt, ProductoTerminado, ProductoTerminadoItem, Usuario
 from ..services import excel_oc_mp
 from . import ordenes_controller
+from .pedidos_controller import sumar_cantidades
 
 UNIDADES = ("KG", "BOLSAS", "MILLAR")
 
@@ -307,8 +309,8 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
 
     def to_de(pesajes: List[PesajePt]) -> float:
         if unidad == "KG":
-            return sum(float(p.peso_bruto) - float(p.tara) for p in pesajes)
-        return sum(float(p.cantidad or 0) for p in pesajes)
+            return sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes)
+        return sumar_cantidades(p.cantidad or 0 for p in pesajes)
 
     por_dia: Dict[date, List[PesajePt]] = {}
     for pesaje in producto_terminado.pesajes:
@@ -329,14 +331,14 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
                 "fecha": fecha,
                 "paquetes": len(pesajes),
                 "to": to,
-                "kg": sum(float(p.peso_bruto) - float(p.tara) for p in pesajes),
+                "kg": sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes),
                 "pesadores": pesadores,
                 "to_acumulado": acumulado,
                 "porcentaje_acumulado": (acumulado / pedido_real * 100) if pedido_real else None,
             }
         )
 
-    total_kg = sum(float(p.peso_bruto) - float(p.tara) for p in producto_terminado.pesajes)
+    total_kg = sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in producto_terminado.pesajes)
     return {
         "dias": dias,
         "total_to": acumulado,
