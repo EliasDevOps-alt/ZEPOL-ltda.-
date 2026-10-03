@@ -124,7 +124,7 @@ export function Layout() {
         )}
       >
         <div className="flex h-full w-64 flex-col p-4">
-          <div className="mb-6 flex items-center justify-between px-2">
+          <div className="mb-6 flex shrink-0 items-center justify-between px-2">
             <div>
               <p className="text-sm font-semibold">ZEPOL</p>
               <p className="text-xs text-muted-foreground">Control de Materia Prima</p>
@@ -138,7 +138,10 @@ export function Layout() {
             </button>
           </div>
 
-          <nav className="flex flex-1 flex-col gap-1">
+          {/* El menú hace scroll por su cuenta (min-h-0 + overflow-y-auto): con
+              muchos módulos (admin) en una pantalla baja, antes se alargaba y
+              empujaba "Cerrar sesión" fuera de la ventana. */}
+          <nav className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto">
             {itemsVisibles.map((item) =>
               item.children ? (
                 <NavGroup key={item.to} item={item} pathname={location.pathname} />
@@ -151,7 +154,7 @@ export function Layout() {
             )}
           </nav>
 
-          <div className="mt-auto border-t border-border pt-3">
+          <div className="mt-auto shrink-0 border-t border-border pt-3">
             <p className="px-2 text-sm font-medium">{sesion?.usuario.nombre}</p>
             <button
               onClick={cerrarSesion}

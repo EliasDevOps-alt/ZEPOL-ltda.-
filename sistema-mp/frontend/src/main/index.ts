@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, screen } from 'electron'
 import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
@@ -28,9 +28,15 @@ function writeConfig(config: AppConfig): void {
 let ventanaPrincipal: BrowserWindow | null = null
 
 function createWindow(): void {
+  // Tamaño fijo de 1200x800 no entraba en pantallas de poca altura (768 px):
+  // el borde de abajo quedaba detrás de la barra de tareas y se perdía
+  // "Cerrar sesión". Se limita al área de trabajo del monitor (sin la barra
+  // de tareas), y en pantallas bajas arranca maximizada.
+  const area = screen.getPrimaryDisplay().workAreaSize
+  const pantallaBaja = area.height <= 800
   const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    width: Math.min(1200, area.width),
+    height: Math.min(800, area.height),
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -38,6 +44,7 @@ function createWindow(): void {
     }
   })
   ventanaPrincipal = win
+  if (pantallaBaja) win.maximize()
   win.on('closed', () => {
     if (ventanaPrincipal === win) ventanaPrincipal = null
   })
