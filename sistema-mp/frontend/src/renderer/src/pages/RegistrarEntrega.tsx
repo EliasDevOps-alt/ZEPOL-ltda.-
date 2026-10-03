@@ -1319,6 +1319,13 @@ export function RegistrarEntrega() {
                       .filter((codigo) => codigo !== pedido.codigo_mp)
                   )
                 ]
+                // El principal es lo que REALMENTE se entregó; el código que
+                // pedía la OT va en la etiqueta "pedido: X".
+                const materialesEntregados = [
+                  ...new Set((entregasPorPedido.get(pedido.ot_material_id) ?? []).map((e) => e.codigo_mp_entregado))
+                ]
+                const tituloMaterial =
+                  materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
                 return (
                   <button
                     key={pedido.ot_material_id}
@@ -1332,7 +1339,10 @@ export function RegistrarEntrega() {
                     )}
                   >
                     <span className="flex flex-wrap items-center gap-2 font-medium">
-                      {pedido.proceso} — {pedido.maquina} — {pedido.codigo_mp}
+                      {pedido.proceso} — {pedido.maquina} —{' '}
+                      <span className={materialesSustituidos.length > 0 ? 'text-warning' : undefined}>
+                        {tituloMaterial}
+                      </span>
                       {pedido.tiene_materia_prima && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                           <Beaker className="h-3 w-3" />
@@ -1347,7 +1357,7 @@ export function RegistrarEntrega() {
                       {materialesSustituidos.length > 0 && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                           <ArrowRightLeft className="h-3 w-3" />
-                          {materialesSustituidos.join(', ')}
+                          pedido: {pedido.codigo_mp}
                         </span>
                       )}
                     </span>

@@ -52,9 +52,13 @@ export function ExcelSyncToasts() {
 
     const conId = nuevos.map((item) => ({ ...item, toastId: ++contadorToastIdRef.current }))
     setToasts((actuales) => [...conId, ...actuales])
-    conId.forEach((t) => {
-      setTimeout(() => setToasts((actuales) => actuales.filter((x) => x.toastId !== t.toastId)), DURACION_MS)
-    })
+    // Un aviso "revisar" (el Excel cambió el código de un material con
+    // movimientos) pide una decisión de una persona: no se cierra solo.
+    conId
+      .filter((t) => t.tipo !== 'revisar')
+      .forEach((t) => {
+        setTimeout(() => setToasts((actuales) => actuales.filter((x) => x.toastId !== t.toastId)), DURACION_MS)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [registro.data])
 
@@ -71,11 +75,13 @@ export function ExcelSyncToasts() {
           key={t.toastId}
           className={cn(
             'rounded-md border bg-card p-3 text-sm shadow-lg',
-            t.tipo === 'eliminada' || t.detalle.includes('eliminado')
-              ? 'border-destructive/30'
-              : t.tipo === 'nueva'
-                ? 'border-primary/30'
-                : 'border-warning/30'
+            t.tipo === 'revisar'
+              ? 'border-warning'
+              : t.tipo === 'eliminada' || t.detalle.includes('eliminado')
+                ? 'border-destructive/30'
+                : t.tipo === 'nueva'
+                  ? 'border-primary/30'
+                  : 'border-warning/30'
           )}
         >
           <div className="flex items-start justify-between gap-2">
@@ -96,7 +102,9 @@ export function ExcelSyncToasts() {
               ? 'Importada del Excel'
               : t.tipo === 'eliminada'
                 ? 'Ausente del Excel'
-                : 'Actualizada desde el Excel'}{' '}
+                : t.tipo === 'revisar'
+                  ? 'Revisar'
+                  : 'Actualizada desde el Excel'}{' '}
             · {t.detalle}
           </p>
         </div>

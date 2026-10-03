@@ -569,6 +569,19 @@ export function RegistrarDevolucion() {
     ]
   }
 
+  // Todos los materiales que REALMENTE salieron para este pedido (incluido el
+  // pedido mismo si también se entregó). Es lo que se muestra como principal:
+  // el que pedía la OT queda en la etiqueta "pedido: X".
+  function materialesEntregadosDe(entregasDeLaOt: Entrega[] | undefined, pedido: Consumo): string[] {
+    return [
+      ...new Set(
+        (entregasDeLaOt ?? [])
+          .filter((e) => e.ot_material_id === pedido.ot_material_id)
+          .map((e) => e.codigo_mp_entregado)
+      )
+    ]
+  }
+
   // Un material al que hubo que fabricarle materia prima puede seguir sin
   // proceso asignado, así que no tiene pedido y no sale en /consumo. Igual
   // producción lo entrega y hay que poder registrar su ingreso — ver
@@ -900,6 +913,9 @@ export function RegistrarDevolucion() {
               })}
               {pedidosVisibles.map((pedido) => {
                 const materialesSustituidos = materialesSustituidosDe(entregas.data, pedido)
+                const materialesEntregados = materialesEntregadosDe(entregas.data, pedido)
+                const tituloMaterial =
+                  materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
                 return (
                 <button
                   key={pedido.ot_material_id}
@@ -913,7 +929,8 @@ export function RegistrarDevolucion() {
                   )}
                 >
                   <span className="flex flex-wrap items-center gap-2 font-medium">
-                    {pedido.proceso} — {pedido.maquina} — {pedido.codigo_mp}
+                    {pedido.proceso} — {pedido.maquina} —{' '}
+                    <span className={materialesSustituidos.length > 0 ? 'text-warning' : undefined}>{tituloMaterial}</span>
                     {pedido.tiene_materia_prima && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                         <Beaker className="h-3 w-3" />
@@ -928,7 +945,7 @@ export function RegistrarDevolucion() {
                     {materialesSustituidos.length > 0 && (
                       <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                         <ArrowRightLeft className="h-3 w-3" />
-                        se entregó {materialesSustituidos.join(', ')}
+                        pedido: {pedido.codigo_mp}
                       </span>
                     )}
                   </span>

@@ -414,12 +414,16 @@ export function Historial() {
   const [modoFecha, setModoFecha] = useState<ModoFecha>('mes')
   const [fecha, setFecha] = useState(mesActualISO())
 
+  // Con algo escrito en el buscador se busca en TODAS las fechas (ver
+  // ListadoOt).
+  const buscando = q.trim() !== ''
+
   const { desde, hasta } = useMemo(() => {
-    if (!fecha) return { desde: '', hasta: '' }
+    if (!fecha || buscando) return { desde: '', hasta: '' }
     if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
     if (modoFecha === 'mes') return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
     return { desde: `${fecha}-01-01`, hasta: `${fecha}-12-31` }
-  }, [modoFecha, fecha])
+  }, [modoFecha, fecha, buscando])
   const filtrandoPorFecha = modoFecha !== 'todos' && desde !== ''
 
   function cambiarModoFecha(modo: ModoFecha) {
@@ -587,9 +591,12 @@ export function Historial() {
                   type={modoFecha === 'dia' ? 'date' : 'month'}
                   value={fecha}
                   onChange={(e) => setFecha(e.target.value)}
-                  className="w-auto"
+                  className={cn('w-auto', buscando && 'opacity-50')}
                 />
               )
+            )}
+            {buscando && (
+              <span className="text-xs text-muted-foreground">Buscando en todas las fechas</span>
             )}
           </div>
         </CardContent>
@@ -682,12 +689,20 @@ export function Historial() {
                         .filter((codigo) => codigo !== pedido.codigo_mp)
                     )
                   ]
+                  // El título es el material que REALMENTE se entregó; el que
+                  // pedía la OT queda en la etiqueta ⇄ (igual que en Registro
+                  // SID y Consultar OT). Antes era al revés y parecía que lo
+                  // entregado era el código del pedido.
+                  const materialesEntregados = [...new Set(susEntregas.map((e) => e.codigo_mp_entregado))]
+                  const tituloMaterial = materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
                   return (
                     <Card key={pedido.ot_material_id}>
                       <CardHeader className="flex-row items-start justify-between">
                         <div>
                           <div className="flex flex-wrap items-center gap-2">
-                            <CardTitle className="text-base">{pedido.codigo_mp}</CardTitle>
+                            <CardTitle className={cn('text-base', materialesSustituidos.length > 0 && 'text-warning')}>
+                              {tituloMaterial}
+                            </CardTitle>
                             {pedido.tiene_materia_prima && (
                               <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                                 <Beaker className="h-3 w-3" />
@@ -702,7 +717,7 @@ export function Historial() {
                             {materialesSustituidos.length > 0 && (
                               <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                                 <ArrowRightLeft className="h-3 w-3" />
-                                {materialesSustituidos.join(', ')}
+                                pedido: {pedido.codigo_mp}
                               </span>
                             )}
                           </div>

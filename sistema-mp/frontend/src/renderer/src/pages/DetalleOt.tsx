@@ -409,6 +409,9 @@ export function DetalleOt() {
   // sin recargar la página.
   const puedeElegirFuelle = origenCargado === null
 
+  // SM- (muestra) o SO- (otros): fijo según el tipo, no editable.
+  const prefijoSot = tipoOtSinNumero === 'muestra' ? 'SM-' : 'SO-'
+
   const sugerenciaSot = useQuery({
     queryKey: ['siguiente-sot', tipoOtSinNumero],
     queryFn: () => api.siguienteNumeroOtSinAsignar(apiBaseUrl, token, tipoOtSinNumero),
@@ -1070,7 +1073,13 @@ export function DetalleOt() {
                   <Label>Tipo</Label>
                   <Select
                     value={tipoOtSinNumero}
-                    onValueChange={(v) => setTipoOtSinNumero(v as 'muestra' | 'otros')}
+                    onValueChange={(v) => {
+                      setTipoOtSinNumero(v as 'muestra' | 'otros')
+                      // El código anterior (SM-3) no vale para el otro tipo: se
+                      // vacía y lo vuelve a llenar la sugerencia del tipo nuevo.
+                      // Sin esto se podía guardar "SM-3" con el tipo Otros.
+                      setNumeroOt('')
+                    }}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecciona" />
@@ -1084,17 +1093,21 @@ export function DetalleOt() {
               ) : esFuelle ? (
                 <div className="flex flex-col gap-1.5">
                   <Label>OT que tiene fuelle</Label>
-                  <Input
-                    value={otPadre}
-                    onChange={(e) => setOtPadre(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault()
-                        if (otPadre && !buscarPadreFuelle.isPending) buscarPadreFuelle.mutate()
-                      }
-                    }}
-                    placeholder="6321"
-                  />
+                  <div className="flex">
+                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm font-medium text-muted-foreground">F-</span>
+                    <Input
+                      className="rounded-l-none"
+                      value={otPadre}
+                      onChange={(e) => setOtPadre(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          if (otPadre && !buscarPadreFuelle.isPending) buscarPadreFuelle.mutate()
+                        }
+                      }}
+                      placeholder="6321"
+                    />
+                  </div>
                 </div>
               ) : (
                 <div className="flex flex-col gap-1.5">
@@ -1115,13 +1128,29 @@ export function DetalleOt() {
               {otSinNumero ? (
                 <div className="flex flex-col gap-1.5">
                   <Label>OT</Label>
-                  <Input value={numeroOt} onChange={(e) => setNumeroOt(e.target.value)} placeholder="SM-1" />
+                  {/* El código (SM- / SO-) lo fija el tipo elegido y no se
+                      puede escribir: solo se puede cambiar el NÚMERO. Si se
+                      pudiera tipear el código entero, cualquiera podía armar
+                      uno que el sistema no reconoce (SG-5). */}
+                  <div className="flex">
+                    <span className="inline-flex items-center rounded-l-md border border-r-0 border-input bg-muted px-3 text-sm font-medium text-muted-foreground">{prefijoSot}</span>
+                    <Input
+                      className="rounded-l-none"
+                      inputMode="numeric"
+                      value={numeroOt.startsWith(prefijoSot) ? numeroOt.slice(prefijoSot.length) : ''}
+                      onChange={(e) => {
+                        const digitos = e.target.value.replace(/\D/g, '')
+                        setNumeroOt(digitos ? `${prefijoSot}${digitos}` : '')
+                      }}
+                      placeholder="1"
+                    />
+                  </div>
                   <p className="text-xs text-muted-foreground">
                     {sugerenciaSot.isFetching
                       ? 'Calculando sugerencia...'
                       : sugerenciaSot.data
-                        ? `Sugerido: ${sugerenciaSot.data.numero_ot} — podés cambiarlo`
-                        : 'Podés cambiarlo si corresponde otro número'}
+                        ? `Sugerido: ${sugerenciaSot.data.numero_ot} — podés cambiar el número`
+                        : 'Podés cambiar el número si corresponde otro'}
                   </p>
                 </div>
               ) : esFuelle ? (

@@ -372,11 +372,16 @@ export function ListadoOt() {
   const [fecha, setFecha] = useState(hoyISO())
   const qDebounced = useDebounced(q, 300)
 
+  // Con algo escrito en el buscador se busca en TODAS las fechas: el filtro de
+  // día/mes está para no volcar todo el historial al entrar, no para esconder
+  // una OT que se está buscando por su número.
+  const buscando = qDebounced.trim() !== ''
+
   const { desde, hasta } = useMemo(() => {
-    if (!fecha) return { desde: '', hasta: '' }
+    if (!fecha || buscando) return { desde: '', hasta: '' }
     if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
     return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
-  }, [modoFecha, fecha])
+  }, [modoFecha, fecha, buscando])
 
   const ordenes = useQuery({
     queryKey: ['ordenes-trabajo', qDebounced, desde, hasta],
@@ -456,8 +461,11 @@ export function ListadoOt() {
               type={modoFecha === 'dia' ? 'date' : 'month'}
               value={fecha}
               onChange={(e) => setFecha(e.target.value)}
-              className="w-auto"
+              className={cn('w-auto', buscando && 'opacity-50')}
             />
+            {buscando && (
+              <span className="text-xs text-muted-foreground">Buscando en todas las fechas</span>
+            )}
 
             {hayFiltros && (
               <button

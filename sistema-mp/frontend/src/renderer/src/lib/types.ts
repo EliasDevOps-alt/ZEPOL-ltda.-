@@ -233,7 +233,7 @@ export interface RegistroExcelAutomatico {
   creado_en: string
   numero_ot: string
   cliente: string | null
-  tipo: 'nueva' | 'actualizada' | 'eliminada'
+  tipo: 'nueva' | 'actualizada' | 'eliminada' | 'revisar'
   detalle: string
 }
 

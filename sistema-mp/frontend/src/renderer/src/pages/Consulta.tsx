@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search } from 'lucide-react'
+import { ArrowRightLeft, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -41,6 +41,25 @@ export function Consulta() {
     enabled: !!otBuscada
   })
 
+  // Qué material salió DE VERDAD en cada pedido: si almacén entregó una
+  // alternativa (pide BOPP20720, sale BOPP20760), la consulta tiene que decir
+  // BOPP20760 — mostrar solo el código pedido hacía pensar que se había
+  // registrado el que no se entregó.
+  const entregas = useQuery({
+    queryKey: ['entregas-consulta', otBuscada],
+    queryFn: () => api.listarEntregas(apiBaseUrl, token, otBuscada!),
+    enabled: !!otBuscada
+  })
+
+  const entregadosPorPedido = useMemo(() => {
+    const mapa = new Map<number, string[]>()
+    for (const e of entregas.data ?? []) {
+      const actuales = mapa.get(e.ot_material_id) ?? []
+      if (!actuales.includes(e.codigo_mp_entregado)) mapa.set(e.ot_material_id, [...actuales, e.codigo_mp_entregado])
+    }
+    return mapa
+  }, [entregas.data])
+
   // Los ingresos a almacén de un material fabricado que todavía no tiene
   // pedido (ver "Registrar ingreso" en Registrar Devolución) no existen en
   // /consumo, así que se piden aparte y se suman como filas propias.
@@ -79,7 +98,7 @@ export function Consulta() {
   }
 
   return (
-    <div className="max-w-4xl">
+    <div>
       <h1 className="mb-6 text-2xl font-semibold">Consultar OT</h1>
 
       <Card className="mb-6">
@@ -113,65 +132,89 @@ export function Consulta() {
           <CardContent className="overflow-x-auto p-0">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-left text-muted-foreground">
-                  <th className="p-3">Proceso</th>
-                  <th className="p-3">Máquina</th>
-                  <th className="p-3">Material</th>
-                  <th className="p-3 text-right">Requerido</th>
-                  <th className="p-3 text-right">Entregado</th>
-                  <th className="p-3 text-right">Devuelto</th>
-                  <th className="p-3 text-right">Ingresó a almacén</th>
-                  <th className="p-3 text-right">Consumo neto</th>
-                  <th className="p-3">Avance</th>
-                  <th className="p-3">Estado SID</th>
+                <tr className="border-b border-border text-left text-muted-foreground [&>th]:whitespace-nowrap">
+                  <th className="px-2 py-3">Proceso</th>
+                  <th className="px-2 py-3">Máquina</th>
+                  <th className="px-2 py-3">Material</th>
+                  <th className="px-2 py-3 text-right">Requerido</th>
+                  <th className="px-2 py-3 text-right">Entregado</th>
+                  <th className="px-2 py-3 text-right">Devuelto</th>
+                  <th className="px-2 py-3 text-right">Ingresó a almacén</th>
+                  <th className="px-2 py-3 text-right">Consumo neto</th>
+                  <th className="px-2 py-3">Avance</th>
+                  <th className="px-2 py-3">Estado SID</th>
                 </tr>
               </thead>
               <tbody>
                 {filasConsumo.map((row) => (
                   <tr key={row.ot_material_id} className="border-b border-border last:border-0">
-                    <td className="p-3">{row.proceso}</td>
-                    <td className="p-3">{row.maquina}</td>
-                    <td className="p-3">{row.codigo_mp}</td>
-                    <td className="p-3 text-right">
+                    <td className="px-2 py-3">{row.proceso}</td>
+                    <td className="px-2 py-3">{row.maquina}</td>
+                    <td className="px-2 py-3">
+                      {(() => {
+                        const entregados = entregadosPorPedido.get(row.ot_material_id) ?? []
+                        const reales = entregados.length > 0 ? entregados : [row.codigo_mp]
+                        const sustituido = reales.some((c) => c !== row.codigo_mp)
+                        return (
+                          <>
+                            {reales.map((c) => (
+                              <div key={c} className={cn('whitespace-nowrap', c !== row.codigo_mp && 'text-warning')}>
+                                {c}
+                              </div>
+                            ))}
+                            {sustituido && (
+                              <span
+                                className="mt-0.5 inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                                title="El material entregado es distinto al que pedía la OT"
+                              >
+                                <ArrowRightLeft className="h-2.5 w-2.5" />
+                                pedido: {row.codigo_mp}
+                              </span>
+                            )}
+                          </>
+                        )
+                      })()}
+                    </td>
+                    <td className="px-2 py-3 text-right">
                       {row.cantidad_requerida ?? '—'} {row.cantidad_requerida ? row.unidad : ''}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="px-2 py-3 text-right">
                       {row.total_entregado} {row.unidad}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="px-2 py-3 text-right">
                       {row.total_devuelto} {row.unidad}
                     </td>
-                    <td className="p-3 text-right">
+                    <td className="px-2 py-3 text-right">
                       {row.total_ingresado > 0 ? `${row.total_ingresado} ${row.unidad}` : '—'}
                     </td>
-                    <td className="p-3 text-right font-medium">
+                    <td className="px-2 py-3 text-right font-medium">
                       {row.consumo_neto} {row.unidad}
                     </td>
-                    <td className="p-3">
+                    <td className="px-2 py-3">
                       <BadgeEstado estado={row.estado_entrega} />
                     </td>
-                    <td className="p-3 text-muted-foreground">{row.estado_sid}</td>
+                    <td className="px-2 py-3 text-muted-foreground">{row.estado_sid}</td>
                   </tr>
                 ))}
                 {ingresosSueltos.map((ing) => (
                   <tr key={`ingreso-${ing.material_id}`} className="border-b border-border last:border-0">
-                    <td className="p-3 text-muted-foreground">—</td>
-                    <td className="p-3 text-muted-foreground">—</td>
-                    <td className="p-3">
-                      {ing.codigo_mp}
-                      <span className="ml-2 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                    <td className="px-2 py-3 text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-muted-foreground">—</td>
+                    <td className="px-2 py-3">
+                      <div className="whitespace-nowrap">{ing.codigo_mp}</div>
+                      <span className="mt-0.5 inline-block whitespace-nowrap rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
                         material fabricado
                       </span>
                     </td>
-                    <td className="p-3 text-right text-muted-foreground">—</td>
-                    <td className="p-3 text-right text-muted-foreground">—</td>
-                    <td className="p-3 text-right text-muted-foreground">—</td>
-                    <td className="p-3 text-right">
+                    <td className="px-2 py-3 text-right text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-right text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-right text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-right">
                       {ing.total} {ing.unidad}
                     </td>
-                    <td className="p-3 text-right text-muted-foreground">—</td>
-                    <td className="p-3 text-muted-foreground">—</td>
-                    <td className="p-3 text-muted-foreground">{ing.todoEnSid ? 'COMPLETADO' : 'PENDIENTE'}</td>
+                    <td className="px-2 py-3 text-right text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-muted-foreground">—</td>
+                    <td className="px-2 py-3 text-muted-foreground">{ing.todoEnSid ? 'COMPLETADO' : 'PENDIENTE'}</td>
                   </tr>
                 ))}
               </tbody>

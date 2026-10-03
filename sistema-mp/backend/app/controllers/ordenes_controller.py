@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Tuple
@@ -502,6 +503,129 @@ def _eliminar_materiales_removidos_del_excel(
     return borrados, bloqueados
 
 
+def _codigos_excel(datos_excel: Dict[str, Any]) -> set:
+    return {m["codigo_mp"].strip().lower() for m in datos_excel["materiales"]}
+
+
+def _items_con_movimientos(ot: OrdenTrabajo) -> List[Dict[str, Any]]:
+    """Pedidos/pendientes de la OT que ya tienen movimientos reales (mismo
+    criterio que _bloquear_si_pedido_tiene_movimientos y su gemelo de
+    pendientes; la materia prima nunca vino del Excel y se ignora), con todos
+    los códigos con los que el Excel podría nombrarlos y cuántos movimientos
+    tienen y cuántos ya están en el SID."""
+    items = []
+    for p in ot.pendientes:
+        if not (p.materias_primas or p.ingresos):
+            continue
+        codigos = {p.codigo_mp.strip().lower()}
+        if p.material_id and p.material:
+            codigos.add(p.material.codigo_mp.strip().lower())
+        items.append(
+            {
+                "codigos": codigos,
+                "mostrado": p.material.codigo_mp if p.material else p.codigo_mp,
+                "movimientos": len(p.ingresos),
+                "con_sid": sum(1 for i in p.ingresos if i.sid_completado),
+            }
+        )
+    for ot_proceso in ot.procesos:
+        for om in ot_proceso.materiales:
+            if om.insumo_de_id is not None or om.insumo_de_pendiente_id is not None:
+                continue
+            if not (om.entregas or om.devoluciones or om.insumos):
+                continue
+            codigos = {om.material.codigo_mp.strip().lower()}
+            if om.codigo_mp_excel:
+                codigos.add(om.codigo_mp_excel.strip().lower())
+            movs = list(om.entregas) + list(om.devoluciones)
+            items.append(
+                {
+                    "codigos": codigos,
+                    "mostrado": om.material.codigo_mp,
+                    "movimientos": len(movs),
+                    "con_sid": sum(1 for m in movs if m.sid_completado),
+                }
+            )
+    return items
+
+
+def _detectar_cambio_de_codigo(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) -> Optional[str]:
+    """Si en el Excel desapareció (o cambió de nombre) el código de un
+    material que YA tiene movimientos, devuelve el texto del aviso para que
+    alguien lo revise; si no, None. Siempre deja guardado qué códigos tiene
+    ahora el Excel (ot.codigos_excel_vistos) para la próxima comparación.
+
+    Lo que dispara el aviso es un CAMBIO entre dos lecturas del Excel, no una
+    diferencia que ya estaba: avisar por toda diferencia repetía el mismo
+    aviso en cada guardado del Excel y daba falsos positivos (pedidos
+    asignados antes de que existiera codigo_mp_excel, visto en ~15 OT del
+    servidor). Por eso la primera lectura de una OT solo guarda el estado, sin
+    avisar. No avisa si el código "nuevo" ya es uno de los nombres que el
+    sistema le conoce a ese material (el propio sistema reescribió el Excel
+    al resolver el pendiente), ni si el material sigue figurando en el Excel
+    bajo otro de sus nombres.
+
+    No cambia nada de lo registrado: el SID es un trámite externo y lo
+    entregado es lo que de verdad salió de almacén. Tanto si el cambio del
+    Excel era una corrección de tipeo como si es otro material, la decisión
+    es de una persona."""
+    actuales = _codigos_excel(datos_excel)
+    anterior_json = ot.codigos_excel_vistos
+    ot.codigos_excel_vistos = json.dumps(sorted(actuales))
+    if anterior_json is None:
+        return None
+    try:
+        anteriores = set(json.loads(anterior_json))
+    except (TypeError, ValueError):
+        return None
+
+    quitados = anteriores - actuales
+    agregados = actuales - anteriores
+    if not quitados:
+        return None
+
+    afectados = []
+    for item in _items_con_movimientos(ot):
+        if not (item["codigos"] & quitados):
+            continue  # este material no es de los que desaparecieron
+        if item["codigos"] & actuales:
+            continue  # sigue en el Excel bajo otro de sus nombres
+        if item["codigos"] & agregados:
+            continue  # el nombre nuevo lo puso el propio sistema
+        afectados.append(item)
+    if not afectados:
+        return None
+
+    # Como los escribieron en el Excel (el estado guardado va en minúsculas).
+    originales = {m["codigo_mp"].strip().lower(): m["codigo_mp"].strip() for m in datos_excel["materiales"]}
+    nuevos = sorted(originales[c] for c in agregados)
+    lineas = []
+    for item in afectados:
+        total = item["movimientos"]
+        if item["con_sid"] == 0:
+            sid = "ninguno con SID registrado"
+        elif item["con_sid"] == total:
+            sid = "todos con SID registrado"
+        else:
+            sid = f"{item['con_sid']} de {total} con SID registrado"
+        lineas.append(f"{item['mostrado']} ({total} movimiento(s), {sid})")
+    if len(afectados) == 1 and len(nuevos) == 1:
+        cambio = f"{afectados[0]['mostrado']} → {nuevos[0]}"
+    else:
+        cambio = f"ya no figura: {', '.join(i['mostrado'] for i in afectados)}"
+        if nuevos:
+            cambio += f" · nuevo en el Excel: {', '.join(nuevos)}"
+    return (
+        f"El Excel cambió un material que ya tiene movimientos: {cambio}. "
+        f"Afectado: {'; '.join(lineas)}. "
+        "El sistema NO tocó lo registrado"
+        + (" y agregó el código nuevo como material pendiente" if nuevos else "")
+        + ". Si fue una corrección del Excel, corrige el material de esos movimientos en Historial de OT "
+        "(los que tienen SID registrado hay que desmarcarlos antes en Registro SID); "
+        "si es otro material, no hay nada que hacer."
+    )
+
+
 def _comparar_ot_con_datos_excel(ot: OrdenTrabajo, datos_excel: Dict[str, Any]) -> Dict[str, Any]:
     """Diferencias comerciales y materiales nuevos entre una OT y su fila ya
     leída del Excel — compartido por comparar_con_excel (una OT puntual) y
@@ -679,11 +803,13 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
 
     ots_nuevas: List[str] = []
     ots_actualizadas: List[str] = []
+    ots_a_revisar: List[str] = []
 
     for numero_ot, datos_excel in todas_excel.items():
         ot = numeros_en_bd.get(numero_ot)
         if ot is None:
             ot = guardar_desde_excel(db, numero_ot, datos=datos_excel)
+            ot.codigos_excel_vistos = json.dumps(sorted(_codigos_excel(datos_excel)))
             cantidad_materiales = len(datos_excel.get("materiales") or [])
             plural = "material" if cantidad_materiales == 1 else "materiales"
             db.add(
@@ -696,6 +822,17 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
             )
             ots_nuevas.append(numero_ot)
             continue
+
+        # Antes de aplicar nada: avisa si el Excel cambió el código de un
+        # material que ya tiene movimientos (ver _detectar_cambio_de_codigo).
+        aviso_codigo = _detectar_cambio_de_codigo(ot, datos_excel)
+        if aviso_codigo:
+            db.add(
+                RegistroExcelAutomatico(
+                    numero_ot=numero_ot, cliente=ot.cliente, tipo="revisar", detalle=aviso_codigo
+                )
+            )
+            ots_a_revisar.append(numero_ot)
 
         comparacion = _comparar_ot_con_datos_excel(ot, datos_excel)
         # Solo lo ACCIONABLE dispara la actualización y su aviso. Un material
@@ -727,7 +864,12 @@ def sincronizar_automaticamente_excel(db: Session) -> Dict[str, List[str]]:
     ots_eliminadas = _procesar_ots_ausentes_del_excel(db, todas_excel, numeros_en_bd)
 
     db.commit()
-    return {"nuevas": ots_nuevas, "actualizadas": ots_actualizadas, "eliminadas": ots_eliminadas}
+    return {
+        "nuevas": ots_nuevas,
+        "actualizadas": ots_actualizadas,
+        "eliminadas": ots_eliminadas,
+        "revisar": ots_a_revisar,
+    }
 
 
 def _detalle_actualizacion_excel(comparacion: Dict[str, Any]) -> str:

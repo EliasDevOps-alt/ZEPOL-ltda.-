@@ -155,6 +155,11 @@ class OrdenTrabajo(Base):
     # le corresponde un pedido real, que es justo lo que no es. El personal
     # la numera a su criterio (ej. "001") para distinguirla a simple vista.
     uso_interno: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Códigos de material que tenía la fila de esta OT en el Excel la última
+    # vez que el vigilante la leyó (JSON, minúsculas). Sirve para detectar un
+    # CAMBIO de código (X pasó a Y) y no una diferencia vieja y estable — ver
+    # ordenes_controller._detectar_cambio_de_codigo. NULL = todavía no se vio.
+    codigos_excel_vistos: Mapped[Optional[str]] = mapped_column(Text)
 
     # Columnas comerciales espejo de la hoja "oc mp" del Excel OC-MP.
     fecha_seguimiento_mp: Mapped[Optional[date]] = mapped_column(Date)

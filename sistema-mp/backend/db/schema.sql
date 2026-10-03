@@ -83,7 +83,7 @@ CREATE TABLE registro_excel_automatico (
     creado_en   TIMESTAMP NOT NULL DEFAULT now(),
     numero_ot   VARCHAR(50) NOT NULL,
     cliente     VARCHAR(255),
-    tipo        VARCHAR(20) NOT NULL,  -- 'nueva' | 'actualizada'
+    tipo        VARCHAR(20) NOT NULL,  -- 'nueva' | 'actualizada' | 'eliminada' | 'revisar'
     detalle     TEXT NOT NULL
 );
 
@@ -144,7 +144,11 @@ CREATE TABLE ordenes_trabajo (
     -- detrás — pasa raramente. _sincronizar_excel la salta por completo, así
     -- que nunca genera una fila en el Excel OC-MP (tenerla ahí implicaría un
     -- pedido real de cliente, que es justo lo que no es).
-    uso_interno                  BOOLEAN     NOT NULL DEFAULT FALSE
+    uso_interno                  BOOLEAN     NOT NULL DEFAULT FALSE,
+    -- Códigos de material que tenía la fila de esta OT en el Excel la última vez
+    -- que el vigilante la leyó (JSON, minúsculas) — para detectar un CAMBIO de
+    -- código y no una diferencia vieja. NULL = todavía no se vio.
+    codigos_excel_vistos         TEXT
 );
 
 -- Un "paso" de la OT: la OT 2121 puede pasar por Laminación en la máquina NORD.

@@ -163,7 +163,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
 
   async function pedirEliminar(pesaje: Pesaje): Promise<void> {
     const ok = await confirmar(
-      `¿Eliminar el pesaje N° ${pesaje.numero} (${num(pesaje.peso_neto)} kg netos)? Si su etiqueta ya está impresa, retírala de la bobina o paquete.`,
+      `¿Eliminar el pesaje N° ${pesaje.numero} (${num(pesaje.peso_neto)} kg netos)? Los N° de los demás pesajes se renumeran desde 1 (si ya imprimiste sus etiquetas, hay que reimprimirlas). Si la etiqueta de este ya está pegada, retírala de la bobina o paquete.`,
       {
         titulo: 'Eliminar pesaje',
         textoConfirmar: 'Eliminar',
@@ -279,6 +279,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                     Etiquetas del día
                   </Button>
                 </div>
+                <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-xs text-muted-foreground">
                     <tr>
@@ -327,7 +328,11 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                               </span>
                             )}
                           </td>
-                          <td className="flex justify-end gap-1 px-3 py-1">
+                          {/* El flex va en un contenedor, no en el <td>: un td con
+                              display:flex deja de ser parte de la tabla y sus
+                              botones se salían de la tarjeta. */}
+                          <td className="px-3 py-1">
+                           <div className="flex justify-end gap-1">
                             <button
                               type="button"
                               title="Corregir pesaje"
@@ -357,12 +362,14 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                             >
                               <X className="h-3.5 w-3.5" />
                             </button>
+                           </div>
                           </td>
                         </tr>
                       )
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             ))}
           </CardContent>

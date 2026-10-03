@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Beaker, LayoutGrid, Table2 } from 'lucide-react'
+import { ArrowRightLeft, Beaker, LayoutGrid, Table2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent } from '@renderer/components/ui/card'
@@ -40,6 +40,8 @@ interface FilaTabla {
   descripcion: string
   material: string
   sustituido: boolean
+  // Código que pedía la OT (para el tooltip del ícono de sustitución).
+  pedidoCodigo: string
   cantidad: string
   // Peso de cada bobina registrada (vacío si el material no se entrega en bobinas).
   bobinas: number[]
@@ -77,9 +79,20 @@ function devolucionCompleta(pedido: Consumo): boolean {
 // los dos trámites a la vez, pero solo el que de verdad aplica: un pedido sin
 // devoluciones/ingresos no tiene por qué tener su SID de devolución tramitado
 // para considerarse completo.
-function estaCompletado(pedido: Consumo, pestana: Pestana): boolean {
+function estaCompletado(
+  pedido: Consumo,
+  pestana: Pestana,
+  devolucionesDelPedido: Map<number, Devolucion[]>
+): boolean {
   if (pestana === 'entregados') return entregaCompleta(pedido)
-  if (pestana === 'devueltos') return devolucionCompleta(pedido)
+  // Devueltos son solo los sobrantes: los ingresos de material fabricado
+  // tienen su propia pestaña y su propio SID, así que no cuentan acá. Si no,
+  // un pedido con todos sus sobrantes marcados seguiría "Pendiente" por un
+  // ingreso que ni siquiera se ve en esta pestaña.
+  if (pestana === 'devueltos') {
+    const sobrantes = (devolucionesDelPedido.get(pedido.ot_material_id) ?? []).filter((d) => !d.es_ingreso_produccion)
+    return sobrantes.length > 0 && sobrantes.every((d) => d.sid_completado)
+  }
   const aplicaEntrega = pedido.total_entregado > 0
   const aplicaDevolucion = pedido.total_devuelto + pedido.total_ingresado > 0
   return (!aplicaEntrega || entregaCompleta(pedido)) && (!aplicaDevolucion || devolucionCompleta(pedido))
@@ -110,11 +123,16 @@ export function RegistroSid() {
     }
   }
 
+  // Con algo escrito en el buscador se busca en TODAS las fechas (ver
+  // ListadoOt): si no, una OT de otro día/mes no aparece hasta que se cambie
+  // el rango a mano.
+  const buscando = q.trim() !== ''
+
   const { desde, hasta } = useMemo(() => {
-    if (!fecha) return { desde: '', hasta: '' }
+    if (!fecha || buscando) return { desde: '', hasta: '' }
     if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
     return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
-  }, [modoFecha, fecha])
+  }, [modoFecha, fecha, buscando])
 
   function cambiarModoFecha(modo: ModoFecha) {
     setModoFecha(modo)
@@ -282,7 +300,7 @@ export function RegistroSid() {
     () =>
       pedidosNoTinta.filter((p) => {
         if (pestana === 'entregados') return tieneEntrega(p)
-        if (pestana === 'devueltos') return tieneDevolucion(p)
+        if (pestana === 'devueltos') return p.total_devuelto > 0
         return tieneEntrega(p) || tieneDevolucion(p)
       }),
     [pedidosNoTinta, pestana]
@@ -311,8 +329,8 @@ export function RegistroSid() {
     let lista = visiblesEnPestana
     const needle = q.trim().toLowerCase()
     if (needle) lista = lista.filter((p) => p.numero_ot.toLowerCase().includes(needle))
-    if (filtro === 'completados') lista = lista.filter((p) => estaCompletado(p, pestana))
-    if (filtro === 'pendientes') lista = lista.filter((p) => !estaCompletado(p, pestana))
+    if (filtro === 'completados') lista = lista.filter((p) => estaCompletado(p, pestana, devolucionesTodasPorPedido))
+    if (filtro === 'pendientes') lista = lista.filter((p) => !estaCompletado(p, pestana, devolucionesTodasPorPedido))
     // El filtro de fecha decide qué se MUESTRA (hay al menos un movimiento
     // en el rango) — a propósito no toca visiblesEnPestana/totalPorOt, que
     // siguen viendo todo el historial: si tocaran el badge "Completado"
@@ -322,12 +340,13 @@ export function RegistroSid() {
         const enEntregas = (entregasPorPedido.get(p.ot_material_id)?.length ?? 0) > 0
         const enDevoluciones = (devolucionesPorPedido.get(p.ot_material_id)?.length ?? 0) > 0
         if (pestana === 'entregados') return enEntregas
-        if (pestana === 'devueltos') return enDevoluciones
+        const haySobrantes = (devolucionesPorPedido.get(p.ot_material_id) ?? []).some((d) => !d.es_ingreso_produccion)
+        if (pestana === 'devueltos') return haySobrantes
         return enEntregas || enDevoluciones
       })
     }
     return lista
-  }, [visiblesEnPestana, q, filtro, pestana, desde, entregasPorPedido, devolucionesPorPedido])
+  }, [visiblesEnPestana, q, filtro, pestana, desde, entregasPorPedido, devolucionesPorPedido, devolucionesTodasPorPedido])
 
   // Una OT = una tarjeta, con todos sus materiales adentro (nunca se repite
   // el número de OT como si fueran OT distintas). "Completado" a nivel de OT
@@ -361,7 +380,7 @@ export function RegistroSid() {
     return orden.map((numeroOt) => {
       const todosVisiblesDeLaOt = visiblesPorOt.get(numeroOt) ?? []
       const todosPresentes = todosVisiblesDeLaOt.length === (totalPorOt.get(numeroOt) ?? 0)
-      const todosCompletados = todosVisiblesDeLaOt.every((p) => estaCompletado(p, pestana))
+      const todosCompletados = todosVisiblesDeLaOt.every((p) => estaCompletado(p, pestana, devolucionesTodasPorPedido))
       const sueltosCompletos = pestana === 'todos' ? (ingresosSueltosCompletoPorOt.get(numeroOt) ?? true) : true
       return {
         numeroOt,
@@ -378,7 +397,8 @@ export function RegistroSid() {
     q,
     filtro,
     ingresosSueltosPorOt,
-    ingresosSueltosCompletoPorOt
+    ingresosSueltosCompletoPorOt,
+    devolucionesTodasPorPedido
   ])
 
   // Vista de tabla: se arma desde los mismos grupos que usan las fichas, así
@@ -398,6 +418,7 @@ export function RegistroSid() {
       descripcion: d.descripcion ?? '',
       material: d.codigo_mp,
       sustituido: !!pedido && d.codigo_mp !== pedido.codigo_mp,
+      pedidoCodigo: pedido?.codigo_mp ?? '',
       cantidad: `${d.total_devuelto} ${unidad}`,
       bobinas: d.usa_bobinas ? d.bobinas : [],
       fecha: formatearFechaHora(d.fecha, d.hora),
@@ -426,6 +447,7 @@ export function RegistroSid() {
               descripcion: e.descripcion_entregado ?? '',
               material: e.codigo_mp_entregado,
               sustituido: e.codigo_mp_entregado !== p.codigo_mp,
+              pedidoCodigo: p.codigo_mp,
               cantidad: `${e.total_entregado} ${p.unidad}`,
               bobinas: e.usa_bobinas ? e.bobinas : [],
               fecha: formatearFechaHora(e.fecha, e.hora),
@@ -437,6 +459,8 @@ export function RegistroSid() {
         }
         if (pestana === 'devueltos' || pestana === 'todos') {
           for (const d of ordenar(devolucionesPorPedido.get(p.ot_material_id) ?? [])) {
+            // Los ingresos de material fabricado van en su pestaña (y en Todos).
+            if (pestana === 'devueltos' && d.es_ingreso_produccion) continue
             filas.push(deDevolucion(d, p.unidad, p))
           }
         }
@@ -473,8 +497,10 @@ export function RegistroSid() {
 
       <Card className="mb-6">
         <CardContent className="flex flex-col gap-4 pt-6">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-            <div className="flex flex-1 flex-col gap-1.5">
+          {/* Buscador y botones en una misma fila solo con ancho de sobra: con la
+              ventana angosta el buscador quedaba aplastado ("Buscar p…"). */}
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
               <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar por número de OT..." />
             </div>
             <div className="flex flex-wrap gap-2">
@@ -557,8 +583,11 @@ export function RegistroSid() {
                 type={modoFecha === 'dia' ? 'date' : 'month'}
                 value={fecha}
                 onChange={(e) => setFecha(e.target.value)}
-                className="w-auto"
+                className={cn('w-auto', buscando && 'opacity-50')}
               />
+            )}
+            {buscando && (
+              <span className="text-xs text-muted-foreground">Buscando en todas las fechas</span>
             )}
 
             {(q || fecha) && (
@@ -645,8 +674,13 @@ const ESTILO_TIPO: Record<FilaTabla['tipo'], string> = {
   ingreso: 'bg-warning/10 text-warning'
 }
 
-// Pocas columnas y ancho fijo: nada de scroll horizontal. Cada dato largo se
-// recorta con "…" y se puede copiar con el ícono junto a él.
+// Una columna por dato (como en una planilla). El scroll horizontal es solo de
+// esta tabla, no de la página: cada columna conserva su ancho y, si la ventana
+// no alcanza, la tabla se desliza dentro de su tarjeta. Las columnas cortas se
+// ajustan a su contenido (w-px + nowrap); Cliente y Descripción tienen un ancho
+// fijo para que se lean y se recortan con "…" (el texto completo queda en el
+// tooltip y se copia con el ícono); Bobinas toma el espacio que sobra y muestra
+// TODAS las bobinas con su peso, sin recortar.
 function TablaSid({
   filas,
   marcarEntregaSid,
@@ -658,20 +692,20 @@ function TablaSid({
 }) {
   return (
     <Card className="mb-4">
-      <CardContent className="p-0">
-        <table className="w-full text-sm">
+      <CardContent className="overflow-x-auto p-0">
+        <table className="w-full min-w-[1180px] text-sm">
           <thead>
             <tr className="border-b border-border text-left text-xs text-muted-foreground">
-              <th className="w-px p-2 text-center">SID</th>
-              <th className="w-px p-2">OT</th>
-              <th className="w-[14%] p-2">Cliente</th>
-              <th className="w-[16%] p-2">Descripción</th>
-              <th className="w-px p-2">Material</th>
-              <th className="w-px p-2">Tipo</th>
-              <th className="w-px p-2 text-right">Cantidad</th>
-              <th className="p-2">Bobinas (peso de cada una)</th>
-              <th className="w-px p-2">Fecha</th>
-              <th className="w-px p-2">Registro SID</th>
+              <th className="w-px whitespace-nowrap p-2 text-center">SID</th>
+              <th className="w-px whitespace-nowrap p-2">OT</th>
+              <th className="whitespace-nowrap p-2">Cliente</th>
+              <th className="whitespace-nowrap p-2">Descripción</th>
+              <th className="w-px whitespace-nowrap p-2">Material</th>
+              <th className="w-px whitespace-nowrap p-2">Tipo</th>
+              <th className="w-px whitespace-nowrap p-2 text-right">Cantidad</th>
+              <th className="min-w-[200px] p-2">Bobinas (peso de cada una)</th>
+              <th className="w-px whitespace-nowrap p-2">Fecha</th>
+              <th className="w-px whitespace-nowrap p-2">Registro SID</th>
             </tr>
           </thead>
           <tbody>
@@ -688,7 +722,7 @@ function TablaSid({
                     f.completado && 'bg-success/5'
                   )}
                 >
-                  <td className="p-2 text-center">
+                  <td className="p-2 text-center align-top">
                     <input
                       type="checkbox"
                       checked={f.completado}
@@ -696,32 +730,43 @@ function TablaSid({
                       onChange={(e) => mutacion.mutate({ id: f.id, completado: e.target.checked })}
                     />
                   </td>
-                  <td className="whitespace-nowrap p-2 font-medium">
+                  <td className="whitespace-nowrap p-2 align-top font-medium">
                     <CeldaCopiable texto={f.numeroOt} />
                   </td>
-                  {/* Cliente y descripción son los únicos que se recortan con
-                      "…" (max-w-0 + ancho en %): el texto completo queda en el
-                      tooltip y se puede copiar con el ícono. */}
-                  <td className="max-w-0 p-2" title={f.cliente}>
-                    <CeldaCopiable texto={f.cliente} />
+                  <td className="p-2 align-top" title={f.cliente}>
+                    <div className="w-[170px]">
+                      <CeldaCopiable texto={f.cliente} />
+                    </div>
                   </td>
-                  <td className="max-w-0 p-2" title={f.descripcion}>
-                    <CeldaCopiable texto={f.descripcion} />
+                  <td className="p-2 align-top" title={f.descripcion}>
+                    <div className="w-[210px]">
+                      <CeldaCopiable texto={f.descripcion} />
+                    </div>
                   </td>
-                  <td className={cn('whitespace-nowrap p-2', f.sustituido && 'text-warning')}>
-                    <CeldaCopiable texto={f.material} />
+                  <td className={cn('whitespace-nowrap p-2 align-top', f.sustituido && 'text-warning')}>
+                    <div className="flex items-center gap-1.5">
+                      <CeldaCopiable texto={f.material} />
+                      {f.sustituido && (
+                        <span
+                          className="shrink-0"
+                          title={`Sustituye a ${f.pedidoCodigo} (el material que pedía la OT)`}
+                        >
+                          <ArrowRightLeft className="h-3.5 w-3.5" />
+                        </span>
+                      )}
+                    </div>
                   </td>
-                  <td className="whitespace-nowrap p-2">
+                  <td className="whitespace-nowrap p-2 align-top">
                     <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ESTILO_TIPO[f.tipo])}>
                       {ETIQUETA_TIPO[f.tipo]}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap p-2 text-right">
+                  <td className="whitespace-nowrap p-2 text-right align-top">
                     <CeldaCopiable texto={f.cantidad} className="justify-end" />
                   </td>
                   {/* Todas las bobinas con su peso, sin recortar: si son 50, se
                       muestran las 50 (la celda crece hacia abajo). */}
-                  <td className="p-2 text-xs">
+                  <td className="p-2 align-top text-xs">
                     {f.bobinas.length > 0 ? (
                       <>
                         <span className="font-medium">
@@ -733,8 +778,8 @@ function TablaSid({
                       <span className="text-muted-foreground">—</span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap p-2 text-xs text-muted-foreground">{f.fecha}</td>
-                  <td className="whitespace-nowrap p-2 text-xs text-primary">
+                  <td className="whitespace-nowrap p-2 align-top text-xs text-muted-foreground">{f.fecha}</td>
+                  <td className="whitespace-nowrap p-2 align-top text-xs text-primary">
                     {f.completado && f.sidEn
                       ? `${formatearFechaHoraCompleta(f.sidEn)}${f.sidPor ? ` ${f.sidPor}` : ''}`
                       : ''}
@@ -968,6 +1013,20 @@ function FilaMaterial({
   const todosIngresos = todasSusDevoluciones.filter((d) => d.es_ingreso_produccion)
   const todosSobrantes = todasSusDevoluciones.filter((d) => !d.es_ingreso_produccion)
 
+  // El SID se tramita con el material que REALMENTE salió, no con el que pedía
+  // la OT: si almacén entregó una alternativa (pide BOPP20720, sale
+  // BOPP20760), eso es lo que hay que copiar. Se toma de los movimientos que
+  // se están viendo (entregas y sobrantes; un ingreso es otro material).
+  const materialesReales = useMemo(() => {
+    const mapa = new Map<string, string | null>()
+    for (const e of entregasOrdenadas) mapa.set(e.codigo_mp_entregado, e.descripcion_entregado)
+    for (const d of sobrantesOrdenados) if (!mapa.has(d.codigo_mp)) mapa.set(d.codigo_mp, d.descripcion ?? null)
+    if (mapa.size === 0) mapa.set(pedido.codigo_mp, pedido.descripcion)
+    return [...mapa.entries()].map(([codigo, descripcion]) => ({ codigo, descripcion }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entregasOrdenadas, devolucionesOrdenadas, pedido.codigo_mp, pedido.descripcion])
+  const sustituido = materialesReales.some((m) => m.codigo !== pedido.codigo_mp)
+
   const seccionEntrega = (
     <SeccionSid titulo="SID de entrega" completado={entregasOrdenadas.length > 0 ? entregaCompleta(pedido) : null}>
       {entregasOrdenadas.map((e) => (
@@ -1073,12 +1132,33 @@ function FilaMaterial({
                 se fabrica en esta OT
               </span>
             )}
+            {sustituido && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-1.5 py-0.5 text-[10px] font-medium text-warning"
+                title="El material entregado es distinto al que pedía la OT"
+              >
+                <ArrowRightLeft className="h-2.5 w-2.5" />
+                pedido: {pedido.codigo_mp}
+              </span>
+            )}
           </p>
-          <CeldaCopiable texto={pedido.codigo_mp} />
+          <div className="flex flex-col gap-0.5">
+            {materialesReales.map((m) => (
+              <CeldaCopiable
+                key={m.codigo}
+                texto={m.codigo}
+                className={m.codigo !== pedido.codigo_mp ? 'text-warning' : undefined}
+              />
+            ))}
+          </div>
         </div>
         <div className="sm:col-span-2">
           <p className="text-xs text-muted-foreground">Descripción</p>
-          <CeldaCopiable texto={pedido.descripcion ?? ''} />
+          <div className="flex flex-col gap-0.5">
+            {materialesReales.map((m) => (
+              <CeldaCopiable key={m.codigo} texto={m.descripcion ?? ''} />
+            ))}
+          </div>
         </div>
         <div>
           <p className="text-xs text-muted-foreground">Cantidad entregada</p>
@@ -1113,10 +1193,8 @@ function FilaMaterial({
       ) : pestana === 'entregados' ? (
         seccionEntrega
       ) : (
-        <div className="flex flex-col gap-3">
-          {seccionIngreso}
-          {seccionDevolucion}
-        </div>
+        // Devueltos: solo sobrantes. Los ingresos se ven en su pestaña.
+        seccionDevolucion
       )}
     </div>
   )

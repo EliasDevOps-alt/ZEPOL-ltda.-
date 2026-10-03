@@ -210,10 +210,17 @@ export function ConfiguracionExcel() {
                         'ml-2 rounded-full px-2 py-0.5 text-xs font-medium',
                         item.tipo === 'nueva' && 'bg-primary/10 text-primary',
                         item.tipo === 'actualizada' && 'bg-muted text-muted-foreground',
-                        item.tipo === 'eliminada' && 'bg-destructive/10 text-destructive'
+                        item.tipo === 'eliminada' && 'bg-destructive/10 text-destructive',
+                        item.tipo === 'revisar' && 'bg-warning/10 text-warning'
                       )}
                     >
-                      {item.tipo === 'nueva' ? 'OT nueva' : item.tipo === 'eliminada' ? 'Eliminada' : 'Actualizada'}
+                      {item.tipo === 'nueva'
+                        ? 'OT nueva'
+                        : item.tipo === 'eliminada'
+                          ? 'Eliminada'
+                          : item.tipo === 'revisar'
+                            ? 'Revisar'
+                            : 'Actualizada'}
                     </span>
                   </p>
                   <span className="text-xs text-muted-foreground">{formatearFechaHoraCompleta(item.creado_en)}</span>

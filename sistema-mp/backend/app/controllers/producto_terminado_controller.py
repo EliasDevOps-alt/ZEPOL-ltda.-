@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from ..models import OrdenTrabajo, PesajePt, ProductoTerminado, ProductoTerminadoItem, Usuario
@@ -285,13 +285,43 @@ def editar_pesaje(
     return pesaje
 
 
+def renumerar_pesajes(db: Session, producto_terminado_id: int) -> None:
+    """Deja los N° BOB/PAQ de la OT correlativos desde 1, conservando el orden.
+    En dos pasos porque (producto_terminado_id, numero) es UNIQUE y un solo
+    UPDATE podría chocar consigo mismo a mitad de camino: primero se mueven
+    todos muy arriba y recién después se les da su número definitivo."""
+    db.execute(
+        text("UPDATE pesajes_pt SET numero = numero + 1000000 WHERE producto_terminado_id = :id"),
+        {"id": producto_terminado_id},
+    )
+    db.execute(
+        text(
+            "UPDATE pesajes_pt p SET numero = r.n FROM ("
+            "  SELECT id, row_number() OVER (ORDER BY numero) AS n"
+            "  FROM pesajes_pt WHERE producto_terminado_id = :id"
+            ") r WHERE p.id = r.id"
+        ),
+        {"id": producto_terminado_id},
+    )
+
+
 def eliminar_pesaje(db: Session, pesaje_id: int) -> None:
-    """Para corregir un pesado mal cargado. El N° de los demás no se
-    renumera: sus etiquetas ya pueden estar impresas y pegadas."""
+    """Para corregir un pesado mal cargado. Los N° de los demás se renumeran
+    para que siempre sean correlativos desde 1 (si se borran casi todos, el
+    que queda pasa a ser el 1, no sigue siendo el 6). Ojo: una etiqueta ya
+    pegada con el N° anterior queda desactualizada; hay que reimprimirla."""
     pesaje = db.get(PesajePt, pesaje_id)
     if pesaje is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesaje no encontrado")
+    producto_terminado_id = pesaje.producto_terminado_id
+    # Mismo candado que al registrar (ver registrar_pesaje): dos estaciones no
+    # pueden numerar a la vez.
+    db.execute(
+        select(ProductoTerminado).where(ProductoTerminado.id == producto_terminado_id).with_for_update()
+    )
     db.delete(pesaje)
+    db.flush()
+    renumerar_pesajes(db, producto_terminado_id)
     db.commit()
 
 

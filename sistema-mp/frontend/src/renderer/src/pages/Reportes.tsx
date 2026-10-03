@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, ClipboardCheck, FileText, Loader2, Printer, Search } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
@@ -42,26 +42,27 @@ export function Reportes() {
   const [q, setQ] = useState('')
   const [modoFecha, setModoFecha] = useState<ModoFecha>('mes')
   const [fecha, setFecha] = useState(mesActualISO())
-  const [seleccionadas, setSeleccionadas] = useState<string[]>([])
+  // Se guardan las OT que alguien DESMARCÓ, no las marcadas: por defecto van
+  // todas, y como la lista cambia al buscar o cambiar el rango, guardar las
+  // marcadas obligaba a reiniciarlas y se perdía lo que se había quitado a mano.
+  const [excluidas, setExcluidas] = useState<Set<string>>(() => new Set())
   const [verFormulario, setVerFormulario] = useState(false)
 
+  // Con algo escrito en el buscador se busca en TODAS las fechas: una OT
+  // terminada es una sola, no tiene sentido tener que mover el rango hasta el
+  // mes donde terminó para encontrarla por su número.
+  const buscando = q.trim() !== ''
+
   const rango = useMemo(() => {
-    if (modoFecha === 'todos') return { desde: undefined, hasta: undefined }
+    if (modoFecha === 'todos' || buscando) return { desde: undefined, hasta: undefined }
     if (modoFecha === 'dia') return { desde: fecha, hasta: fecha }
     return { desde: `${fecha}-01`, hasta: ultimoDiaDelMes(fecha) }
-  }, [modoFecha, fecha])
+  }, [modoFecha, fecha, buscando])
 
   const ots = useQuery({
     queryKey: ['ots-terminadas', rango.desde, rango.hasta],
     queryFn: () => api.listarOtsTerminadas(apiBaseUrl, token, rango.desde, rango.hasta)
   })
-
-  // Por defecto van todas: el caso normal es imprimir el lote entero, no ir
-  // eligiendo. Solo se reinicia cuando cambia el filtro (o sea, cuando cambia
-  // el resultado de la consulta), así una deselección manual no se pierde.
-  useEffect(() => {
-    setSeleccionadas((ots.data ?? []).map((o) => o.numero_ot))
-  }, [ots.data])
 
   const visibles = useMemo(() => {
     const texto = q.trim().toLowerCase()
@@ -73,10 +74,35 @@ export function Reportes() {
     )
   }, [ots.data, q])
 
+  // Seleccionadas = las que se ven y nadie desmarcó. Con búsqueda la consulta
+  // trae todas las OT terminadas, pero solo las que coinciden están en
+  // pantalla: contar y generar el formulario con las que no se ven sería
+  // imprimir de más.
+  const seleccionadasVisibles = useMemo(
+    () => visibles.map((o) => o.numero_ot).filter((n) => !excluidas.has(n)),
+    [visibles, excluidas]
+  )
+
   function alternar(numeroOt: string): void {
-    setSeleccionadas((prev) =>
-      prev.includes(numeroOt) ? prev.filter((n) => n !== numeroOt) : [...prev, numeroOt]
-    )
+    setExcluidas((prev) => {
+      const nuevas = new Set(prev)
+      if (nuevas.has(numeroOt)) nuevas.delete(numeroOt)
+      else nuevas.add(numeroOt)
+      return nuevas
+    })
+  }
+
+  // "Seleccionar todas" / "Quitar todas" actúan solo sobre las que se ven.
+  function alternarTodasVisibles(): void {
+    const todasMarcadas = seleccionadasVisibles.length === visibles.length
+    setExcluidas((prev) => {
+      const nuevas = new Set(prev)
+      for (const o of visibles) {
+        if (todasMarcadas) nuevas.add(o.numero_ot)
+        else nuevas.delete(o.numero_ot)
+      }
+      return nuevas
+    })
   }
 
   function cambiarModo(modo: ModoFecha): void {
@@ -88,7 +114,7 @@ export function Reportes() {
   if (verFormulario) {
     return (
       <FormularioMp
-        numerosOt={seleccionadas}
+        numerosOt={seleccionadasVisibles}
         ots={ots.data ?? []}
         onVolver={() => setVerFormulario(false)}
       />
@@ -142,11 +168,11 @@ export function Reportes() {
                 type={modoFecha === 'dia' ? 'date' : 'month'}
                 value={fecha}
                 onChange={(e) => setFecha(e.target.value)}
-                className="w-auto"
+                className={cn('w-auto', buscando && 'opacity-50')}
               />
             )}
             <span className="text-sm text-muted-foreground">
-              Se filtra por la fecha del último movimiento.
+              {buscando ? 'Buscando en todas las fechas.' : 'Se filtra por la fecha del último movimiento.'}
             </span>
           </div>
         </CardContent>
@@ -170,7 +196,7 @@ export function Reportes() {
       {!ots.isLoading && !ots.isError && visibles.length === 0 && (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            No hay OT terminadas en este rango.
+            {buscando ? 'Ninguna OT terminada coincide con la búsqueda.' : 'No hay OT terminadas en este rango.'}
           </CardContent>
         </Card>
       )}
@@ -180,19 +206,15 @@ export function Reportes() {
           <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="outline"
-              onClick={() =>
-                setSeleccionadas(
-                  seleccionadas.length === visibles.length ? [] : visibles.map((o) => o.numero_ot)
-                )
-              }
+              onClick={alternarTodasVisibles}
             >
-              {seleccionadas.length === visibles.length ? 'Quitar todas' : 'Seleccionar todas'}
+              {seleccionadasVisibles.length === visibles.length ? 'Quitar todas' : 'Seleccionar todas'}
             </Button>
             <span className="text-sm text-muted-foreground">
-              {seleccionadas.length} de {visibles.length} seleccionada
-              {seleccionadas.length === 1 ? '' : 's'}
+              {seleccionadasVisibles.length} de {visibles.length} seleccionada
+              {seleccionadasVisibles.length === 1 ? '' : 's'}
             </span>
-            <Button disabled={seleccionadas.length === 0} onClick={() => setVerFormulario(true)}>
+            <Button disabled={seleccionadasVisibles.length === 0} onClick={() => setVerFormulario(true)}>
               <ClipboardCheck className="h-4 w-4" />
               Ver formulario
             </Button>
@@ -203,7 +225,7 @@ export function Reportes() {
               <TarjetaOt
                 key={ot.numero_ot}
                 ot={ot}
-                seleccionada={seleccionadas.includes(ot.numero_ot)}
+                seleccionada={seleccionadasVisibles.includes(ot.numero_ot)}
                 onToggle={() => alternar(ot.numero_ot)}
               />
             ))}
