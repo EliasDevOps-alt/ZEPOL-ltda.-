@@ -74,6 +74,25 @@ export function CampoCantidad({
     onChange({ bobinas: copia })
   }
 
+  // Enter pasa a la casilla siguiente (y la deja seleccionada para escribir
+  // encima), en vez de enviar el formulario: pesar 40 bobinas es escribir el
+  // peso y apretar Enter, sin tocar el mouse. Al escribir en la última casilla
+  // ya se agregó sola otra vacía, así que casi siempre hay una "siguiente".
+  // Enter NUNCA envía el formulario desde acá: un Enter de más sobre la última
+  // casilla vacía registraba la entrega entera sin querer.
+  function alApretarTecla(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    const casillas = Array.from(
+      e.currentTarget.closest('[data-campo-bobinas]')?.querySelectorAll<HTMLInputElement>('input[data-bobina]') ?? []
+    )
+    const siguiente = casillas[casillas.indexOf(e.currentTarget) + 1]
+    if (siguiente) {
+      siguiente.focus()
+      siguiente.select()
+    }
+  }
+
   function quitarBobina(i: number) {
     const copia = lista.filter((_, idx) => idx !== i)
     onChange({ bobinas: copia.length > 0 ? copia : [''] })
@@ -85,7 +104,7 @@ export function CampoCantidad({
         Peso de cada bobina {unidad ? `(${unidad})` : ''}
         {sufijo}
       </Label>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-3 gap-3" data-campo-bobinas>
         {lista.map((valor, i) => (
           <div key={i} className="flex items-center gap-1.5">
             <Input
@@ -94,11 +113,17 @@ export function CampoCantidad({
               min={0}
               placeholder={`N.º ${i + 1}`}
               value={valor}
+              data-bobina
               onChange={(e) => actualizarBobina(i, e.target.value)}
+              onKeyDown={alApretarTecla}
             />
             {lista.length > 1 && (
               <button
                 type="button"
+                // Fuera del orden del Tab: sin esto, para pasar de una casilla
+                // a la siguiente hacían falta dos Tab (casilla → X → casilla).
+                // Sigue funcionando con el mouse.
+                tabIndex={-1}
                 onClick={() => quitarBobina(i)}
                 className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
                 aria-label={`Quitar bobina N.º ${i + 1}`}

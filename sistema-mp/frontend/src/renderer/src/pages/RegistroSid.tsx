@@ -10,7 +10,14 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { formatearFechaHora, formatearFechaHoraCompleta, hoyISO, mesActualISO, ultimoDiaDelMes } from '@renderer/lib/fechas'
+import {
+  formatearFechaHora,
+  formatearFechaHoraCompleta,
+  hoyISO,
+  mesActualISO,
+  textoDeEntrega,
+  ultimoDiaDelMes
+} from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
 type ModoFecha = 'dia' | 'mes' | 'todos'
@@ -42,6 +49,8 @@ interface FilaTabla {
   sustituido: boolean
   // Código que pedía la OT (para el tooltip del ícono de sustitución).
   pedidoCodigo: string
+  // "de la entrega de las 11:00" cuando el sobrante dice de cuál entrega es.
+  deEntrega: string | null
   cantidad: string
   // Peso de cada bobina registrada (vacío si el material no se entrega en bobinas).
   bobinas: number[]
@@ -419,6 +428,7 @@ export function RegistroSid() {
       material: d.codigo_mp,
       sustituido: !!pedido && d.codigo_mp !== pedido.codigo_mp,
       pedidoCodigo: pedido?.codigo_mp ?? '',
+      deEntrega: textoDeEntrega(d.entrega_fecha, d.entrega_hora, d.fecha),
       cantidad: `${d.total_devuelto} ${unidad}`,
       bobinas: d.usa_bobinas ? d.bobinas : [],
       fecha: formatearFechaHora(d.fecha, d.hora),
@@ -448,6 +458,7 @@ export function RegistroSid() {
               material: e.codigo_mp_entregado,
               sustituido: e.codigo_mp_entregado !== p.codigo_mp,
               pedidoCodigo: p.codigo_mp,
+              deEntrega: null,
               cantidad: `${e.total_entregado} ${p.unidad}`,
               bobinas: e.usa_bobinas ? e.bobinas : [],
               fecha: formatearFechaHora(e.fecha, e.hora),
@@ -760,6 +771,7 @@ function TablaSid({
                     <span className={cn('rounded-full px-2 py-0.5 text-xs font-medium', ESTILO_TIPO[f.tipo])}>
                       {ETIQUETA_TIPO[f.tipo]}
                     </span>
+                    {f.deEntrega && <div className="mt-0.5 text-xs text-muted-foreground">{f.deEntrega}</div>}
                   </td>
                   <td className="whitespace-nowrap p-2 text-right align-top">
                     <CeldaCopiable texto={f.cantidad} className="justify-end" />
@@ -1089,10 +1101,17 @@ function FilaMaterial({
           key={d.id}
           fecha={formatearFechaHora(d.fecha, d.hora)}
           etiqueta={
-            d.codigo_mp !== pedido.codigo_mp ? (
-              <span className="text-warning">
-                {d.codigo_mp} (pedido: {pedido.codigo_mp})
-              </span>
+            d.codigo_mp !== pedido.codigo_mp || d.entrega_id !== null ? (
+              <>
+                {d.codigo_mp !== pedido.codigo_mp && (
+                  <span className="text-warning">
+                    {d.codigo_mp} (pedido: {pedido.codigo_mp})
+                  </span>
+                )}
+                {d.entrega_id !== null && (
+                  <span className="text-primary">{textoDeEntrega(d.entrega_fecha, d.entrega_hora, d.fecha)}</span>
+                )}
+              </>
             ) : null
           }
           cantidad={d.total_devuelto}

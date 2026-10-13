@@ -379,6 +379,10 @@ class Entrega(Base):
     usuario: Mapped["Usuario"] = relationship(foreign_keys="Entrega.usuario_id")
     editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Entrega.editado_por_id")
     sid_completado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Entrega.sid_completado_por_id")
+    # Sobrantes que se registraron indicando que son de ESTA entrega (solo lectura).
+    devoluciones_vinculadas: Mapped[List["Devolucion"]] = relationship(
+        "Devolucion", primaryjoin="Entrega.id == Devolucion.entrega_id", viewonly=True
+    )
     bobinas: Mapped[List["EntregaBobina"]] = relationship(back_populates="entrega", cascade="all, delete-orphan")
 
 
@@ -435,6 +439,11 @@ class Devolucion(Base):
     # Ver la nota equivalente en Entrega.sid_completado_en.
     sid_completado_en: Mapped[Optional[datetime]] = mapped_column(DateTime)
     sid_completado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
+    # De cuál entrega puntual es este sobrante (11:00 vs 16:00 del mismo material).
+    # OPCIONAL a propósito: sin esto, una devolución cuelga del pedido entero
+    # (ver la nota de Devolucion arriba) y sigue siendo válida. Si la entrega se
+    # borra, la devolución queda sin vínculo (ON DELETE SET NULL), no se pierde.
+    entrega_id: Mapped[Optional[int]] = mapped_column(ForeignKey("entregas.id", ondelete="SET NULL"))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Ver la nota equivalente en Entrega.editado_por_id/editado_en.
     editado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
@@ -448,6 +457,7 @@ class Devolucion(Base):
     usuario: Mapped["Usuario"] = relationship(foreign_keys="Devolucion.usuario_id")
     editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Devolucion.editado_por_id")
     sid_completado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="Devolucion.sid_completado_por_id")
+    entrega: Mapped[Optional["Entrega"]] = relationship(foreign_keys="Devolucion.entrega_id")
     bobinas: Mapped[List["DevolucionBobina"]] = relationship(
         back_populates="devolucion", cascade="all, delete-orphan"
     )

@@ -18,7 +18,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
+import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Entrega, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
 
 interface EntradaMaterial extends BobinasPedido {
@@ -78,6 +78,19 @@ function seleccionVaciaContinuando(
   }
 }
 
+/** Cada opción de la lista "Materiales pedidos en esta OT". Normalmente es el
+ * pedido; pero si el mismo pedido ya tuvo 2 o más entregas, cada ENTREGA es su
+ * propia opción, con su proceso, máquina, material y hora — antes todo se
+ * juntaba bajo el proceso del pedido (y luego por destino) y dos entregas al
+ * mismo lugar a distinta hora parecían una sola. Elegir una opción abre la
+ * tarjeta de una entrega NUEVA ya con el proceso y máquina de esa entrega.
+ * `entregas` es la entrega de la opción (o todas las del pedido cuando hay 0 o 1). */
+interface FuenteEntrega {
+  clave: string
+  pedido: Consumo
+  entregas: Entrega[]
+}
+
 function tieneCantidad(datos: BobinasPedido): boolean {
   return pesosCargados(datos).length > 0
 }
@@ -97,8 +110,7 @@ function EntregaDelPedido({
   usaBobinasPedido,
   requerido,
   procesos,
-  procesoIdPedido,
-  maquinaIdPedido
+  permitirMaterialDistinto = true
 }: {
   datos: EntradaMaterial
   onChange: (datos: EntradaMaterial) => void
@@ -107,20 +119,22 @@ function EntregaDelPedido({
   unidadPedido: string
   usaBobinasPedido: boolean
   requerido?: boolean
-  // Con estos tres se puede corregir dónde se consume ESTA entrega puntual
-  // (ver EntradaMaterial.procesoId/maquinaId). Sin ellos (pendiente recién
-  // promovido, todavía sin pedido "hogar") esa opción no tiene sentido y no
-  // se ofrece.
+  // Con la lista de procesos se muestran Proceso y Máquina de ESTA entrega, ya
+  // precargados con los de la entrega anterior del pedido (o los del propio
+  // pedido si no tiene ninguna) y editables: el mismo material puede salir dos
+  // veces a procesos o máquinas distintos. Sin ella (pendiente recién promovido,
+  // todavía sin pedido) no se muestran: ahí se eligen en la propia tarjeta.
   procesos?: Proceso[]
-  procesoIdPedido?: string
-  maquinaIdPedido?: string
+  // Falso en un pedido que ya tuvo entrega: ahí no se vuelve a preguntar si se
+  // entregó un material distinto. En la primera entrega (tarjeta de pendientes
+  // y pedido sin entregas) sí.
+  permitirMaterialDistinto?: boolean
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
 
   const [cambiarMaterial, setCambiarMaterial] = useState(false)
-  const [cambiarMaquina, setCambiarMaquina] = useState(false)
   const material = materiales.find((m) => String(m.id) === datos.materialId)
   const unidad = material?.unidad ?? unidadPedido
   const usaBobinas = material?.usa_bobinas ?? usaBobinasPedido
@@ -128,7 +142,7 @@ function EntregaDelPedido({
   const maquinas = useQuery({
     queryKey: ['maquinas', datos.procesoId],
     queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(datos.procesoId)),
-    enabled: !!datos.procesoId
+    enabled: procesos !== undefined && !!datos.procesoId
   })
 
   function cancelarCambioMaterial() {
@@ -136,15 +150,46 @@ function EntregaDelPedido({
     onChange({ ...datos, materialId: '' })
   }
 
-  function cancelarCambioMaquina() {
-    setCambiarMaquina(false)
-    onChange({ ...datos, procesoId: procesoIdPedido ?? '', maquinaId: maquinaIdPedido ?? '' })
-  }
-
-  const puedeElegirMaquina = procesos !== undefined && procesoIdPedido !== undefined && maquinaIdPedido !== undefined
-
   return (
     <div>
+      {procesos !== undefined && (
+        <div className="mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Proceso</Label>
+            <Select value={datos.procesoId} onValueChange={(v) => onChange({ ...datos, procesoId: v, maquinaId: '' })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona" />
+              </SelectTrigger>
+              <SelectContent>
+                {procesos.map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {p.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs">Máquina</Label>
+            <Select
+              value={datos.maquinaId}
+              onValueChange={(v) => onChange({ ...datos, maquinaId: v })}
+              disabled={!datos.procesoId}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecciona" />
+              </SelectTrigger>
+              <SelectContent>
+                {maquinas.data?.map((m) => (
+                  <SelectItem key={m.id} value={String(m.id)}>
+                    {m.nombre}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      )}
       {(cambiarMaterial || datos.materialId) && (
         <div className="mb-2 flex flex-col gap-1.5">
           <Label className="text-xs">Material realmente entregado</Label>
@@ -169,55 +214,6 @@ function EntregaDelPedido({
           </div>
         </div>
       )}
-      {puedeElegirMaquina &&
-        (cambiarMaquina || datos.procesoId !== procesoIdPedido || datos.maquinaId !== maquinaIdPedido) && (
-          <div className="mb-2 flex flex-col gap-1.5">
-            <Label className="text-xs">Proceso y máquina de esta entrega</Label>
-            <div className="flex items-end gap-2">
-              <div className="grid flex-1 grid-cols-2 gap-2">
-                <Select
-                  value={datos.procesoId}
-                  onValueChange={(v) => onChange({ ...datos, procesoId: v, maquinaId: '' })}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Proceso" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {procesos.map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
-                        {p.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={datos.maquinaId}
-                  onValueChange={(v) => onChange({ ...datos, maquinaId: v })}
-                  disabled={!datos.procesoId}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Máquina" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {maquinas.data?.map((m) => (
-                      <SelectItem key={m.id} value={String(m.id)}>
-                        {m.nombre}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <button
-                type="button"
-                onClick={cancelarCambioMaquina}
-                className="rounded-md border border-destructive/40 p-1.5 text-destructive hover:bg-destructive/10"
-                aria-label="Cancelar — entregar en el proceso y máquina del pedido"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-        )}
       <CampoCantidad
         unidad={unidad}
         usaBobinas={usaBobinas}
@@ -234,19 +230,11 @@ function EntregaDelPedido({
         onChange={(e) => onChange({ ...datos, observacion: e.target.value })}
       />
       <div className="mt-2 flex flex-wrap gap-2">
-        {!cambiarMaterial && !datos.materialId && (
+        {permitirMaterialDistinto && !cambiarMaterial && !datos.materialId && (
           <Button type="button" variant="outline" size="sm" onClick={() => setCambiarMaterial(true)}>
             ¿Se entregó un material distinto? (alternativa o cambio de estructura)
           </Button>
         )}
-        {puedeElegirMaquina &&
-          !cambiarMaquina &&
-          datos.procesoId === procesoIdPedido &&
-          datos.maquinaId === maquinaIdPedido && (
-            <Button type="button" variant="outline" size="sm" onClick={() => setCambiarMaquina(true)}>
-              ¿Se entregó en otro proceso/máquina?
-            </Button>
-          )}
       </div>
     </div>
   )
@@ -295,6 +283,9 @@ function validarSeleccion(entrega: SeleccionPedido): string | null {
   }
   if (!tieneCantidad(entrega)) {
     return 'Completa la cantidad entregada'
+  }
+  if (entrega.procesoId && !entrega.maquinaId) {
+    return 'Elige la máquina de esta entrega'
   }
   return null
 }
@@ -657,118 +648,6 @@ function PendienteCard({
   )
 }
 
-/** Cambiar el proceso/máquina de un pedido ya creado. El proceso se elige
- * antes de saberlo con certeza —al asignar el material, incluso cuando lo que
- * se está cargando es solo su materia prima— así que equivocarse no puede
- * obligar a rehacer la OT. Lo ya entregado/devuelto se mueve con el pedido.
- * Ver ordenes_controller.mover_pedido. */
-function MoverPedido({
-  pedido,
-  procesos,
-  onMovido
-}: {
-  pedido: Consumo
-  procesos: Proceso[]
-  onMovido: () => void
-}) {
-  const { apiBaseUrl } = useConfig()
-  const { sesion } = useAuth()
-  const token = sesion!.token
-
-  const [abierto, setAbierto] = useState(false)
-  const [procesoId, setProcesoId] = useState('')
-  const [maquinaId, setMaquinaId] = useState('')
-  const [error, setError] = useState<string | null>(null)
-
-  const maquinas = useQuery({
-    queryKey: ['maquinas', procesoId],
-    queryFn: () => api.listarMaquinas(apiBaseUrl, token, Number(procesoId)),
-    enabled: !!procesoId
-  })
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      api.moverPedido(apiBaseUrl, token, pedido.ot_material_id, {
-        proceso_id: Number(procesoId),
-        maquina_id: Number(maquinaId)
-      }),
-    onSuccess: () => {
-      setAbierto(false)
-      setProcesoId('')
-      setMaquinaId('')
-      setError(null)
-      onMovido()
-    },
-    onError: (err) => setError(err instanceof ApiError ? err.message : 'No se pudo mover el pedido')
-  })
-
-  if (!abierto) {
-    return (
-      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => setAbierto(true)}>
-        Este pedido va a otro proceso — mover
-      </Button>
-    )
-  }
-
-  return (
-    <div className="mt-3 rounded-md border border-border bg-muted/30 p-3">
-      <p className="mb-2 text-xs text-muted-foreground">
-        Mover {pedido.codigo_mp} de {pedido.proceso} · {pedido.maquina} a:
-      </p>
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        <Select
-          value={procesoId}
-          onValueChange={(v) => {
-            setProcesoId(v)
-            setMaquinaId('')
-          }}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Proceso" />
-          </SelectTrigger>
-          <SelectContent>
-            {procesos.map((p) => (
-              <SelectItem key={p.id} value={String(p.id)}>
-                {p.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Select value={maquinaId} onValueChange={setMaquinaId} disabled={!procesoId}>
-          <SelectTrigger>
-            <SelectValue placeholder="Máquina" />
-          </SelectTrigger>
-          <SelectContent>
-            {maquinas.data?.map((m) => (
-              <SelectItem key={m.id} value={String(m.id)}>
-                {m.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-      <p className="mt-1.5 text-xs text-muted-foreground">
-        Lo que ya se entregó o devolvió se mueve con el pedido. Su materia prima no se toca: tiene su propio
-        proceso.
-      </p>
-      {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
-      <div className="mt-2 flex gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={!procesoId || !maquinaId || mutation.isPending}
-          onClick={() => mutation.mutate()}
-        >
-          {mutation.isPending ? 'Moviendo...' : 'Mover'}
-        </Button>
-        <Button type="button" size="sm" variant="outline" onClick={() => setAbierto(false)}>
-          Cancelar
-        </Button>
-      </div>
-    </div>
-  )
-}
-
 /** Corregir el material o la cantidad de un pedido ya asignado a un proceso
  * — para el mismo tipo de error de tipeo del Excel que ya se puede arreglar
  * en un pendiente (ver DetalleOt.tsx), pero para cuando el material ya se
@@ -912,6 +791,7 @@ function PedidoEntregaCard({
   materiales,
   materialOptions,
   procesos,
+  destinoTitulo,
   onMovido
 }: {
   pedido: Consumo
@@ -921,6 +801,9 @@ function PedidoEntregaCard({
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
   procesos: Proceso[]
+  // Proceso y máquina donde se entregó esta opción (si no, los del pedido).
+  destinoTitulo?: { proceso: string; maquina: string }
+  // Se llama al corregir o borrar el pedido, para refrescar la lista.
   onMovido: () => void
 }) {
   return (
@@ -929,7 +812,7 @@ function PedidoEntregaCard({
         <p className="text-sm font-medium">
           {pedido.codigo_mp}
           <span className="ml-2 font-normal text-muted-foreground">
-            {pedido.proceso} · {pedido.maquina}
+            {destinoTitulo?.proceso ?? pedido.proceso} · {destinoTitulo?.maquina ?? pedido.maquina}
           </span>
         </p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
@@ -957,11 +840,8 @@ function PedidoEntregaCard({
         usaBobinasPedido={pedido.usa_bobinas}
         requerido
         procesos={procesos}
-        procesoIdPedido={String(pedido.proceso_id)}
-        maquinaIdPedido={String(pedido.maquina_id)}
+        permitirMaterialDistinto={pedido.total_entregado <= 0}
       />
-
-      <MoverPedido pedido={pedido} procesos={procesos} onMovido={onMovido} />
 
       <EditarPedido
         pedido={pedido}
@@ -985,7 +865,8 @@ export function RegistrarEntrega() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
-  const [seleccion, setSeleccion] = useState<Record<number, SeleccionPedido>>({})
+  // Indexada por FuenteEntrega.clave: 'p<pedido>' o 'd<pedido>-<proceso>-<máquina>-<material>'.
+  const [seleccion, setSeleccion] = useState<Record<string, SeleccionPedido>>({})
   const [fecha, setFecha] = useState(hoyISO())
   const [error, setError] = useState<string | null>(null)
   const [confirmaciones, setConfirmaciones] = useState<Entrega[]>([])
@@ -1038,6 +919,26 @@ export function RegistrarEntrega() {
   // Los cargos de tinta (Laminación, FLaminación, Superficie) no se entregan
   // en planta — se registran en Crear OT, pero no aparecen aquí.
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
+
+  // Las opciones de la lista: un pedido con 2+ entregas se abre en una opción por
+  // ENTREGA (cada una con su proceso, máquina, material y hora — aunque dos hayan
+  // ido al mismo proceso y máquina, la hora las distingue); con 0 o 1 entrega,
+  // una opción por pedido. Espera a que lleguen las entregas para que la clave
+  // de una opción ya elegida no cambie a mitad de camino.
+  const fuentes = useMemo<FuenteEntrega[]>(() => {
+    if (entregas.isLoading) return []
+    const lista: FuenteEntrega[] = []
+    for (const pedido of pedidosVisibles ?? []) {
+      const susEntregas = entregasPorPedido.get(pedido.ot_material_id) ?? []
+      if (susEntregas.length >= 2) {
+        for (const e of susEntregas) lista.push({ clave: `e${e.id}`, pedido, entregas: [e] })
+      } else {
+        lista.push({ clave: `p${pedido.ot_material_id}`, pedido, entregas: susEntregas })
+      }
+    }
+    return lista
+  }, [pedidosVisibles, entregasPorPedido, entregas.isLoading])
+
   const pendientesVisibles = useMemo(() => pendientes.data?.filter((p) => !p.es_tinta), [pendientes.data])
   // Un pendiente "suelto" (creado desde "Registrar ingreso" en Registrar
   // Devolución, ver crear_pendiente_libre) no vino del Excel y no representa
@@ -1122,11 +1023,13 @@ export function RegistrarEntrega() {
     mutationFn: async () => {
       const exitosEntrega: Entrega[] = []
       const mensajesFallidos: string[] = []
-      const restantePorPedido = new Map<number, SeleccionPedido>()
+      const restantePorPedido = new Map<string, SeleccionPedido>()
 
-      for (const [otMaterialIdStr, sel] of Object.entries(seleccion)) {
-        const otMaterialId = Number(otMaterialIdStr)
-        const pedido = pedidos.data?.find((p) => p.ot_material_id === otMaterialId)
+      for (const [clave, sel] of Object.entries(seleccion)) {
+        const fuente = fuentes.find((f) => f.clave === clave)
+        if (!fuente) continue
+        const pedido = fuente.pedido
+        const otMaterialId = pedido.ot_material_id
         const { exitos, fallos, restante } = await enviarSeleccion(
           apiBaseUrl,
           token,
@@ -1138,7 +1041,7 @@ export function RegistrarEntrega() {
         )
         exitosEntrega.push(...exitos)
         mensajesFallidos.push(...fallos)
-        if (restante) restantePorPedido.set(otMaterialId, restante)
+        if (restante) restantePorPedido.set(clave, restante)
       }
 
       return { exitosEntrega, mensajesFallidos, restantePorPedido }
@@ -1147,8 +1050,8 @@ export function RegistrarEntrega() {
       setConfirmaciones(exitosEntrega)
       setError(mensajesFallidos.length > 0 ? `No se pudieron registrar: ${mensajesFallidos.join(', ')}` : null)
       setSeleccion(() => {
-        const restante: Record<number, SeleccionPedido> = {}
-        for (const [otMaterialId, sel] of restantePorPedido) restante[otMaterialId] = sel
+        const restante: Record<string, SeleccionPedido> = {}
+        for (const [clave, sel] of restantePorPedido) restante[clave] = sel
         return restante
       })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
@@ -1171,14 +1074,15 @@ export function RegistrarEntrega() {
     setOtBuscada(numero)
   }
 
-  function toggleSeleccion(pedido: Consumo) {
+  function toggleSeleccion(fuente: FuenteEntrega) {
     setConfirmaciones([])
     setSeleccion((prev) => {
       const copia = { ...prev }
-      if (copia[pedido.ot_material_id]) {
-        delete copia[pedido.ot_material_id]
+      if (copia[fuente.clave]) {
+        delete copia[fuente.clave]
       } else {
-        copia[pedido.ot_material_id] = seleccionVaciaContinuando(pedido, entregasPorPedido.get(pedido.ot_material_id))
+        // Arranca con el proceso, máquina y material de la última entrega de ESTA opción.
+        copia[fuente.clave] = seleccionVaciaContinuando(fuente.pedido, fuente.entregas)
       }
       return copia
     })
@@ -1220,6 +1124,10 @@ export function RegistrarEntrega() {
               <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" />
               <div>
                 <p>
+                  <span className="font-medium">Entrega de las {confirmacion.hora.slice(0, 5)}:</span>{' '}
+                  {confirmacion.usa_bobinas
+                    ? `${confirmacion.bobinas.length} ${confirmacion.bobinas.length === 1 ? 'bobina' : 'bobinas'} · `
+                    : ''}
                   {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}
                   {confirmacion.codigo_mp_entregado !== confirmacion.codigo_mp
                     ? ` — se entregó como ${confirmacion.codigo_mp_entregado}`
@@ -1235,16 +1143,17 @@ export function RegistrarEntrega() {
                   <p className="text-muted-foreground">Nota: {confirmacion.observacion}</p>
                 )}
                 {confirmacion.cantidad_requerida ? (
-                  <p className="text-muted-foreground">
-                    Van {confirmacion.total_entregado_pedido} de {confirmacion.cantidad_requerida}{' '}
-                    {confirmacion.unidad} requeridos
+                  <p className="text-xs text-muted-foreground">
+                    Acumulado del pedido (todas las entregas): {confirmacion.total_entregado_pedido} de{' '}
+                    {confirmacion.cantidad_requerida} {confirmacion.unidad} requeridos
                     {confirmacion.total_entregado_pedido >= confirmacion.cantidad_requerida
                       ? ' — pedido completo.'
                       : ` — faltan ${(confirmacion.cantidad_requerida - confirmacion.total_entregado_pedido).toFixed(2)} ${confirmacion.unidad}.`}
                   </p>
                 ) : (
-                  <p className="text-muted-foreground">
-                    Acumulado del pedido: {confirmacion.total_entregado_pedido} {confirmacion.unidad}
+                  <p className="text-xs text-muted-foreground">
+                    Acumulado del pedido (todas las entregas): {confirmacion.total_entregado_pedido}{' '}
+                    {confirmacion.unidad}
                   </p>
                 )}
               </div>
@@ -1311,35 +1220,37 @@ export function RegistrarEntrega() {
               <p className="text-xs text-muted-foreground">
                 Materiales pedidos en esta OT — marca todos a los que corresponda la entrega:
               </p>
-              {pedidosVisibles.map((pedido) => {
+              {fuentes.map((fuente) => {
+                const pedido = fuente.pedido
+                const susEntregas = fuente.entregas
                 const materialesSustituidos = [
                   ...new Set(
-                    (entregasPorPedido.get(pedido.ot_material_id) ?? [])
-                      .map((e) => e.codigo_mp_entregado)
-                      .filter((codigo) => codigo !== pedido.codigo_mp)
+                    susEntregas.map((e) => e.codigo_mp_entregado).filter((codigo) => codigo !== pedido.codigo_mp)
                   )
                 ]
                 // El principal es lo que REALMENTE se entregó; el código que
                 // pedía la OT va en la etiqueta "pedido: X".
-                const materialesEntregados = [
-                  ...new Set((entregasPorPedido.get(pedido.ot_material_id) ?? []).map((e) => e.codigo_mp_entregado))
-                ]
+                const materialesEntregados = [...new Set(susEntregas.map((e) => e.codigo_mp_entregado))]
                 const tituloMaterial =
                   materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
+                // Donde se entregó (la última vez); si todavía no hay entregas, donde está el pedido.
+                const ultima = susEntregas.at(-1)
+                const tituloProceso = ultima ? ultima.proceso : pedido.proceso
+                const tituloMaquina = ultima ? ultima.maquina : pedido.maquina
                 return (
                   <button
-                    key={pedido.ot_material_id}
+                    key={fuente.clave}
                     type="button"
-                    onClick={() => toggleSeleccion(pedido)}
+                    onClick={() => toggleSeleccion(fuente)}
                     className={cn(
                       'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
-                      seleccion[pedido.ot_material_id]
+                      seleccion[fuente.clave]
                         ? 'border-primary bg-primary/10'
                         : 'border-border hover:bg-muted'
                     )}
                   >
                     <span className="flex flex-wrap items-center gap-2 font-medium">
-                      {pedido.proceso} — {pedido.maquina} —{' '}
+                      {tituloProceso} — {tituloMaquina} —{' '}
                       <span className={materialesSustituidos.length > 0 ? 'text-warning' : undefined}>
                         {tituloMaterial}
                       </span>
@@ -1361,9 +1272,25 @@ export function RegistrarEntrega() {
                         </span>
                       )}
                     </span>
-                    <span className="text-muted-foreground">
-                      {pedido.diseno ? `Descripción: ${pedido.diseno} · ` : ''}Entregado: {pedido.total_entregado}{' '}
-                      {pedido.unidad}
+                    {susEntregas.length > 0 && (
+                      <span className="mt-0.5 flex flex-col text-xs">
+                        {susEntregas.map((e) => (
+                          <span key={e.id}>
+                            <span className="font-medium">
+                              {formatearFecha(e.fecha)} {e.hora.slice(0, 5)}
+                            </span>
+                            <span className="text-muted-foreground">
+                              {' '}
+                              — {e.total_entregado} {pedido.unidad}
+                              {e.codigo_mp_entregado !== pedido.codigo_mp ? ` (${e.codigo_mp_entregado})` : ''}
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      {pedido.diseno ? `Descripción: ${pedido.diseno} · ` : ''}Acumulado del pedido:{' '}
+                      {pedido.total_entregado} {pedido.unidad}
                       {pedido.cantidad_requerida ? ` de ${pedido.cantidad_requerida} requeridos` : ''}
                       {pedido.total_ingresado > 0 ? ` · Fabricado en almacén: ${pedido.total_ingresado}` : ''} ·{' '}
                       {pedido.estado_entrega}
@@ -1446,21 +1373,25 @@ export function RegistrarEntrega() {
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
 
-              {pedidosVisibles
-                ?.filter((p) => seleccion[p.ot_material_id])
-                .map((pedido) => (
-                  <PedidoEntregaCard
-                    key={pedido.ot_material_id}
-                    pedido={pedido}
-                    seleccion={seleccion[pedido.ot_material_id]}
-                    onChange={(sel) => setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: sel }))}
-                    onQuitar={() => toggleSeleccion(pedido)}
-                    materiales={materiales.data ?? []}
-                    materialOptions={materialOptions}
-                    procesos={procesos.data ?? []}
-                    onMovido={alMoverPedido}
-                  />
-                ))}
+              {fuentes
+                .filter((f) => seleccion[f.clave])
+                .map((fuente) => {
+                  const ultima = fuente.entregas.at(-1)
+                  return (
+                    <PedidoEntregaCard
+                      key={fuente.clave}
+                      pedido={fuente.pedido}
+                      seleccion={seleccion[fuente.clave]}
+                      onChange={(sel) => setSeleccion((prev) => ({ ...prev, [fuente.clave]: sel }))}
+                      onQuitar={() => toggleSeleccion(fuente)}
+                      materiales={materiales.data ?? []}
+                      materialOptions={materialOptions}
+                      procesos={procesos.data ?? []}
+                      destinoTitulo={ultima ? { proceso: ultima.proceso, maquina: ultima.maquina } : undefined}
+                      onMovido={alMoverPedido}
+                    />
+                  )
+                })}
 
               {error && <p className="text-sm text-destructive">{error}</p>}
 

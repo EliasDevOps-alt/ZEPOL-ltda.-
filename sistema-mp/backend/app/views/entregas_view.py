@@ -46,6 +46,12 @@ def _serializar(entrega: Entrega, pedido_creado: bool = False) -> schemas.Entreg
         sid_completado=entrega.sid_completado,
         sid_completado_en=entrega.sid_completado_en,
         sid_completado_por=entrega.sid_completado_por.inicial if entrega.sid_completado_por else None,
+        total_devuelto_entrega=sumar_cantidades(
+            b.cantidad
+            for d in entrega.devoluciones_vinculadas
+            if not d.es_ingreso_produccion
+            for b in d.bobinas
+        ),
         observacion=entrega.observacion,
         pedido_creado=pedido_creado,
         editado_por=entrega.editado_por.inicial if entrega.editado_por else None,

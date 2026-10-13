@@ -514,6 +514,8 @@ class EntregaOut(BaseModel):
     sid_completado_en: Optional[datetime] = None
     # Inicial del usuario que marcó el SID (None si no se sabe).
     sid_completado_por: Optional[str] = None
+    # Lo que ya se devolvió indicando que es de ESTA entrega (solo sobrantes).
+    total_devuelto_entrega: float = 0
     observacion: Optional[str] = None
     # ot_material_id/proceso/maquina/codigo_mp de arriba son los del pedido
     # donde REALMENTE quedó la entrega, que con como_materia_prima no es el
@@ -556,6 +558,8 @@ class DevolucionCreate(BaseModel):
     # TRUE = material FABRICADO en esta OT entrando a almacén, no un sobrante.
     # Ver Devolucion.es_ingreso_produccion.
     es_ingreso_produccion: bool = False
+    # Opcional: de cuál entrega puntual es este sobrante (ver Devolucion.entrega_id).
+    entrega_id: Optional[int] = None
 
 
 class DevolucionOut(BaseModel):
@@ -592,6 +596,11 @@ class DevolucionOut(BaseModel):
     # Inicial del usuario que marcó el SID (None si no se sabe).
     sid_completado_por: Optional[str] = None
     es_ingreso_produccion: bool
+    # De cuál entrega es (None = del pedido en general).
+    entrega_id: Optional[int] = None
+    # Cuándo fue esa entrega (para decir "de la entrega de las 11:00" sin otra consulta).
+    entrega_fecha: Optional[date] = None
+    entrega_hora: Optional[time] = None
     # Quién la corrigió por última vez y cuándo — ver EntregaOut.editado_por.
     editado_por: Optional[str] = None
     editado_en: Optional[datetime] = None
@@ -619,6 +628,9 @@ class DevolucionUpdate(BaseModel):
     fecha: Optional[date] = None
     bobinas: Optional[List[float]] = Field(default=None, min_length=1)
     material_id: Optional[int] = None
+    # Se distingue "no mandado" (no cambia) de null (quita el vínculo) con
+    # model_fields_set en el controlador.
+    entrega_id: Optional[int] = None
 
 
 class PedidoMaterialOut(BaseModel):

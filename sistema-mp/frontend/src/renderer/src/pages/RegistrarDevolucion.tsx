@@ -15,7 +15,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn, redondearPeso } from '@renderer/lib/utils'
-import { hoyISO } from '@renderer/lib/fechas'
+import { formatearFecha, hoyISO } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, OtMaterialPendiente } from '@renderer/lib/types'
 
 interface EntradaDevolucion extends BobinasPedido {
@@ -23,10 +23,13 @@ interface EntradaDevolucion extends BobinasPedido {
   // entregas de más de uno (por una sustitución), así que hace falta elegir
   // de cuál se devuelve.
   materialId: string
+  // De cuál entrega es este sobrante ('' = sin especificar, del pedido en
+  // general). Solo se ofrece cuando el pedido tiene 2+ entregas de ese material.
+  entregaId: string
 }
 
 function entradaVacia(): EntradaDevolucion {
-  return { materialId: '', bobinas: [] }
+  return { materialId: '', entregaId: '', bobinas: [] }
 }
 
 /** Lo que entra a almacén de un material que todavía no tiene pedido. */
@@ -50,15 +53,30 @@ interface SeleccionDevolucion {
   entradas: EntradaDevolucion[]
 }
 
-function seleccionVacia(pedido: Consumo): SeleccionDevolucion {
+/** Cada opción de la lista de "Materiales de esta OT". Normalmente es el pedido
+ * entero; pero cuando un pedido tuvo 2 o más entregas (a distintas horas, o a
+ * distintos procesos/máquinas) cada entrega es su PROPIA opción, con su proceso,
+ * máquina, material y hora, y lo que se devuelva queda registrado como de esa
+ * entrega (Devolucion.entrega_id). Así no hay que decir "¿de cuál entrega?": se
+ * elige la entrega y listo. Un pedido cuyo material se fabrica en la OT sigue
+ * siendo una sola opción, porque ahí también se registra el ingreso a almacén. */
+interface FuenteDevolucion {
+  clave: string
+  pedido: Consumo
+  entrega?: Entrega
+}
+
+function seleccionVacia(pedido: Consumo, entrega?: Entrega): SeleccionDevolucion {
   return {
     // Si el material de este pedido se fabrica en la OT, lo que se viene a
-    // registrar casi siempre es su ingreso a almacén.
-    modo: pedido.tiene_materia_prima ? 'ingreso' : 'sobrante',
+    // registrar casi siempre es su ingreso a almacén. Una entrega puntual es
+    // siempre un sobrante.
+    modo: !entrega && pedido.tiene_materia_prima ? 'ingreso' : 'sobrante',
     entradas: [
       {
-        bobinas: pedido.usa_bobinas ? [] : [''],
-        materialId: String(pedido.material_id)
+        bobinas: (entrega ? entrega.usa_bobinas : pedido.usa_bobinas) ? [] : [''],
+        materialId: String(entrega ? entrega.material_entregado_id : pedido.material_id),
+        entregaId: entrega ? String(entrega.id) : ''
       }
     ]
   }
@@ -326,11 +344,15 @@ function IngresoLibreForm({
 
 function PedidoDevolucionCard({
   pedido,
+  entrega,
   seleccion,
   onChange,
   onQuitar
 }: {
   pedido: Consumo
+  // Si viene, la tarjeta es de ESA entrega (ver FuenteDevolucion): su proceso,
+  // máquina, material y lo que queda por devolver salen de ella.
+  entrega?: Entrega
   seleccion: SeleccionDevolucion
   onChange: (seleccion: SeleccionDevolucion) => void
   onQuitar: () => void
@@ -348,10 +370,31 @@ function PedidoDevolucionCard({
   const balance = useQuery({
     queryKey: ['materiales-entregados', pedido.ot_material_id],
     queryFn: () => api.listarMaterialesEntregados(apiBaseUrl, token, pedido.ot_material_id),
-    enabled: !esIngreso
+    enabled: !esIngreso && !entrega
   })
 
-  const materiales = esIngreso ? [] : (balance.data ?? [])
+  // De una entrega puntual hay un solo material, el suyo, y lo que queda por
+  // devolver es lo que falta de ESA entrega (no el acumulado del pedido).
+  const materialDeLaEntrega = useMemo(
+    () =>
+      entrega
+        ? [
+            {
+              material_id: entrega.material_entregado_id,
+              codigo_mp: entrega.codigo_mp_entregado,
+              descripcion: entrega.descripcion_entregado,
+              unidad: entrega.unidad,
+              usa_bobinas: entrega.usa_bobinas,
+              total_entregado: entrega.total_entregado,
+              total_devuelto: entrega.total_devuelto_entrega,
+              disponible: redondearPeso(entrega.total_entregado - entrega.total_devuelto_entrega)
+            }
+          ]
+        : null,
+    [entrega]
+  )
+
+  const materiales = esIngreso ? [] : (materialDeLaEntrega ?? balance.data ?? [])
 
   // Lo que hay para devolver es lo que REALMENTE salió de almacén, no lo que
   // pedía la OT — si hubo una sustitución total (un solo material entregado,
@@ -396,9 +439,19 @@ function PedidoDevolucionCard({
     <div className={cn('rounded-md border p-4', esIngreso ? 'border-warning/40 bg-warning/5' : 'border-border')}>
       <div className="mb-3 flex items-center justify-between">
         <p className="text-sm font-medium">
+          {entrega && (
+            <>
+              {entrega.proceso} — {entrega.maquina} —{' '}
+            </>
+          )}
           {materialPrincipal}
           {materialPrincipal !== pedido.codigo_mp && (
             <span className="ml-1.5 text-xs font-normal text-warning">(pedido: {pedido.codigo_mp})</span>
+          )}
+          {entrega && (
+            <span className="ml-1.5 text-xs font-normal text-muted-foreground">
+              · entrega de las {entrega.hora.slice(0, 5)} ({formatearFecha(entrega.fecha)})
+            </span>
           )}
         </p>
         <button type="button" onClick={onQuitar} className="text-muted-foreground hover:text-destructive">
@@ -409,7 +462,7 @@ function PedidoDevolucionCard({
       {/* Un pedido con materia prima puede recibir las dos cosas: el material
           recién fabricado entrando, y más adelante sobrantes volviendo de
           planta. Por eso se pregunta en vez de asumir. */}
-      {pedido.tiene_materia_prima && (
+      {pedido.tiene_materia_prima && !entrega && (
         <div className="mb-3 flex flex-col gap-1.5">
           <Label className="text-xs">¿Qué estás registrando?</Label>
           <Select value={seleccion.modo} onValueChange={(v) => cambiarModo(v as ModoDevolucion)}>
@@ -439,6 +492,7 @@ function PedidoDevolucionCard({
           vez para toda la tarjeta. No confundir con "disponible para
           devolver" de cada entrada, que nunca es negativo. */}
       {!esIngreso &&
+        !entrega &&
         pedido.cantidad_requerida != null &&
         pedido.cantidad_requerida - pedido.total_entregado > 0 && (
           <p className="mb-3 text-xs text-muted-foreground">
@@ -456,8 +510,14 @@ function PedidoDevolucionCard({
             : 0
         const unidad = seleccionado?.unidad ?? pedido.unidad
         const usaBobinas = seleccionado?.usa_bobinas ?? pedido.usa_bobinas
+
+        // Con una entrega puntual, lo que importa es lo que queda de ESA entrega.
+        const entregaElegida = entrega
+        const disponibleEfectivo = entregaElegida
+          ? redondearPeso(entregaElegida.total_entregado - entregaElegida.total_devuelto_entrega)
+          : disponible
         const excedeDisponible =
-          redondearPeso(entrada.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)) > disponible
+          redondearPeso(entrada.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0)) > disponibleEfectivo
 
         return (
           <div key={indice} className={indice > 0 ? 'mt-3 border-t border-border pt-3' : ''}>
@@ -465,7 +525,10 @@ function PedidoDevolucionCard({
               <div className="mb-2 flex items-end gap-2">
                 <div className="flex flex-1 flex-col gap-1.5">
                   <Label className="text-xs">¿Qué material se está devolviendo?</Label>
-                  <Select value={entrada.materialId} onValueChange={(v) => actualizar(indice, { materialId: v })}>
+                  <Select
+                    value={entrada.materialId}
+                    onValueChange={(v) => actualizar(indice, { materialId: v, entregaId: '' })}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Selecciona" />
                     </SelectTrigger>
@@ -492,7 +555,9 @@ function PedidoDevolucionCard({
 
             {!esIngreso && (
               <p className="mb-1 text-xs text-muted-foreground">
-                Disponible para devolver según el sistema: {disponible.toFixed(2)} {unidad}
+                {entregaElegida
+                  ? `Disponible de esa entrega (${entregaElegida.hora.slice(0, 5)}): ${disponibleEfectivo.toFixed(2)} ${unidad}`
+                  : `Disponible para devolver según el sistema: ${disponible.toFixed(2)} ${unidad}`}
               </p>
             )}
             <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={entrada} onChange={(d) => actualizar(indice, d)} />
@@ -501,7 +566,8 @@ function PedidoDevolucionCard({
                 se deja guardar igual, el operador sabe qué volvió a bodega. */}
             {!esIngreso && excedeDisponible && (
               <p className="mt-2 text-xs text-warning">
-                Estás registrando más de lo que el sistema tiene como entregado ({disponible.toFixed(2)} {unidad}).
+                Estás registrando más de lo que el sistema tiene como entregado
+                {entregaElegida ? ' en esa entrega' : ''} ({disponibleEfectivo.toFixed(2)} {unidad}).
                 Se puede guardar igual si es lo que realmente volvió a bodega.
               </p>
             )}
@@ -529,7 +595,8 @@ export function RegistrarDevolucion() {
 
   const [numeroOt, setNumeroOt] = useState('')
   const [otBuscada, setOtBuscada] = useState<string | null>(null)
-  const [seleccion, setSeleccion] = useState<Record<number, SeleccionDevolucion>>({})
+  // Indexada por FuenteDevolucion.clave: 'p<id del pedido>' o 'e<id de la entrega>'.
+  const [seleccion, setSeleccion] = useState<Record<string, SeleccionDevolucion>>({})
   // Los materiales que entrega producción se eligen de la misma lista que los
   // pedidos, pero son otra cosa (no tienen pedido todavía), así que llevan su
   // propia selección, indexada por id de pendiente.
@@ -557,6 +624,24 @@ export function RegistrarDevolucion() {
     queryFn: () => api.listarEntregas(apiBaseUrl, token, otBuscada!),
     enabled: !!otBuscada
   })
+
+  // Las opciones de la lista: un pedido con 2+ entregas se abre en una opción por
+  // entrega (cada una con su proceso/máquina/material/hora); el resto, una por
+  // pedido. Se arma recién cuando llegaron las entregas, para que una opción ya
+  // elegida no cambie de clave a mitad de camino.
+  const fuentes = useMemo<FuenteDevolucion[]>(() => {
+    if (entregas.isLoading) return []
+    const lista: FuenteDevolucion[] = []
+    for (const pedido of pedidosVisibles ?? []) {
+      const susEntregas = (entregas.data ?? []).filter((e) => e.ot_material_id === pedido.ot_material_id)
+      if (susEntregas.length >= 2 && !pedido.tiene_materia_prima) {
+        for (const e of susEntregas) lista.push({ clave: `e${e.id}`, pedido, entrega: e })
+      } else {
+        lista.push({ clave: `p${pedido.ot_material_id}`, pedido })
+      }
+    }
+    return lista
+  }, [pedidosVisibles, entregas.data, entregas.isLoading])
 
   function materialesSustituidosDe(entregasDeLaOt: Entrega[] | undefined, pedido: Consumo): string[] {
     return [
@@ -645,10 +730,12 @@ export function RegistrarDevolucion() {
     mutationFn: async () => {
       const exitos: Devolucion[] = []
       const mensajesFallidos: string[] = []
-      const fallidosPorPedido = new Map<number, SeleccionDevolucion>()
-      for (const [otMaterialIdStr, sel] of Object.entries(seleccion)) {
-        const otMaterialId = Number(otMaterialIdStr)
-        const pedido = pedidos.data?.find((p) => p.ot_material_id === otMaterialId)
+      const fallidosPorPedido = new Map<string, SeleccionDevolucion>()
+      for (const [clave, sel] of Object.entries(seleccion)) {
+        const fuente = fuentes.find((f) => f.clave === clave)
+        if (!fuente) continue
+        const pedido = fuente.pedido
+        const otMaterialId = pedido.ot_material_id
         for (const entrada of sel.entradas) {
           try {
             const devolucion = await api.registrarDevolucion(apiBaseUrl, token, {
@@ -656,15 +743,16 @@ export function RegistrarDevolucion() {
               material_id: Number(entrada.materialId),
               fecha,
               bobinas: pesosCargados(entrada),
-              es_ingreso_produccion: sel.modo === 'ingreso'
+              es_ingreso_produccion: sel.modo === 'ingreso',
+              entrega_id: sel.modo === 'sobrante' && entrada.entregaId ? Number(entrada.entregaId) : undefined
             })
             exitos.push(devolucion)
           } catch (err) {
             mensajesFallidos.push(
               `${pedido?.codigo_mp ?? `#${otMaterialId}`} (${err instanceof ApiError ? err.message : 'error de conexión'})`
             )
-            const previo = fallidosPorPedido.get(otMaterialId)
-            fallidosPorPedido.set(otMaterialId, {
+            const previo = fallidosPorPedido.get(clave)
+            fallidosPorPedido.set(clave, {
               modo: sel.modo,
               entradas: [...(previo?.entradas ?? []), entrada]
             })
@@ -702,8 +790,8 @@ export function RegistrarDevolucion() {
       setConfirmaciones(exitos)
       setError(mensajesFallidos.length > 0 ? `No se pudieron registrar: ${mensajesFallidos.join(', ')}` : null)
       setSeleccion(() => {
-        const restante: Record<number, SeleccionDevolucion> = {}
-        for (const [otMaterialId, sel] of fallidosPorPedido) restante[otMaterialId] = sel
+        const restante: Record<string, SeleccionDevolucion> = {}
+        for (const [clave, sel] of fallidosPorPedido) restante[clave] = sel
         return restante
       })
       setIngresos(() => {
@@ -712,6 +800,7 @@ export function RegistrarDevolucion() {
         return restante
       })
       queryClient.invalidateQueries({ queryKey: ['consumo', otBuscada] })
+      queryClient.invalidateQueries({ queryKey: ['entregas', otBuscada] })
       queryClient.invalidateQueries({ queryKey: ['pendientes', otBuscada] })
     },
     onError: () => setError('Error al registrar las devoluciones')
@@ -760,14 +849,14 @@ export function RegistrarDevolucion() {
     })
   }
 
-  function toggleSeleccion(pedido: Consumo) {
+  function toggleSeleccion(fuente: FuenteDevolucion) {
     setConfirmaciones([])
     setSeleccion((prev) => {
       const copia = { ...prev }
-      if (copia[pedido.ot_material_id]) {
-        delete copia[pedido.ot_material_id]
+      if (copia[fuente.clave]) {
+        delete copia[fuente.clave]
       } else {
-        copia[pedido.ot_material_id] = seleccionVacia(pedido)
+        copia[fuente.clave] = seleccionVacia(fuente.pedido, fuente.entrega)
       }
       return copia
     })
@@ -911,19 +1000,55 @@ export function RegistrarDevolucion() {
                 </button>
                 )
               })}
-              {pedidosVisibles.map((pedido) => {
+              {fuentes.map((fuente) => {
+                const pedido = fuente.pedido
+                const entregaFuente = fuente.entrega
+                // Una entrega puntual: su proceso, máquina, material y hora.
+                if (entregaFuente) {
+                  const sustituida = entregaFuente.codigo_mp_entregado !== pedido.codigo_mp
+                  const quedan = redondearPeso(entregaFuente.total_entregado - entregaFuente.total_devuelto_entrega)
+                  return (
+                    <button
+                      key={fuente.clave}
+                      type="button"
+                      onClick={() => toggleSeleccion(fuente)}
+                      className={cn(
+                        'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
+                        seleccion[fuente.clave] ? 'border-primary bg-primary/10' : 'border-border hover:bg-muted'
+                      )}
+                    >
+                      <span className="flex flex-wrap items-center gap-2 font-medium">
+                        {entregaFuente.proceso} — {entregaFuente.maquina} —{' '}
+                        <span className={sustituida ? 'text-warning' : undefined}>
+                          {entregaFuente.codigo_mp_entregado}
+                        </span>
+                        {sustituida && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
+                            <ArrowRightLeft className="h-3 w-3" />
+                            pedido: {pedido.codigo_mp}
+                          </span>
+                        )}
+                      </span>
+                      <span className="text-muted-foreground">
+                        Entrega de las {entregaFuente.hora.slice(0, 5)} ({formatearFecha(entregaFuente.fecha)}):{' '}
+                        {entregaFuente.total_entregado} {pedido.unidad} · Ya devuelto de esta entrega:{' '}
+                        {entregaFuente.total_devuelto_entrega} {pedido.unidad} · Queda: {quedan} {pedido.unidad}
+                      </span>
+                    </button>
+                  )
+                }
                 const materialesSustituidos = materialesSustituidosDe(entregas.data, pedido)
                 const materialesEntregados = materialesEntregadosDe(entregas.data, pedido)
                 const tituloMaterial =
                   materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
                 return (
                 <button
-                  key={pedido.ot_material_id}
+                  key={fuente.clave}
                   type="button"
-                  onClick={() => toggleSeleccion(pedido)}
+                  onClick={() => toggleSeleccion(fuente)}
                   className={cn(
                     'flex flex-col rounded-md border p-3 text-left text-sm transition-colors',
-                    seleccion[pedido.ot_material_id]
+                    seleccion[fuente.clave]
                       ? 'border-primary bg-primary/10'
                       : 'border-border hover:bg-muted'
                   )}
@@ -1023,15 +1148,16 @@ export function RegistrarDevolucion() {
                 <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
               </div>
 
-              {pedidosVisibles
-                ?.filter((p) => seleccion[p.ot_material_id])
-                .map((pedido) => (
+              {fuentes
+                .filter((f) => seleccion[f.clave])
+                .map((fuente) => (
                   <PedidoDevolucionCard
-                    key={pedido.ot_material_id}
-                    pedido={pedido}
-                    seleccion={seleccion[pedido.ot_material_id]}
-                    onChange={(sel) => setSeleccion((prev) => ({ ...prev, [pedido.ot_material_id]: sel }))}
-                    onQuitar={() => toggleSeleccion(pedido)}
+                    key={fuente.clave}
+                    pedido={fuente.pedido}
+                    entrega={fuente.entrega}
+                    seleccion={seleccion[fuente.clave]}
+                    onChange={(sel) => setSeleccion((prev) => ({ ...prev, [fuente.clave]: sel }))}
+                    onQuitar={() => toggleSeleccion(fuente)}
                   />
                 ))}
 

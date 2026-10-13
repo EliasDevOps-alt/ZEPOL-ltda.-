@@ -64,11 +64,13 @@ const ESTILOS_CELDA: Record<string, string> = {
   'codigo-rotulo': `border:${GRUESA};font-size:10pt;text-align:center`,
   'codigo-valor': `border:${GRUESA};font-size:9.5pt;font-weight:bold;text-align:center`,
   'cliente-rotulo': `border-left:${GRUESA};font-size:13pt;font-weight:bold;padding-left:4pt;padding-bottom:2pt;vertical-align:bottom;white-space:nowrap`,
-  'cliente-valor': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:11pt;padding:0 4pt 2pt 4pt`,
+  // Todo valor que se trae de la OT (cliente, ítems, columna derecha) va centrado
+  // en su casilla (pedido de Elias); los rótulos conservan su alineación.
+  'cliente-valor': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:11pt;padding:0 4pt 2pt 4pt;text-align:center`,
   // Nombres largos: se achica la letra y, en el ultimo caso, se deja partir en
   // dos renglones. Los nombres reales llegan a 62 caracteres.
-  'cliente-valor-medio': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:9pt;padding:0 4pt 2pt 4pt`,
-  'cliente-valor-chico': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:7.5pt;line-height:1.05;padding:0 4pt 2pt 4pt`,
+  'cliente-valor-medio': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:9pt;padding:0 4pt 2pt 4pt;text-align:center`,
+  'cliente-valor-chico': `border-bottom:2.25pt solid #000;vertical-align:bottom;font-size:7.5pt;line-height:1.05;padding:0 4pt 2pt 4pt;text-align:center`,
   'ot-rotulo': 'font-size:13pt;font-weight:bold;text-align:right;padding-right:3pt;vertical-align:bottom;white-space:nowrap',
   ot: `border-left:${GRUESA};border-bottom:${GRUESA};text-align:center;font-size:12pt;font-weight:bold`,
   'ot-der': `border-left:${GRUESA};border-right:${GRUESA};border-bottom:${GRUESA};text-align:center;font-size:12pt;font-weight:bold`,
@@ -78,14 +80,14 @@ const ESTILOS_CELDA: Record<string, string> = {
   // En las filas TEM el original separa CODIGO de PRODUCTO con una línea fina, no
   // con el trazo grueso del resto. Las dos juntas porque con border-collapse
   // gana el borde más grueso entre celdas vecinas.
-  'tem-codigo': `border-bottom:${FINA};padding:0 3pt`,
-  'tem-producto': `border-bottom:${FINA};border-left:${FINA};padding:0 3pt;white-space:nowrap`,
+  'tem-codigo': `border-bottom:${FINA};padding:0 3pt;text-align:center`,
+  'tem-producto': `border-bottom:${FINA};border-left:${FINA};padding:0 3pt;white-space:nowrap;text-align:center`,
   // Descripciones de más de ~60 caracteres: letra más chica en una
   // línea, en vez de partir el renglón y agrandar la fila.
-  'tem-producto-chico': `border-bottom:${FINA};border-left:${FINA};padding:0 3pt;white-space:nowrap;font-size:7pt`,
+  'tem-producto-chico': `border-bottom:${FINA};border-left:${FINA};padding:0 3pt;white-space:nowrap;font-size:7pt;text-align:center`,
   // Total del ítem, bajo el rótulo de la unidad (como el "200000" escrito
   // bajo "BOLSAS" en el formulario en papel). Misma línea que el producto.
-  'tem-total': `border-bottom:${FINA};padding:0 3pt 0 0;text-align:right;font-weight:bold;white-space:nowrap`,
+  'tem-total': `border-bottom:${FINA};padding:0 3pt;text-align:center;font-weight:bold;white-space:nowrap`,
   'unidad-rotulo': 'font-size:9.5pt;font-weight:bold;text-align:right;padding-right:3pt',
   // 8pt y nowrap: a 8.5pt "Fecha Pedido:" y "Entrega Total:" no entran en sus
   // 4 columnas y Word los parte en dos renglones.
@@ -93,7 +95,7 @@ const ESTILOS_CELDA: Record<string, string> = {
   'rot-der': `border-left:${GRUESA};font-size:8.5pt;font-weight:bold;text-align:right;padding-right:3pt`,
   'dato-b': `border:${GRUESA};padding:0 3pt`,
   // valor de la columna derecha: solo subrayado + borde del marco
-  'valor-linea': `border-bottom:${GRUESA};border-right:${GRUESA};padding:0 3pt`,
+  'valor-linea': `border-bottom:${GRUESA};border-right:${GRUESA};padding:0 3pt;text-align:center`,
   'dato-linea': `border-bottom:${FINA};padding:0 3pt`,
   'pedido-total': 'font-size:9pt;font-weight:bold;text-align:right;padding-right:5pt',
   total: `border:${GRUESA};font-size:10pt;font-weight:bold;text-align:center`,

@@ -13,6 +13,7 @@ from sqlalchemy import func, or_
 from ..models import (
     Devolucion,
     DevolucionBobina,
+    Entrega,
     Material,
     OrdenTrabajo,
     OtMaterial,
@@ -21,6 +22,29 @@ from ..models import (
     Usuario,
 )
 from . import ordenes_controller, sid_controller
+
+
+def _validar_entrega_de_la_devolucion(db, entrega_id, ot_material, material, es_ingreso_produccion):
+    """Indicar de cuál entrega es un sobrante es OPCIONAL. Si se indica, tiene
+    que ser una entrega de ESTE pedido y del MISMO material que se devuelve (no
+    se puede devolver BOPP20760 diciendo que es de una entrega de BOPP20720), y
+    solo aplica a sobrantes: un ingreso a almacén es material fabricado, nunca
+    salió en una entrega."""
+    if entrega_id is None:
+        return None
+    if es_ingreso_produccion or ot_material is None:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Solo un sobrante puede indicar de cuál entrega es"
+        )
+    entrega = db.get(Entrega, entrega_id)
+    if entrega is None or entrega.ot_material_id != ot_material.id:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Esa entrega no es de este pedido")
+    if entrega.material_id != material.id:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Esa entrega fue de {entrega.material.codigo_mp}, no de {material.codigo_mp}",
+        )
+    return entrega.id
 
 
 def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.DevolucionCreate) -> Devolucion:
@@ -51,6 +75,8 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
     if material is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
+    entrega_id = _validar_entrega_de_la_devolucion(db, data.entrega_id, ot_material, material, data.es_ingreso_produccion)
+
     # No se bloquea si la cantidad supera lo entregado registrado en el
     # sistema: el registro de entregas puede estar incompleto o el conteo
     # físico real puede diferir, y el operador sabe qué volvió realmente a
@@ -63,6 +89,7 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
         usuario_id=usuario.id,
         fecha=data.fecha,
         es_ingreso_produccion=data.es_ingreso_produccion,
+        entrega_id=entrega_id,
     )
     devolucion.bobinas = [DevolucionBobina(numero=i + 1, cantidad=c) for i, c in enumerate(data.bobinas)]
     db.add(devolucion)
@@ -132,6 +159,17 @@ def editar_devolucion(db: Session, usuario: Usuario, devolucion_id: int, data: s
         if material is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
         devolucion.material_id = material.id
+    if "entrega_id" in data.model_fields_set:
+        # null = quitar el vínculo; un número = vincularla a esa entrega. Se
+        # valida contra el material FINAL (el que quedó tras este mismo cambio).
+        devolucion.entrega_id = _validar_entrega_de_la_devolucion(
+            db, data.entrega_id, ot_material, db.get(Material, devolucion.material_id), devolucion.es_ingreso_produccion
+        )
+    elif devolucion.entrega_id is not None and data.material_id is not None:
+        # Cambió el material pero no el vínculo: si ya no coincide con el de la
+        # entrega, el vínculo deja de tener sentido y se quita.
+        if devolucion.entrega is not None and devolucion.entrega.material_id != devolucion.material_id:
+            devolucion.entrega_id = None
     if data.bobinas is not None:
         for bobina in list(devolucion.bobinas):
             db.delete(bobina)

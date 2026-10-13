@@ -399,6 +399,8 @@ export interface Entrega {
   sid_completado_en: string | null
   // Inicial de quien marcó el SID (null si no se sabe, p. ej. marcado antes de guardar este dato).
   sid_completado_por: string | null
+  // Lo que ya se devolvió indicando que es de ESTA entrega (solo sobrantes).
+  total_devuelto_entrega: number
   observacion: string | null
   // ot_material_id/proceso/codigo_mp de arriba son los del pedido donde
   // REALMENTE quedó la entrega, que con como_materia_prima no es el que estaba
@@ -457,6 +459,8 @@ export interface DevolucionCreate {
   bobinas: number[]
   // TRUE = material FABRICADO en esta OT entrando a almacén, no un sobrante.
   es_ingreso_produccion?: boolean
+  // Opcional: de cuál entrega puntual es este sobrante (la de las 11:00 o la de las 16:00).
+  entrega_id?: number
 }
 
 export interface Devolucion {
@@ -492,6 +496,10 @@ export interface Devolucion {
   // Inicial de quien marcó el SID (null si no se sabe, p. ej. marcado antes de guardar este dato).
   sid_completado_por: string | null
   es_ingreso_produccion: boolean
+  // De cuál entrega es (null = del pedido en general) y cuándo fue esa entrega.
+  entrega_id: number | null
+  entrega_fecha: string | null
+  entrega_hora: string | null
   // Quién la corrigió por última vez y cuándo — ver Entrega.editado_por.
   editado_por: string | null
   editado_en: string | null
@@ -502,6 +510,8 @@ export interface DevolucionUpdate {
   fecha?: string
   bobinas?: number[]
   material_id?: number | null
+  // null quita el vínculo con la entrega; si no se manda, no cambia.
+  entrega_id?: number | null
 }
 
 // Un material pedido dentro de una OT+proceso, con su avance de entrega/devolución.

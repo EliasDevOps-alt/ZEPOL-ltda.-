@@ -448,8 +448,9 @@ function textoCantidad(
  * un único COD.MATERIAL y un único MAQ.: una devolución de otro material o de
  * otra máquina va en su propia fila. Con varias entregas iguales el mismo día,
  * la devolución se pega a la primera; y así sucesivamente si hay varias
- * devoluciones. (El sistema no guarda de qué entrega sale cada devolución, así
- * que esto es solo una regla de presentación.)
+ * devoluciones. Si la devolución dice de cuál entrega es (Devolucion.entrega_id,
+ * opcional), va en la fila de ESA entrega — la de las 11:00 o la de las 16:00 —
+ * y las que no lo dicen se reparten como antes con las filas que queden.
  *
  * Los ingresos a almacén (Devolucion.es_ingreso_produccion) también van, cada
  * uno en su propia fila: COD.MATERIAL lleva "INGRESO ALMACEN/<código>" y la
@@ -464,7 +465,7 @@ export function construirBloques(ots: DatosOtFormularioMp[]): BloqueFormularioMp
   const bloques: BloqueFormularioMp[] = []
 
   for (const ot of ots) {
-    type FilaConOrden = FilaFormularioMp & { orden: string }
+    type FilaConOrden = FilaFormularioMp & { orden: string; entregaId?: number }
     const claveDe = (fecha: string, material: string, maquina: string): string =>
       `${fecha}|${material}|${maquina}`
 
@@ -477,13 +478,30 @@ export function construirBloques(ots: DatosOtFormularioMp[]): BloqueFormularioMp
         cantidadEntregada: textoCantidad(e.bobinas, e.total_entregado, e.unidad, e.usa_bobinas),
         devolucion: '',
         procesoMaquina: procesoMaquinaDe(e.proceso, e.maquina),
-        codigoMaterial: e.codigo_mp_entregado
+        codigoMaterial: e.codigo_mp_entregado,
+        entregaId: e.id
       }
       entregas.set(clave, [...(entregas.get(clave) ?? []), fila])
     }
 
+    const filaDeEntrega = new Map<number, FilaConOrden>()
+    const reservadas = new Set<number>()
+    for (const d of ot.devoluciones) if (d.entrega_id !== null) reservadas.add(d.entrega_id)
+    // Una fila cuya entrega tiene devoluciones propias no se le reparte una sin vínculo.
+    const devolucionesVinculadasAFila = (fila: FilaConOrden): boolean =>
+      fila.entregaId !== undefined && reservadas.has(fila.entregaId)
+    for (const fila of [...entregas.values()].flat()) {
+      if (fila.entregaId !== undefined) filaDeEntrega.set(fila.entregaId, fila)
+    }
+
+    // Primero las que dicen de cuál entrega son: así una devolución sin vínculo
+    // no le saca la fila a una que sí lo tiene (el sort es estable).
+    const devolucionesOrdenadas = [...ot.devoluciones].sort(
+      (a, b) => Number(b.entrega_id !== null) - Number(a.entrega_id !== null)
+    )
+
     const sueltas: FilaConOrden[] = []
-    for (const d of ot.devoluciones) {
+    for (const d of devolucionesOrdenadas) {
       const maquina = d.maquina ?? ''
       if (d.es_ingreso_produccion) {
         // Un ingreso a almacén no es una devolución: es material fabricado que
@@ -504,7 +522,11 @@ export function construirBloques(ots: DatosOtFormularioMp[]): BloqueFormularioMp
       const textoDevuelto = textoCantidad(d.bobinas, d.total_devuelto, d.unidad, d.usa_bobinas)
       // Se pega a la primera entrega de ese día/material/máquina que todavía no
       // tenga devolución; si no hay ninguna, queda en una fila propia.
-      const destino = (entregas.get(clave) ?? []).find((f) => f.devolucion === '')
+      const vinculada = d.entrega_id !== null ? filaDeEntrega.get(d.entrega_id) : undefined
+      const destino =
+        vinculada && vinculada.devolucion === ''
+          ? vinculada
+          : (entregas.get(clave) ?? []).find((f) => f.devolucion === '' && !devolucionesVinculadasAFila(f))
       if (destino) {
         destino.devolucion = textoDevuelto
       } else {

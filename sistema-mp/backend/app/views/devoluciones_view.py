@@ -55,6 +55,9 @@ def _serializar(devolucion: Devolucion) -> schemas.DevolucionOut:
         sid_completado_en=devolucion.sid_completado_en,
         sid_completado_por=devolucion.sid_completado_por.inicial if devolucion.sid_completado_por else None,
         es_ingreso_produccion=devolucion.es_ingreso_produccion,
+        entrega_id=devolucion.entrega_id,
+        entrega_fecha=devolucion.entrega.fecha if devolucion.entrega else None,
+        entrega_hora=devolucion.entrega.hora if devolucion.entrega else None,
         editado_por=devolucion.editado_por.inicial if devolucion.editado_por else None,
         editado_en=devolucion.editado_en,
     )

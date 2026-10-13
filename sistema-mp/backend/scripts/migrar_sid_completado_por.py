@@ -1,7 +1,8 @@
 """Migración de la versión 1.0.13/1.0.14. Agrega: entregas y devoluciones
 .sid_completado_por_id (quién marcó el SID de ese movimiento) y
 ordenes_trabajo.codigos_excel_vistos (para avisar cuando el Excel cambia el
-código de un material que ya tiene movimientos). Uso: python scripts/migrar_sid_completado_por.py
+código de un material que ya tiene movimientos) y devoluciones.entrega_id
+(de cuál entrega es cada sobrante, opcional). Uso: python scripts/migrar_sid_completado_por.py
 
 Mismo criterio que migrar_producto_terminado.py: usa la conexión del propio
 backend (app.database), así funciona también en el servidor, y se puede correr
@@ -23,6 +24,7 @@ SENTENCIAS = [
     "ALTER TABLE entregas ADD COLUMN IF NOT EXISTS sid_completado_por_id INTEGER REFERENCES usuarios(id)",
     "ALTER TABLE devoluciones ADD COLUMN IF NOT EXISTS sid_completado_por_id INTEGER REFERENCES usuarios(id)",
     "ALTER TABLE ordenes_trabajo ADD COLUMN IF NOT EXISTS codigos_excel_vistos TEXT",
+    "ALTER TABLE devoluciones ADD COLUMN IF NOT EXISTS entrega_id INTEGER REFERENCES entregas(id) ON DELETE SET NULL",
 ]
 
 with engine.begin() as conexion:

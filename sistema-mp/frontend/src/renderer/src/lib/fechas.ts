@@ -65,3 +65,17 @@ export function formatearFechaHoraCompleta(datetime: string): string {
   const d = new Date(datetime)
   return `${d.toLocaleDateString('es-BO')} ${d.toLocaleTimeString('es-BO', { hour: '2-digit', minute: '2-digit' })}`
 }
+
+/** "de la entrega de las 11:00" para una devolución vinculada a una entrega
+ * (null si no lo está). Si la entrega fue otro día se incluye la fecha. */
+export function textoDeEntrega(
+  entregaFecha: string | null,
+  entregaHora: string | null,
+  fechaDevolucion: string
+): string | null {
+  if (!entregaHora) return null
+  const hora = entregaHora.slice(0, 5)
+  return entregaFecha && entregaFecha !== fechaDevolucion
+    ? `de la entrega del ${formatearFecha(entregaFecha)} ${hora}`
+    : `de la entrega de las ${hora}`
+}

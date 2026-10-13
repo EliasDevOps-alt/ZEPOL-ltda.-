@@ -339,6 +339,8 @@ CREATE TABLE devoluciones (
     -- Quién marcó el check (NULL si no está marcado, o si se marcó antes de que
     -- se guardara este dato).
     sid_completado_por_id INTEGER REFERENCES usuarios(id),
+    -- De cuál entrega puntual es el sobrante (opcional; NULL = del pedido en general).
+    entrega_id     INTEGER   REFERENCES entregas(id) ON DELETE SET NULL,
     creado_en      TIMESTAMP NOT NULL DEFAULT now(),
     -- Ver la nota equivalente en entregas.editado_por_id/editado_en.
     editado_por_id INTEGER   REFERENCES usuarios(id),

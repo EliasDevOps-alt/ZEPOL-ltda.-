@@ -20,6 +20,7 @@ import {
   formatearFechaHoraCompleta,
   hoyISO,
   mesActualISO,
+  textoDeEntrega,
   ultimoDiaDelMes
 } from '@renderer/lib/fechas'
 import type { Consumo, Devolucion, Entrega, Material, Proceso } from '@renderer/lib/types'
@@ -259,12 +260,15 @@ function FilaDevolucion({
   pedidoUnidad,
   materiales,
   materialOptions,
+  entregasDelPedido = [],
   onCambiado
 }: {
   devolucion: Devolucion
   pedidoUnidad: string
   materiales: Material[]
   materialOptions: { value: string; label: string }[]
+  // Entregas del pedido, para poder cambiar de cuál entrega es este sobrante.
+  entregasDelPedido?: Entrega[]
   onCambiado: () => void
 }) {
   const { apiBaseUrl } = useConfig()
@@ -275,8 +279,15 @@ function FilaDevolucion({
   const [editando, setEditando] = useState(false)
   const [fecha, setFecha] = useState(devolucion.fecha)
   const [materialId, setMaterialId] = useState(String(devolucion.material_id))
+  const [entregaId, setEntregaId] = useState(devolucion.entrega_id ? String(devolucion.entrega_id) : 'ninguna')
   const [seleccion, setSeleccion] = useState<BobinasPedido>(() => bobinasDesde(devolucion.bobinas))
   const [error, setError] = useState<string | null>(null)
+
+  // Solo se ofrece para un sobrante, entre las entregas de ESE material.
+  const entregasPosibles = devolucion.es_ingreso_produccion
+    ? []
+    : entregasDelPedido.filter((e) => String(e.material_entregado_id) === materialId)
+  const entregaEfectiva = entregasPosibles.some((e) => String(e.id) === entregaId) ? entregaId : 'ninguna'
 
   const material = materiales.find((m) => String(m.id) === materialId)
   const unidad = material?.unidad ?? pedidoUnidad
@@ -287,7 +298,9 @@ function FilaDevolucion({
       api.editarDevolucion(apiBaseUrl, token, devolucion.id, {
         fecha,
         material_id: Number(materialId),
-        bobinas: pesosCargados(seleccion)
+        bobinas: pesosCargados(seleccion),
+        // null quita el vínculo; solo un sobrante puede tenerlo.
+        entrega_id: devolucion.es_ingreso_produccion ? undefined : entregaEfectiva === 'ninguna' ? null : Number(entregaEfectiva)
       }),
     onSuccess: () => {
       setEditando(false)
@@ -325,6 +338,11 @@ function FilaDevolucion({
           </span>
         </div>
         <p className="text-muted-foreground">{devolucion.usuario}</p>
+        {textoDeEntrega(devolucion.entrega_fecha, devolucion.entrega_hora, devolucion.fecha) && (
+          <p className="font-medium text-primary">
+            {textoDeEntrega(devolucion.entrega_fecha, devolucion.entrega_hora, devolucion.fecha)}
+          </p>
+        )}
         {devolucion.usa_bobinas && (
           <p className="mt-1 text-muted-foreground">
             {devolucion.bobinas.length} {devolucion.bobinas.length === 1 ? 'bobina' : 'bobinas'}:{' '}
@@ -377,6 +395,25 @@ function FilaDevolucion({
           emptyText="Sin materiales activos que coincidan"
         />
       </div>
+      {/* De cuál entrega es este sobrante: opcional, se puede cambiar o quitar. */}
+      {entregasPosibles.length >= 2 && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          <Label className="text-xs">¿De cuál entrega es? (opcional)</Label>
+          <Select value={entregaEfectiva} onValueChange={setEntregaId}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ninguna">Sin especificar (del pedido en general)</SelectItem>
+              {entregasPosibles.map((e) => (
+                <SelectItem key={e.id} value={String(e.id)}>
+                  {formatearFechaHora(e.fecha, e.hora)} — entregado {e.total_entregado} {unidad}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={seleccion} onChange={setSeleccion} />
       {error && <p className="mt-2 text-destructive">{error}</p>}
       <div className="mt-2 flex gap-2">
@@ -826,6 +863,7 @@ export function Historial() {
                                   pedidoUnidad={pedido.unidad}
                                   materiales={materiales.data ?? []}
                                   materialOptions={materialOptions}
+                                  entregasDelPedido={susEntregas}
                                   onCambiado={alCorregirMovimiento}
                                 />
                               ))}
