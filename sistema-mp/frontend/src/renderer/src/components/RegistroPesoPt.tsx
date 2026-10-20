@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Loader2, Pencil, Printer, Scale, X } from 'lucide-react'
+import { Check, Loader2, Pencil, Printer, Scale, Settings, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -19,6 +19,7 @@ import {
   nombreArchivoEtiquetaPt
 } from '@renderer/lib/etiquetaPt'
 import type { PesajePt as Pesaje, ProductoTerminado, UnidadPt } from '@renderer/lib/types'
+import { useBalanza } from '@renderer/lib/useBalanza'
 
 /** Sin ceros de más y con punto decimal, como se escribe en el formulario. */
 function num(valor: number, decimales = 3): string {
@@ -562,6 +563,136 @@ function Avance({
   )
 }
 
+const TEXTO_ESTADO_BALANZA: Record<string, string> = {
+  conectando: 'Conectando…',
+  error: 'No se pudo leer.',
+  'sin-datos': 'No envía datos.'
+}
+
+/**
+ * Peso en vivo de las balanzas de esta PC (hasta dos, una por puerto COM).
+ * Dar Enter en el formulario acepta el peso de la balanza activa, como antes
+ * se hacía al escribirlo a mano.
+ */
+function PanelBalanza({
+  balanza,
+  aviso,
+  yaRegistrado
+}: {
+  balanza: ReturnType<typeof useBalanza>
+  aviso: string | null
+  yaRegistrado: boolean
+}) {
+  const [configurando, setConfigurando] = useState(false)
+  const [errorPuerto, setErrorPuerto] = useState<string | null>(null)
+  const { balanzas, activa, elegirActiva, puertos, actualizarPuertos, configurar } = balanza
+  const variasConfiguradas = balanzas.filter((b) => b.estado.estado !== 'detenida').length > 1
+
+  function abrirConfiguracion(): void {
+    void actualizarPuertos()
+    setConfigurando((v) => !v)
+  }
+
+  async function cambiarPuerto(numero: 1 | 2, puerto: string): Promise<void> {
+    setErrorPuerto(null)
+    try {
+      await configurar(numero, puerto)
+    } catch (e) {
+      setErrorPuerto(e instanceof Error ? e.message.replace(/^Error invoking remote method '[^']+': (Error: )?/, '') : 'No se pudo cambiar el puerto.')
+    }
+  }
+
+  return (
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+      <div className="flex flex-wrap items-stretch gap-3">
+        {balanzas.map((b) => {
+          if (b.estado.estado === 'detenida' && b.numero === 2 && !configurando) return null
+          const esActiva = b.numero === activa
+          const lectura = b.lectura
+          return (
+            <div
+              key={b.numero}
+              className={`min-w-[14rem] flex-1 rounded-md border bg-background p-3 ${
+                esActiva && variasConfiguradas ? 'ring-2 ring-primary' : ''
+              }`}
+            >
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Scale className="h-4 w-4" />
+                <span>Balanza {b.numero}</span>
+                {b.estado.puerto && <span className="text-xs">· {b.estado.puerto}</span>}
+                {variasConfiguradas && (
+                  <Button
+                    type="button"
+                    variant={esActiva ? 'default' : 'outline'}
+                    size="sm"
+                    className="ml-auto h-7"
+                    onClick={() => elegirActiva(b.numero)}
+                  >
+                    {esActiva ? 'En uso' : 'Usar esta'}
+                  </Button>
+                )}
+              </div>
+              {lectura ? (
+                <div className="mt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-3xl font-bold tabular-nums">{num(lectura.peso, 2)} kg</span>
+                  {esActiva && yaRegistrado ? (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">Ya registrado</span>
+                  ) : lectura.estable ? (
+                    <span className="rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
+                      Estable{esActiva ? ' · Enter para registrar' : ''}
+                    </span>
+                  ) : (
+                    <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                      Midiendo…
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {b.estado.estado === 'detenida'
+                    ? 'Sin balanza configurada.'
+                    : `${TEXTO_ESTADO_BALANZA[b.estado.estado] ?? ''} ${b.estado.estado === 'error' ? (b.estado.mensaje ?? '') : ''}`}
+                </p>
+              )}
+            </div>
+          )
+        })}
+        <Button type="button" variant="outline" size="sm" className="self-start" onClick={abrirConfiguracion}>
+          <Settings className="h-4 w-4" />
+          Configurar balanzas
+        </Button>
+      </div>
+      {aviso && <p className="text-sm text-warning">{aviso}</p>}
+      {configurando && (
+        <div className="space-y-2 text-sm">
+          {balanzas.map((b) => (
+            <div key={b.numero} className="flex flex-wrap items-center gap-2">
+              <Label htmlFor={`puerto-balanza-${b.numero}`} className="w-24">
+                Balanza {b.numero}
+              </Label>
+              <select
+                id={`puerto-balanza-${b.numero}`}
+                className="h-9 rounded-md border bg-background px-2"
+                value={b.estado.puerto ?? ''}
+                onChange={(e) => void cambiarPuerto(b.numero, e.target.value)}
+              >
+                <option value="">Sin balanza</option>
+                {[...new Set([...(b.estado.puerto ? [b.estado.puerto] : []), ...puertos])].map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+          <p className="text-xs text-muted-foreground">Se guarda solo en esta PC.</p>
+          {errorPuerto && <p className="text-sm text-destructive">{errorPuerto}</p>}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function FormularioPesaje({
   pt,
   unidad,
@@ -584,6 +715,18 @@ function FormularioPesaje({
   const [registrado, setRegistrado] = useState<Pesaje | null>(null)
   const pesoRef = useRef<HTMLInputElement>(null)
   const etiquetas = useExportarEtiquetas(pt)
+  const balanza = useBalanza()
+  const [avisoBalanza, setAvisoBalanza] = useState<string | null>(null)
+  // Último peso aceptado desde la balanza. Mientras la balanza siga marcando
+  // ese mismo valor es el MISMO paquete (la balanza no para de mandar lecturas),
+  // así que un Enter de más no lo registra dos veces; al retirarlo cambia.
+  const ultimoDeBalanza = useRef<number | null>(null)
+  const pesoBalanza = balanza.lecturaActiva
+
+  useEffect(() => {
+    setAvisoBalanza(null)
+    if (pesoBalanza && pesoBalanza.peso !== ultimoDeBalanza.current) ultimoDeBalanza.current = null
+  }, [pesoBalanza])
 
   // La tara (el cono) y la cantidad por paquete casi siempre se repiten de
   // una pesada a la siguiente: se proponen las del último pesaje de la OT,
@@ -597,19 +740,24 @@ function FormularioPesaje({
     }
   }, [ultimo])
 
-  const bruto = Number(pesoBruto)
+  // Con la casilla vacía y la balanza conectada, el peso bruto es el que marca
+  // la balanza; si la persona escribe algo, manda lo escrito.
+  const deBalanza = pesoBruto === '' && pesoBalanza !== null
+  const bruto = deBalanza ? pesoBalanza.peso : Number(pesoBruto)
   const taraNum = tara === '' ? 0 : Number(tara)
-  const neto = pesoBruto !== '' && !Number.isNaN(bruto) && !Number.isNaN(taraNum) ? bruto - taraNum : null
+  const hayBruto = deBalanza || pesoBruto !== ''
+  const neto = hayBruto && !Number.isNaN(bruto) && !Number.isNaN(taraNum) ? bruto - taraNum : null
 
   const registrar = useMutation({
-    mutationFn: () =>
+    mutationFn: (v: { bruto: number; deBalanza: boolean }) =>
       api.registrarPesajePt(apiBaseUrl, sesion!.token, pt.numero_ot, {
         fecha,
-        peso_bruto: bruto,
+        peso_bruto: v.bruto,
         tara: taraNum,
         cantidad: conCantidad ? Number(cantidad) : null
       }),
-    onSuccess: (pesaje) => {
+    onSuccess: (pesaje, v) => {
+      if (v.deBalanza) ultimoDeBalanza.current = v.bruto
       setRegistrado(pesaje)
       setPesoBruto('')
       onRegistrado()
@@ -622,7 +770,15 @@ function FormularioPesaje({
 
   function enviar(e: React.FormEvent): void {
     e.preventDefault()
-    if (valido && !registrar.isPending) registrar.mutate()
+    if (registrar.isPending) return
+    if (deBalanza) {
+      // Enter = aceptar el peso que marca la balanza, pero solo si es real.
+      if (!pesoBalanza.estable) return setAvisoBalanza('El peso todavía se mueve: espera a que se estabilice.')
+      if (pesoBalanza.peso <= 0) return setAvisoBalanza('La balanza marca 0: pon el paquete.')
+      if (ultimoDeBalanza.current === pesoBalanza.peso)
+        return setAvisoBalanza('Este peso ya se registró. Retira el paquete y pon el siguiente.')
+    }
+    if (valido) registrar.mutate({ bruto, deBalanza })
   }
 
   return (
@@ -632,6 +788,7 @@ function FormularioPesaje({
       </CardHeader>
       <CardContent>
         <form onSubmit={enviar} className="space-y-4">
+          <PanelBalanza balanza={balanza} aviso={avisoBalanza} yaRegistrado={deBalanza && ultimoDeBalanza.current === pesoBalanza.peso} />
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
               <Label htmlFor="pesaje-fecha">Fecha</Label>
@@ -648,6 +805,7 @@ function FormularioPesaje({
                 min="0"
                 autoFocus
                 value={pesoBruto}
+                placeholder={pesoBalanza ? `${num(pesoBalanza.peso)} (balanza)` : undefined}
                 onChange={(e) => setPesoBruto(e.target.value)}
               />
             </div>

@@ -13,8 +13,9 @@ This repo (`e:\ZEPOL`) is a single git repository (root here, not per-subfolder)
 
 Remote: `origin` → `https://github.com/EliasDevOps-alt/ZEPOL-ltda.-.git` (`main`, pushed).
 
-## Estado actual y pendientes (actualizado 2026-10-15) — leer primero
+## Estado actual y pendientes (actualizado 2026-10-20) — leer primero
 
+- **Balanzas (2026-10-20)**: el código de las dos balanzas está commiteado en la rama `balanza-pesaje` (**no** en `main`) y **NO publicado**: falta versión nueva del frontend (1.0.17) e instalarla en la PC de pesado. Probado en la laptop con dos balanzas reales (COM2 y COM8) y con pesos reales; el jefe de área confirmó que está bien. Ver la sección "Balanzas en Registro de peso" más abajo.
 - **Publicado**: frontend **1.0.16**; el servidor (`ALMACEN-PC`) está en el commit `31848fd`, con la base migrada (`scripts/migrar_sid_completado_por.py` ya corrido; agrega `entregas`/`devoluciones.sid_completado_por_id`, `ordenes_trabajo.codigos_excel_vistos` y `devoluciones.entrega_id`) y el backend reiniciado. Todo el trabajo está commiteado y subido; solo `OC 2025 bas.xlsx` y `proceso etiquetado v.2.xlsx` aparecen modificados y **nunca se commitean**. Antes de afirmar qué versión tiene el servidor, verificar con `git log --oneline -1` por SSH y `http://192.168.121.72:8000/updates/latest.yml`.
 - **Pendientes conocidos** (ninguno bloquea):
   1. `scripts/cargar_producto_terminado.py` **no se corrió en el servidor**: necesita la unidad `Z:\` (solo existe en la sesión de escritorio del servidor, no por SSH). Cada OT carga sus productos al abrirla.
@@ -270,6 +271,16 @@ Pedido de Elias (OT 220295), tras tres vueltas — **el orden de las decisiones 
 ### Teclado en las casillas de bobinas (2026-10-13)
 
 Pedido de Elias: pesar cada bobina con doble Tab o con clic en la casilla era lento. En `CampoCantidad` (compartido por Registrar Entrega, Registrar Devolución e Historial, no duplicar): **Enter pasa a la casilla siguiente** (la deja seleccionada), y **Tab salta de casilla a casilla en un solo toque** porque los botones X de quitar tienen `tabIndex={-1}` (siguen funcionando con el mouse). Al escribir en la última casilla ya se agregaba sola una vacía, así que cargar N bobinas es `peso, Enter, peso, Enter…`. **Enter dentro de una casilla de bobina nunca envía el formulario** (`preventDefault` siempre; antes un Enter de más sobre la última casilla vacía registraba la entrega entera). El campo de cantidad única (material sin bobinas) no cambió. Probado con teclas reales en Electron: 4 pesos seguidos, el foco avanza N.º 1→5, el Enter extra no hace nada y no sale ningún POST.
+
+### Balanzas en Registro de peso (2026-10-20)
+
+- Dos balanzas CAS seriales por PC (una por convertidor USB-serie: en la laptop COM2 es Prolific y COM8 es CH340). **La lectura la hace el proceso principal de Electron** (`src/main/balanza.ts`, `crearBalanza()` = una instancia por balanza); el renderer solo recibe `balanza:estado` y `balanza:lectura` por IPC (`useBalanza.ts`, `PanelBalanza` en `RegistroPesoPt.tsx`). La configuración (`puertoBalanza`, `puertoBalanza2`) va en el `config.json` de **cada PC**, no en el servidor.
+- **Por qué no `serialport` ni .NET**: este CH340 rechaza `SetCommState` (error 31) en cada apertura salvo la primera tras reconectarlo. Por eso el puerto se abre con `fs.open('//./COMn')` y se lee sin configurarlo, después de correr `mode COMn BAUD=9600 PARITY=n DATA=8 STOP=1` (`fijarParametros`, que ignora el fallo si el adaptador no deja). Si alguna vez se cambia de librería, probar reabrir varias veces seguidas: ese es el caso que falla.
+- **Formato de la balanza**: `"    1.45kg\r\n"`, ~8 líneas/s en continuo, sin indicador de estable. Estable = `LECTURAS_ESTABLE` (4) lecturas iguales seguidas. Unidades: kg directo, `g` ÷ 1000, `lb` se rechaza (no se adivina la conversión).
+- **Reglas de Enter** (`FormularioPesaje.enviar`): con Peso Bruto vacío y balanza activa, toma el peso de la balanza; no registra si no está estable, si es 0, ni si es el mismo valor que ya se registró (`ultimoDeBalanza`, se libera al cambiar el peso). Escribir a mano siempre gana.
+- **Dos balanzas**: la "activa" se elige con "Usar esta" (no se adivina cuál tiene el paquete) y se recuerda en `localStorage` (`zepol.balanza.activa`). Si solo hay una configurada, esa es la activa. No se permite el mismo COM en las dos (`balanza:configurar` lo rechaza).
+- **Pendiente antes de publicar**: probado por Elias con pesos reales en la laptop (`npm run dev`); falta repetirlo en la PC de pesado con la app instalada desde el instalador.
+- **PC de pesado** (requisitos para TI): ver lo acordado en la conversación del 2026-10-20 — Windows 10 22H2 o 11 de 64 bits, 8 GB, 2 puertos USB, ahorro de energía del USB desactivado, drivers CH340/Prolific, sin PuTTY/Arduino abiertos. El servidor es Windows 10 **Pro** 22H2 (`reg query … EditionID`).
 
 ### Frontend structure
 
