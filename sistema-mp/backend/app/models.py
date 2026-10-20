@@ -487,7 +487,7 @@ class ProductoTerminado(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ot_id: Mapped[int] = mapped_column(ForeignKey("ordenes_trabajo.id", ondelete="CASCADE"), unique=True)
-    # 'KG' | 'BOLSAS' | 'MILLAR'. None = "Med." del Excel no reconocida,
+    # 'KG' | 'BOLSAS' | 'MILLAR' | 'BOBINA' | 'LAMINA'. None = "Med." del Excel no reconocida,
     # falta confirmarla a mano antes de poder pesar.
     unidad: Mapped[Optional[str]] = mapped_column(String(10))
     medida_excel: Mapped[Optional[str]] = mapped_column(String(20))

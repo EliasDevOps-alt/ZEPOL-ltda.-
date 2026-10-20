@@ -372,7 +372,7 @@ CREATE TABLE productos_terminados (
     ot_id         INTEGER       NOT NULL UNIQUE REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
     -- NULL = la columna "Med." del Excel no se reconoció y alguien tiene que
     -- confirmar la unidad a mano antes de pesar.
-    unidad        VARCHAR(10)   CHECK (unidad IN ('KG', 'BOLSAS', 'MILLAR')),
+    unidad        VARCHAR(10)   CHECK (unidad IN ('KG', 'BOLSAS', 'MILLAR', 'BOBINA', 'LAMINA')),
     medida_excel  VARCHAR(20),
     pedido_total  NUMERIC(14,3),
     -- Se elige a mano en la pantalla (Bs, $us u otra): la OT no la guarda.
@@ -401,8 +401,8 @@ CREATE TABLE pesajes_pt (
     hora                   TIME          NOT NULL DEFAULT current_time,
     peso_bruto             NUMERIC(10,3) NOT NULL CHECK (peso_bruto > 0),
     tara                   NUMERIC(10,3) NOT NULL DEFAULT 0 CHECK (tara >= 0),
-    -- Solo BOLSAS/MILLAR (NULL en KG). Bolsas del paquete, en unidades,
-    -- también cuando el pedido está en millares.
+    -- Todo menos KG (NULL en KG). Unidades del paquete (bolsas, bobinas o
+    -- láminas), también cuando el pedido está en millares.
     cantidad               NUMERIC(14,3) CHECK (cantidad > 0),
     usuario_id             INTEGER       NOT NULL REFERENCES usuarios(id),
     creado_en              TIMESTAMP     NOT NULL DEFAULT now(),

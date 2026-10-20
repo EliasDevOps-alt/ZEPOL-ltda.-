@@ -578,7 +578,7 @@ export interface OtTerminada {
   total_movimientos: number
 }
 
-export type UnidadPt = 'KG' | 'BOLSAS' | 'MILLAR'
+export type UnidadPt = 'KG' | 'BOLSAS' | 'MILLAR' | 'BOBINA' | 'LAMINA'
 
 export interface ProductoTerminadoItem {
   numero: number

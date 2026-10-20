@@ -6,11 +6,11 @@ import * as api from '@renderer/lib/api'
 import { ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
 import type { ProductoTerminado, UnidadPt } from '@renderer/lib/types'
 
-const UNIDADES: UnidadPt[] = ['KG', 'BOLSAS', 'MILLAR']
+const UNIDADES: UnidadPt[] = ['KG', 'BOLSAS', 'MILLAR', 'BOBINA', 'LAMINA']
 
 /**
- * Aviso para una OT cuya columna "Med." del Excel no se reconoció (ej.
- * "lamina", o vacía). Sin la unidad no se puede calcular el avance ni pesar,
+ * Aviso para una OT cuya columna "Med." del Excel no se reconoció (ej. un
+ * texto nuevo, o vacía). Sin la unidad no se puede calcular el avance ni pesar,
  * así que se pregunta en vez de adivinar. Compartido por el formulario de
  * Producto Terminado y el registro de pesaje.
  */
@@ -32,7 +32,7 @@ export function ConfirmarUnidadPt({
     <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
       <p>
         No se reconoce la unidad de esta OT en el Excel
-        {pt.medida_excel ? ` ("${pt.medida_excel}")` : ' (está vacía)'}. Por favor confirme si es Kg, Bolsas o Mill:
+        {pt.medida_excel ? ` ("${pt.medida_excel}")` : ' (está vacía)'}. Por favor confirme si es Kg, Bolsas, Mill, Bob o Lám:
       </p>
       <div className="flex flex-wrap gap-2">
         {UNIDADES.map((unidad) => (

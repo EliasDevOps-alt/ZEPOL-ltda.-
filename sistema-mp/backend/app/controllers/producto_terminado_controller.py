@@ -13,17 +13,19 @@ from ..services import excel_oc_mp
 from . import ordenes_controller
 from .pedidos_controller import sumar_cantidades
 
-UNIDADES = ("KG", "BOLSAS", "MILLAR")
+UNIDADES = ("KG", "BOLSAS", "MILLAR", "BOBINA", "LAMINA")
 
 # Lo que un número del Excel vale en unidades reales. MILLAR se escribe en
 # miles en "oc mp" (27.00 = 27000 bolsas); los pesajes se guardan en
-# unidades reales, así que el pedido se multiplica al comparar.
-FACTOR_UNIDAD = {"KG": 1, "BOLSAS": 1, "MILLAR": 1000}
+# unidades reales, así que el pedido se multiplica al comparar. BOBINA y
+# LAMINA se escriben tal cual (OT 220132: 250; OT 220231: 350000).
+FACTOR_UNIDAD = {"KG": 1, "BOLSAS": 1, "MILLAR": 1000, "BOBINA": 1, "LAMINA": 1}
 
 # Variantes de la columna "Med." de "oc mp" que ya se vieron en el Excel real
-# y a qué unidad corresponden (confirmado con la planta). "bob" es un error de
-# tipeo de "bol"; "m" suelta es millar. Todo lo que no esté acá (ej. "lamina",
-# que no es producto terminado) queda sin resolver y se pregunta a mano.
+# y a qué unidad corresponden (confirmado con la planta). "bob" es bobina (no
+# bolsa: así lo aclaró Elias, y el formulario la muestra como "Bob"); "m"
+# suelta es millar. Todo lo que no esté acá queda sin resolver y se pregunta
+# a mano.
 _VARIANTES_UNIDAD = {
     "kg": "KG",
     "kgs": "KG",
@@ -35,13 +37,20 @@ _VARIANTES_UNIDAD = {
     "bolsas": "BOLSAS",
     "bolsa": "BOLSAS",
     "bol": "BOLSAS",
-    "bob": "BOLSAS",
+    "bob": "BOBINA",
+    "bobina": "BOBINA",
+    "bobinas": "BOBINA",
+    "lamina": "LAMINA",
+    "laminas": "LAMINA",
+    "lámina": "LAMINA",
+    "láminas": "LAMINA",
 }
 
 
 def normalizar_unidad(medida: Optional[str]) -> Optional[str]:
-    """'Kg', 'kg', 'Mill', 'mb'... → 'KG' / 'MILLAR' / 'BOLSAS'. None si no
-    se reconoce: mejor preguntar que adivinar mal el total de un pedido."""
+    """'Kg', 'kg', 'Mill', 'mb', 'Bob', 'lamina'... → 'KG' / 'MILLAR' /
+    'BOLSAS' / 'BOBINA' / 'LAMINA'. None si no se reconoce: mejor preguntar
+    que adivinar mal el total de un pedido."""
     if not medida:
         return None
     clave = medida.strip().rstrip(".").lower()
@@ -155,7 +164,9 @@ def confirmar_unidad(db: Session, numero_ot: str, unidad: str) -> ProductoTermin
     cambiaría el significado de lo ya pesado (una cantidad en bolsas no es lo
     mismo que una en kilos)."""
     if unidad not in UNIDADES:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Unidad inválida: tiene que ser Kg, Bolsas o Mill")
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST, "Unidad inválida: tiene que ser Kg, Bolsas, Mill, Bob o Lám"
+        )
     producto_terminado = obtener(db, numero_ot)
     if producto_terminado is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa OT todavía no se abrió en Producto Terminado")
@@ -245,7 +256,7 @@ def _validar_pesaje(
     if unidad is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Falta confirmar la unidad de esta OT (Kg, Bolsas o Mill) antes de pesar.",
+            "Falta confirmar la unidad de esta OT (Kg, Bolsas, Mill, Bob o Lám) antes de pesar.",
         )
     if peso_bruto <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "El peso bruto tiene que ser mayor a 0.")
@@ -254,7 +265,7 @@ def _validar_pesaje(
     if unidad == "KG":
         return None
     if cantidad is None or cantidad <= 0:
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Falta la cantidad de bolsas del paquete.")
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Falta la cantidad del paquete.")
     return cantidad
 
 

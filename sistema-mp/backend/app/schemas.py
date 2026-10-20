@@ -739,13 +739,13 @@ class ProductoTerminadoOut(BaseModel):
     # Tipo de producción tal como está en el Excel: R (repetición), N (nuevo),
     # Rc-Arte (repetición con cambio de estructura) — y variantes escritas a mano.
     tipo_trabajo: Optional[str]
-    # 'KG' | 'BOLSAS' | 'MILLAR', o None si "Med." no se reconoció y hay que
+    # 'KG' | 'BOLSAS' | 'MILLAR' | 'BOBINA' | 'LAMINA', o None si "Med." no se reconoció y hay que
     # confirmarla (PUT /producto-terminado/{numero_ot}/unidad).
     unidad: Optional[str]
     medida_excel: Optional[str]
     # Como en el Excel (en MILLAR, en miles) — lo que se imprime.
     pedido_total: Optional[float]
-    # En unidades reales (bolsas o kg) — contra esto se calcula el avance.
+    # En unidades reales (bolsas, bobinas, láminas o kg) — contra esto se calcula el avance.
     pedido_total_real: Optional[float]
     moneda: Optional[str]
     items: List[ProductoTerminadoItemOut]

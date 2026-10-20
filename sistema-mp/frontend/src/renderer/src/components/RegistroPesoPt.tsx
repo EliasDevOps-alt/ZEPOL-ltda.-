@@ -10,7 +10,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
-import { ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
+import { NOMBRE_CANTIDAD_PT, ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
 import {
   ALTO_ETIQUETA_MM,
   ANCHO_ETIQUETA_MM,
@@ -28,14 +28,9 @@ function num(valor: number, decimales = 3): string {
   })
 }
 
-/** En qué se cuenta el To (y la cantidad de cada paquete). En una OT en
- * millares el pedido se escribe en millares, pero cada paquete se cuenta en
- * bolsas (Elias), así que el To también va en bolsas. */
-const ROTULO_TO: Record<UnidadPt, string> = {
-  KG: 'kg',
-  BOLSAS: 'bolsas',
-  MILLAR: 'bolsas'
-}
+/** En qué se cuenta el To (y la cantidad de cada paquete): bolsas, bobinas o
+ * láminas según la unidad de la OT (en millares también bolsas). */
+const ROTULO_TO = NOMBRE_CANTIDAD_PT
 
 /** Pedido total como se escribe en el Excel, y en millares su equivalente en
  * bolsas para compararlo con lo pesado. */
@@ -471,7 +466,7 @@ function FilaEdicion({
           </div>
           {conCantidad && (
             <div className="space-y-1">
-              <Label htmlFor={`ed-cantidad-${pesaje.id}`}>Cantidad (bolsas)</Label>
+              <Label htmlFor={`ed-cantidad-${pesaje.id}`}>Cantidad ({ROTULO_TO[unidad]})</Label>
               <Input
                 id={`ed-cantidad-${pesaje.id}`}
                 type="number"
@@ -666,7 +661,7 @@ function FormularioPesaje({
             </div>
             {conCantidad && (
               <div className="space-y-1">
-                <Label htmlFor="pesaje-cantidad">Cantidad (bolsas)</Label>
+                <Label htmlFor="pesaje-cantidad">Cantidad ({ROTULO_TO[unidad]})</Label>
                 <Input
                   id="pesaje-cantidad"
                   type="number"
@@ -705,7 +700,7 @@ function FormularioPesaje({
             <div className="space-y-3 rounded-md border border-success/40 bg-success/10 p-3">
               <p className="text-sm text-success">
                 Pesaje N° {registrado.numero} registrado: {num(registrado.peso_neto)} kg netos
-                {registrado.cantidad !== null ? `, ${num(registrado.cantidad)} bolsas` : ''}.
+                {registrado.cantidad !== null ? `, ${num(registrado.cantidad)} ${ROTULO_TO[unidad]}` : ''}.
               </p>
               <div className="flex flex-wrap items-end gap-4">
                 <VistaEtiqueta pt={pt} pesaje={registrado} />

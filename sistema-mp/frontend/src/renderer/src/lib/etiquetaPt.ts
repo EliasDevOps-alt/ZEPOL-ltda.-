@@ -1,6 +1,7 @@
 import JsBarcode from 'jsbarcode'
 import { escaparHtml as esc } from './documentoWord'
 import { formatearFecha } from './fechas'
+import { NOMBRE_CANTIDAD_PT } from './formularioPt'
 import { LOGO_ZEPOL_BASE64 } from './logoZepol'
 import type { PesajePt, ProductoTerminado } from './types'
 
@@ -66,10 +67,12 @@ export function datosEtiquetaDesdePesaje(pt: ProductoTerminado, pesaje: PesajePt
     // Todavía no se sabe de dónde sale (en la etiqueta original decía "200 Gg").
     descripcion: '',
     numero: pesaje.numero,
-    // Bolsas: las del paquete. Bobinas: el peso neto (pedido de Elias).
+    // Bolsas, bobinas o láminas: las del paquete. En Kg: el peso neto (pedido de Elias).
     cantidadEnvases:
       pesaje.cantidad !== null
-        ? `${pesaje.cantidad.toLocaleString('en-US', { useGrouping: false })} bolsas`
+        ? `${pesaje.cantidad.toLocaleString('en-US', { useGrouping: false })} ${
+            pt.unidad ? NOMBRE_CANTIDAD_PT[pt.unidad] : 'bolsas'
+          }`
         : `${peso(pesaje.peso_neto)} kg`,
     fecha: formatearFecha(pesaje.fecha),
     pesador: pesaje.pesador,

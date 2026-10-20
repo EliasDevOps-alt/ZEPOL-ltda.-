@@ -761,11 +761,25 @@ ${cuerpo}${
 }
 
 // Como se escribe la unidad en el formulario en papel (el de la OT 219988
-// dice "BOLSAS" sobre la columna de totales).
+// dice "BOLSAS" sobre la columna de totales). La bobina va como "Bob" (así la
+// escribe el Excel y así la reconoce la planta).
 export const ROTULO_UNIDAD_PT: Record<UnidadPt, string> = {
   KG: 'Kg',
   BOLSAS: 'BOLSAS',
-  MILLAR: 'Mill'
+  MILLAR: 'Mill',
+  BOBINA: 'Bob',
+  LAMINA: 'Lám'
+}
+
+/** En qué se cuenta lo pesado (el To y la cantidad de cada paquete). En una OT
+ * en millares el pedido se escribe en millares, pero cada paquete se cuenta en
+ * bolsas (Elias), así que el To también va en bolsas. */
+export const NOMBRE_CANTIDAD_PT: Record<UnidadPt, string> = {
+  KG: 'kg',
+  BOLSAS: 'bolsas',
+  MILLAR: 'bolsas',
+  BOBINA: 'bobinas',
+  LAMINA: 'láminas'
 }
 
 /** Sin ceros de más: 200000 y no 200000.00; 22.5 y no 22.50. */
