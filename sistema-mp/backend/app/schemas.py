@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -748,7 +748,16 @@ class ProductoTerminadoOut(BaseModel):
     # En unidades reales (bolsas, bobinas, láminas o kg) — contra esto se calcula el avance.
     pedido_total_real: Optional[float]
     moneda: Optional[str]
+    # Textos del formulario corregidos a mano {campo: texto}. Solo valen para el
+    # formulario; el resto de los datos sigue saliendo de la OT / el Excel.
+    ediciones: Dict[str, str]
     items: List[ProductoTerminadoItemOut]
+
+
+class EdicionesFormularioPtIn(BaseModel):
+    # El conjunto completo de ediciones de la OT: lo que no esté vuelve al valor
+    # original. Un texto vacío es una edición válida (dejar el campo en blanco).
+    ediciones: Dict[str, str]
 
 
 class ConfirmarUnidadPtIn(BaseModel):

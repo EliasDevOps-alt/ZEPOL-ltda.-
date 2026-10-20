@@ -377,6 +377,9 @@ CREATE TABLE productos_terminados (
     pedido_total  NUMERIC(14,3),
     -- Se elige a mano en la pantalla (Bs, $us u otra): la OT no la guarda.
     moneda        VARCHAR(20),
+    -- Correcciones a mano de los textos del formulario (JSON {campo: texto}).
+    -- Valen solo para el formulario: ni el Excel ni la OT las reciben.
+    ediciones_formulario TEXT,
     creado_en     TIMESTAMP     NOT NULL DEFAULT now()
 );
 

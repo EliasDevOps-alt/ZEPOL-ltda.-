@@ -30,6 +30,7 @@ def _serializar(producto_terminado: ProductoTerminado) -> schemas.ProductoTermin
         pedido_total=float(producto_terminado.pedido_total) if producto_terminado.pedido_total is not None else None,
         pedido_total_real=producto_terminado_controller.pedido_total_real(producto_terminado),
         moneda=producto_terminado.moneda,
+        ediciones=producto_terminado_controller.ediciones_del_formulario(producto_terminado),
         items=[schemas.ProductoTerminadoItemOut.model_validate(item) for item in producto_terminado.items],
     )
 
@@ -115,6 +116,15 @@ def confirmar_unidad(numero_ot: str, data: schemas.ConfirmarUnidadPtIn, db: Sess
 )
 def fijar_moneda(numero_ot: str, data: schemas.MonedaPtIn, db: Session = Depends(get_db)):
     return _serializar(producto_terminado_controller.fijar_moneda(db, numero_ot, data.moneda))
+
+
+@router.put(
+    "/{numero_ot}/ediciones",
+    response_model=schemas.ProductoTerminadoOut,
+    dependencies=[Depends(security.requiere_modulo("producto_terminado"))],
+)
+def fijar_ediciones(numero_ot: str, data: schemas.EdicionesFormularioPtIn, db: Session = Depends(get_db)):
+    return _serializar(producto_terminado_controller.fijar_ediciones(db, numero_ot, data.ediciones))
 
 
 @router.get("/{numero_ot}/pesajes", response_model=schemas.PesajesPtOut)

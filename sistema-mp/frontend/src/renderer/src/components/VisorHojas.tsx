@@ -21,6 +21,13 @@ const RELLENO_PX = 24
  * vista previa, y así la rueda y el arrastre llegan al marco en vez de
  * quedarse dentro del iframe.
  *
+ * Con `alEditar`, la hoja se puede corregir directamente: un clic en un dato
+ * (una celda con `data-campo`) lo vuelve escribible; Enter o salir de la celda
+ * lo guarda y Escape lo cancela. Ahí los iframes SÍ reciben el ratón, así que
+ * la rueda, el Ctrl + rueda y el arrastre del fondo se reenvían al marco desde
+ * dentro del iframe. Mientras se escribe en una celda no se reemplazan las
+ * hojas (se perdería lo escrito); los cambios llegan al terminar.
+ *
  * `conMarco` (por defecto) dibuja cada hoja como un papel blanco con sus
  * márgenes. Sin marco, el HTML ya trae sus propias hojas dibujadas — el
  * formulario de Reportes pone todas en un solo documento, con su fondo gris
@@ -33,7 +40,8 @@ export function VisorHojas({
   margenVerticalPx = 0,
   margenHorizontalPx = 0,
   conMarco = true,
-  titulo
+  titulo,
+  alEditar
 }: {
   hojas: string[]
   anchoPx: number
@@ -42,8 +50,22 @@ export function VisorHojas({
   margenHorizontalPx?: number
   conMarco?: boolean
   titulo: string
+  /** Recibe la clave (`data-campo`) y el texto nuevo; si falla, la celda vuelve a su texto. */
+  alEditar?: (clave: string, texto: string) => Promise<unknown> | void
 }) {
   const marcoRef = useRef<HTMLDivElement>(null)
+  const alEditarRef = useRef(alEditar)
+  alEditarRef.current = alEditar
+  // Hojas que se muestran: igual a `hojas`, salvo mientras se escribe en una
+  // celda (ver arriba).
+  const [visibles, setVisibles] = useState(hojas)
+  const hojasRef = useRef(hojas)
+  hojasRef.current = hojas
+  const escribiendoRef = useRef(false)
+  useEffect(() => {
+    if (!escribiendoRef.current) setVisibles(hojas)
+  }, [hojas])
+  const mostradas = alEditar ? visibles : hojas
   const [ajuste, setAjuste] = useState(1)
   // null = "Ajustar": la escala sigue al ancho del marco.
   const [zoom, setZoom] = useState<number | null>(null)
@@ -125,6 +147,101 @@ export function VisorHojas({
     setArrastrando(false)
   }
 
+  /** Conecta una hoja recién cargada: rueda y arrastre reenviados al marco, y
+   * clic en un dato para corregirlo. Se llama en cada carga del iframe (cada
+   * vez que cambia su contenido). */
+  function prepararEdicion(iframe: HTMLIFrameElement): void {
+    const doc = iframe.contentDocument
+    if (!doc) return
+    const marco = marcoRef.current
+
+    doc.addEventListener(
+      'wheel',
+      (ev) => {
+        ev.preventDefault()
+        if (ev.ctrlKey) {
+          if (ev.deltaY < 0) acercar()
+          else alejar()
+        } else if (marco) {
+          marco.scrollTop += ev.deltaY
+          marco.scrollLeft += ev.deltaX
+        }
+      },
+      { passive: false }
+    )
+
+    // Arrastrar el fondo de la hoja (no un dato) mueve el marco. Se mide en
+    // pantalla (screenX/Y) porque dentro del iframe la hoja está escalada.
+    let pan: { x: number; y: number; izquierda: number; arriba: number } | null = null
+    doc.addEventListener('mousedown', (ev) => {
+      if (ev.button !== 0 || !marco || (ev.target as Element).closest('[data-campo]')) return
+      pan = { x: ev.screenX, y: ev.screenY, izquierda: marco.scrollLeft, arriba: marco.scrollTop }
+    })
+    doc.addEventListener('mousemove', (ev) => {
+      if (!pan || !marco) return
+      marco.scrollLeft = pan.izquierda - (ev.screenX - pan.x)
+      marco.scrollTop = pan.arriba - (ev.screenY - pan.y)
+    })
+    const soltar = (): void => {
+      pan = null
+    }
+    doc.addEventListener('mouseup', soltar)
+    doc.addEventListener('mouseleave', soltar)
+
+    doc.addEventListener('click', (ev) => {
+      const celda = (ev.target as Element).closest<HTMLElement>('[data-campo]')
+      if (celda && !celda.isContentEditable) empezarEdicion(doc, celda)
+    })
+  }
+
+  function empezarEdicion(doc: Document, celda: HTMLElement): void {
+    const clave = celda.dataset.campo
+    if (!clave) return
+    const inicial = celda.textContent ?? ''
+    let cancelado = false
+    escribiendoRef.current = true
+    celda.contentEditable = 'plaintext-only'
+    celda.focus()
+    const seleccion = doc.defaultView?.getSelection()
+    const rango = doc.createRange()
+    rango.selectNodeContents(celda)
+    seleccion?.removeAllRanges()
+    seleccion?.addRange(rango)
+
+    const alTeclear = (ev: KeyboardEvent): void => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault()
+        celda.blur()
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault()
+        cancelado = true
+        celda.textContent = inicial
+        celda.blur()
+      }
+    }
+    const alSalir = async (): Promise<void> => {
+      celda.removeEventListener('keydown', alTeclear)
+      celda.removeEventListener('blur', alSalir)
+      celda.removeAttribute('contenteditable')
+      const texto = (celda.textContent ?? '').replace(/\s+/g, ' ').trim()
+      escribiendoRef.current = false
+      if (cancelado || texto === inicial.trim()) {
+        celda.textContent = inicial
+        setVisibles(hojasRef.current)
+        return
+      }
+      try {
+        await alEditarRef.current?.(clave, texto)
+      } catch {
+        celda.textContent = inicial
+      } finally {
+        if (!escribiendoRef.current) setVisibles(hojasRef.current)
+      }
+    }
+    celda.addEventListener('keydown', alTeclear)
+    celda.addEventListener('blur', alSalir)
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -176,7 +293,7 @@ export function VisorHojas({
         )}
       >
         <div className="flex w-max min-w-full flex-col items-center gap-6">
-          {hojas.map((hoja, i) => (
+          {mostradas.map((hoja, i) => (
             // El contenedor ocupa el tamaño ya escalado, así las barras de
             // desplazamiento saben cuánto mide la hoja con zoom.
             <div
@@ -197,7 +314,8 @@ export function VisorHojas({
                   title={`${titulo}, hoja ${i + 1}`}
                   srcDoc={hoja}
                   scrolling="no"
-                  className="pointer-events-none h-full w-full border-0"
+                  onLoad={alEditar ? (e) => prepararEdicion(e.currentTarget) : undefined}
+                  className={cn('h-full w-full border-0', !alEditar && 'pointer-events-none')}
                 />
               </div>
             </div>

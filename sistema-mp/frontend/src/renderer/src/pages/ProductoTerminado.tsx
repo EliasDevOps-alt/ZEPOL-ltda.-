@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { FileText, Loader2, Printer, Scale, Search, X } from 'lucide-react'
+import { FileText, Loader2, Pencil, Printer, Scale, Search, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -9,6 +9,7 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import {
   datosFormularioDesdePt,
+  edicionesTrasEditar,
   generarDocumentoWordFormularioPt,
   generarHtmlFormularioPt,
   hojasFormularioPt,
@@ -16,6 +17,7 @@ import {
 } from '@renderer/lib/formularioPt'
 import type { ProductoTerminado as ProductoTerminadoDatos } from '@renderer/lib/types'
 import { ConfirmarUnidadPt } from '@renderer/components/ConfirmarUnidadPt'
+import { CorreccionesFormularioPt } from '@renderer/components/CorreccionesFormularioPt'
 import { RegistroPesoPt } from '@renderer/components/RegistroPesoPt'
 import { VisorHojas } from '@renderer/components/VisorHojas'
 import { cn } from '@renderer/lib/utils'
@@ -104,6 +106,43 @@ export function ProductoTerminado() {
     onSuccess: (datos) => setPt(datos)
   })
   const [otraMoneda, setOtraMoneda] = useState<string | null>(null)
+  // Correcciones a mano de los datos del formulario, hechas con un clic sobre la
+  // hoja. Se guardan en orden y de a una: cada envío lleva el conjunto completo,
+  // así que dos correcciones seguidas (una en cada celda) no pueden pisarse.
+  const ptRef = useRef(pt)
+  ptRef.current = pt
+  const edicionesRef = useRef<Record<string, string>>({})
+  const enVueloRef = useRef(0)
+  const colaRef = useRef<Promise<unknown>>(Promise.resolve())
+  const [errorEdicion, setErrorEdicion] = useState<string | null>(null)
+  useEffect(() => {
+    if (enVueloRef.current === 0) edicionesRef.current = pt?.ediciones ?? {}
+  }, [pt])
+
+  function alEditarHoja(clave: string, texto: string): Promise<unknown> {
+    const actual = ptRef.current
+    if (!actual) return Promise.resolve()
+    const nuevas = edicionesTrasEditar({ ...actual, ediciones: edicionesRef.current }, clave, texto)
+    edicionesRef.current = nuevas
+    enVueloRef.current++
+    const envio = colaRef.current
+      .then(() => api.guardarEdicionesFormularioPt(apiBaseUrl, token, actual.numero_ot, nuevas))
+      .then((datos) => {
+        setPt(datos)
+        setErrorEdicion(null)
+        return datos
+      })
+    colaRef.current = envio.catch(() => undefined)
+    return envio
+      .finally(() => {
+        enVueloRef.current--
+      })
+      .catch((error: unknown) => {
+        edicionesRef.current = ptRef.current?.ediciones ?? {}
+        setErrorEdicion(error instanceof Error ? error.message : String(error))
+        throw error
+      })
+  }
   const monedaEsOtra = pt?.moneda != null && !MONEDAS.includes(pt.moneda)
 
   // Los pesajes van escritos en "Registrar Fecha, Cantidades y Pesos".
@@ -117,9 +156,15 @@ export function ProductoTerminado() {
   const html = useMemo(() => generarHtmlFormularioPt(datos), [datos])
   // La vista previa va hoja por hoja: cada una en su propio iframe tamaño
   // carta, así los márgenes se ven igual que impresos.
+  // En pantalla los datos de la OT se corrigen con un clic; el PDF y el Word
+  // (`html` y `datos`, más arriba) salen sin nada de eso.
+  const editados = useMemo(() => Object.keys(pt?.ediciones ?? {}), [pt])
   const hojas = useMemo(
-    () => Array.from({ length: hojasFormularioPt(datos) }, (_, i) => generarHtmlFormularioPt(datos, { soloHoja: i })),
-    [datos]
+    () =>
+      Array.from({ length: hojasFormularioPt(datos) }, (_, i) =>
+        generarHtmlFormularioPt(datos, { soloHoja: i, editable: pt ? { editados } : undefined })
+      ),
+    [datos, pt, editados]
   )
   const nombreArchivo = pt ? `${NOMBRE_ARCHIVO_FORMULARIO_PT}-OT-${pt.numero_ot}` : NOMBRE_ARCHIVO_FORMULARIO_PT
 
@@ -335,6 +380,20 @@ export function ProductoTerminado() {
             </div>
           )}
 
+          {pt && (
+            <p className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Pencil className="h-4 w-4 shrink-0" />
+              Haz clic en un dato de la hoja para corregirlo: Enter guarda y Esc cancela. Solo cambia este
+              formulario; el Excel y la OT quedan como están.
+            </p>
+          )}
+          {errorEdicion && (
+            <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              No se pudo guardar la corrección: {errorEdicion}
+            </p>
+          )}
+          {pt && <CorreccionesFormularioPt pt={pt} onActualizado={setPt} />}
+
           {pt && pesajes.isError && (
             <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
               No se pudieron cargar los pesajes de la OT: {pesajes.error.message}. El formulario sale sin ellos.
@@ -378,6 +437,7 @@ export function ProductoTerminado() {
             margenVerticalPx={MARGEN_VERTICAL_PX}
             margenHorizontalPx={MARGEN_HORIZONTAL_PX}
             titulo="Vista previa del formulario"
+            alEditar={pt ? alEditarHoja : undefined}
           />
         </CardContent>
       </Card>

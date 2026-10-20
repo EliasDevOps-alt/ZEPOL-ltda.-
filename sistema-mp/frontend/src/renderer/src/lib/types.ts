@@ -606,6 +606,9 @@ export interface ProductoTerminado {
   pedido_total_real: number | null
   // Elegida a mano (Bs, $us u otra): la OT no la guarda.
   moneda: string | null
+  // Textos del formulario corregidos a mano {campo: texto}. Valen solo para el
+  // formulario: ni el Excel ni la OT los reciben.
+  ediciones: Record<string, string>
   items: ProductoTerminadoItem[]
 }
 

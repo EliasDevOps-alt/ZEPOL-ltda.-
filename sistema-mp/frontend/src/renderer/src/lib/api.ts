@@ -199,6 +199,21 @@ export function fijarMonedaPt(baseUrl: string, token: string, numeroOt: string, 
   )
 }
 
+/** Guarda el conjunto completo de correcciones a mano del formulario de la OT
+ * (lo que falte vuelve al valor original). No toca el Excel. */
+export function guardarEdicionesFormularioPt(
+  baseUrl: string,
+  token: string,
+  numeroOt: string,
+  ediciones: Record<string, string>
+) {
+  return request<ProductoTerminado>(
+    baseUrl,
+    `/producto-terminado/${encodeURIComponent(numeroOt)}/ediciones`,
+    { method: 'PUT', token, body: { ediciones } }
+  )
+}
+
 export function listarPesajesPt(baseUrl: string, token: string, numeroOt: string) {
   return request<PesajesPt>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/pesajes`, { token })
 }

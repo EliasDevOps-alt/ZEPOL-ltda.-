@@ -32,7 +32,7 @@ export function ConfirmarUnidadPt({
     <div className="space-y-2 rounded-md border border-warning/40 bg-warning/10 px-3 py-2 text-sm">
       <p>
         No se reconoce la unidad de esta OT en el Excel
-        {pt.medida_excel ? ` ("${pt.medida_excel}")` : ' (está vacía)'}. Por favor confirme si es Kg, Bolsas, Mill, Bob o Lám:
+        {pt.medida_excel ? ` ("${pt.medida_excel}")` : ' (está vacía)'}. Por favor confirme si es Kg, Bolsas, Mill, Bob o lamina:
       </p>
       <div className="flex flex-wrap gap-2">
         {UNIDADES.map((unidad) => (

@@ -24,6 +24,7 @@ from app.database import engine
 # Columnas agregadas a tablas del módulo después de crearlas por primera vez.
 COLUMNAS_POSTERIORES = [
     "ALTER TABLE productos_terminados ADD COLUMN IF NOT EXISTS moneda VARCHAR(20)",
+    "ALTER TABLE productos_terminados ADD COLUMN IF NOT EXISTS ediciones_formulario TEXT",
     "ALTER TABLE pesajes_pt ADD COLUMN IF NOT EXISTS editado_por_id INTEGER REFERENCES usuarios(id)",
     "ALTER TABLE pesajes_pt ADD COLUMN IF NOT EXISTS editado_en TIMESTAMP",
 ]

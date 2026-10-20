@@ -494,6 +494,10 @@ class ProductoTerminado(Base):
     pedido_total: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
     # Se elige a mano en la pantalla (Bs, $us u otra): la OT no la guarda.
     moneda: Mapped[Optional[str]] = mapped_column(String(20))
+    # Correcciones a mano de los textos del formulario (JSON {campo: texto}).
+    # Valen solo para el formulario: no se escriben en el Excel ni en la OT, y
+    # la sincronización con el Excel no las pisa. Ver producto_terminado_controller.
+    ediciones_formulario: Mapped[Optional[str]] = mapped_column(Text)
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
     ot: Mapped["OrdenTrabajo"] = relationship(back_populates="producto_terminado")

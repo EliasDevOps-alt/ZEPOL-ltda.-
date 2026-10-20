@@ -178,6 +178,11 @@ const esc = escaparHtml
 
 interface Contexto {
   paraWord: boolean
+  /** Solo la vista previa en pantalla: marca los datos que se pueden corregir
+   * haciendo clic (`data-campo`). El PDF y el Word nunca lo llevan. */
+  editable?: boolean
+  /** Claves de los datos ya corregidos a mano (se dibujan con su marca naranja). */
+  editados?: Set<string>
 }
 
 /** Abre un `<td>`: clase en el navegador, estilo inline en Word. */
@@ -188,6 +193,14 @@ function celda(ctx: Contexto, estilo: string, colspan = 1, extra = ''): string {
     ? ` style="${BASE_CELDA};${ESTILOS_CELDA[estilo]}"`
     : ` class="${estilo}"`
   return `<td${span}${ancho}${atributo}${extra ? ' ' + extra : ''}>`
+}
+
+/** Un `<td>` con un dato que se puede corregir directamente en la hoja. Fuera
+ * de la vista previa en pantalla es una celda común. */
+function celdaCampo(ctx: Contexto, estilo: string, colspan: number, clave: string | undefined): string {
+  if (!ctx.editable || !clave) return celda(ctx, estilo, colspan)
+  const editado = ctx.editados?.has(clave) ? ' data-editado="1"' : ''
+  return celda(ctx, estilo, colspan, `data-campo="${clave}"${editado}`)
 }
 
 function celdasCuadricula(ctx: Contexto, cantidad: number, estilo = 'g'): string {
@@ -226,15 +239,17 @@ function filaTem(
   indice: number,
   item: ItemFormularioPt,
   etiquetaDerecha: string,
-  valorDerecha: string
+  valorDerecha: string,
+  claveDerecha?: string
 ): string {
+  const n = indice - 1
   return `<tr ${altoFila(ALTO_FILA_DATOS_PT)}>
 ${celda(ctx, 'tem', 3)}TEM ${indice}</td>
-${celda(ctx, 'tem-codigo', 3)}${esc(item.codigo)}</td>
-${celda(ctx, (item.producto ?? '').length > 60 ? 'tem-producto-chico' : 'tem-producto', 15)}${esc(item.producto)}</td>
-${celda(ctx, 'tem-total', 3)}${esc(item.total)}</td>
+${celdaCampo(ctx, 'tem-codigo', 3, claveItemFormularioPt(n, 'codigo'))}${esc(item.codigo)}</td>
+${celdaCampo(ctx, (item.producto ?? '').length > 60 ? 'tem-producto-chico' : 'tem-producto', 15, claveItemFormularioPt(n, 'producto'))}${esc(item.producto)}</td>
+${celdaCampo(ctx, 'tem-total', 3, claveItemFormularioPt(n, 'total'))}${esc(item.total)}</td>
 ${celda(ctx, 'rot-b', 4)}${etiquetaDerecha}</td>
-${celda(ctx, 'valor-linea', 6)}${esc(valorDerecha)}</td>
+${celdaCampo(ctx, 'valor-linea', 6, claveDerecha)}${esc(valorDerecha)}</td>
 </tr>`
 }
 
@@ -644,9 +659,19 @@ export function hojasFormularioPt(datos: DatosFormularioPt = {}): number {
 
 export function generarHtmlFormularioPt(
   datos: DatosFormularioPt = {},
-  opciones: { paraWord?: boolean; soloHoja?: number } = {}
+  opciones: {
+    paraWord?: boolean
+    soloHoja?: number
+    /** Vista previa en pantalla: los datos se pueden corregir con un clic. `editados`
+     * son las claves ya corregidas, que se dibujan con su marca naranja. */
+    editable?: { editados: string[] }
+  } = {}
 ): string {
-  const ctx: Contexto = { paraWord: opciones.paraWord ?? false }
+  const ctx: Contexto = {
+    paraWord: opciones.paraWord ?? false,
+    editable: !opciones.paraWord && opciones.editable !== undefined,
+    editados: new Set(opciones.editable?.editados ?? [])
+  }
   const hojas = lineasRegistro(datos.registros)
   const conCantidad = datos.registros?.conCantidad ?? false
   const elegidas = opciones.soloHoja !== undefined ? [hojas[opciones.soloHoja] ?? hojaVacia()] : hojas
@@ -688,7 +713,7 @@ ${celda(ctx, 'codigo-valor', 7)}P-LOG-001-F-04/V.4.0</td>
 </tr>
 <tr ${altoFila(ALTO_CLIENTE_PT)}>
 ${celda(ctx, 'cliente-rotulo', COLS_CLIENTE_ROTULO)}CLIENTE:</td>
-${celda(ctx, estiloClienteValor(datos.cliente), COLS_CLIENTE_VALOR)}${esc(datos.cliente)}</td>
+${celdaCampo(ctx, estiloClienteValor(datos.cliente), COLS_CLIENTE_VALOR, 'cliente')}${esc(datos.cliente)}</td>
 ${celda(ctx, 'ot-rotulo', COLS_OT_ROTULO)}N&ordm; OT.:</td>
 ${casillasNumeroOt(ctx, datos.numeroOt)}
 </tr>
@@ -696,33 +721,33 @@ ${casillasNumeroOt(ctx, datos.numeroOt)}
 ${celda(ctx, 'lat-izq', 3)}</td>
 ${celda(ctx, 'cabecera-col', 3)}CODIGO</td>
 ${celda(ctx, 'cabecera-col', 15)}PRODUCTO</td>
-${celda(ctx, 'unidad-rotulo', 3)}${esc(datos.unidad) || '(unidad)'}</td>
+${celdaCampo(ctx, 'unidad-rotulo', 3, 'unidad')}${esc(datos.unidad) || '(unidad)'}</td>
 ${celda(ctx, 'rot-b', 4)}Fecha Pedido:</td>
-${celda(ctx, 'valor-linea', 6)}${esc(datos.fechaPedido)}</td>
+${celdaCampo(ctx, 'valor-linea', 6, 'fechaPedido')}${esc(datos.fechaPedido)}</td>
 </tr>
-${filaTem(ctx, 1, item(0), 'Fecha Entrega', datos.fechaEntrega ?? '')}
-${filaTem(ctx, 2, item(1), 'Comercial:', datos.comercial ?? '')}
-${filaTem(ctx, 3, item(2), 'Ciudad:', datos.ciudad ?? '')}
+${filaTem(ctx, 1, item(0), 'Fecha Entrega', datos.fechaEntrega ?? '', 'fechaEntrega')}
+${filaTem(ctx, 2, item(1), 'Comercial:', datos.comercial ?? '', 'comercial')}
+${filaTem(ctx, 3, item(2), 'Ciudad:', datos.ciudad ?? '', 'ciudad')}
 ${filaTem(ctx, 4, item(3), 'Moneda:', datos.moneda ?? '')}
-${filaTem(ctx, 5, item(4), 'Nuevo:', datos.nuevo ?? '')}
+${filaTem(ctx, 5, item(4), 'Nuevo:', datos.nuevo ?? '', 'nuevo')}
 <tr ${altoFila(ALTO_FILA_DATOS_PT)}>
 ${celda(ctx, 'lat-izq', 16)}</td>
 ${celda(ctx, 'pedido-total', 5)}Pedido Total</td>
-${celda(ctx, 'total', 3)}${esc(datos.pedidoTotal) || '0.00'}</td>
+${celdaCampo(ctx, 'total', 3, 'pedidoTotal')}${esc(datos.pedidoTotal) || '0.00'}</td>
 ${celda(ctx, 'rot-b', 4)}Rc-Arte:</td>
-${celda(ctx, 'valor-linea', 6)}${esc(datos.rcArte)}</td>
+${celdaCampo(ctx, 'valor-linea', 6, 'rcArte')}${esc(datos.rcArte)}</td>
 </tr>
 <tr ${altoFila(ALTO_FILA_DATOS_PT)}>
 ${celda(ctx, 'rot-der', 5)}Condiciones:</td>
-${celda(ctx, 'dato-linea', 19)}${esc(datos.condiciones)}</td>
+${celdaCampo(ctx, 'dato-linea', 19, 'condiciones')}${esc(datos.condiciones)}</td>
 ${celda(ctx, 'rot-b', 4)}Muestra:</td>
-${celda(ctx, 'valor-linea', 6)}${esc(datos.muestra)}</td>
+${celdaCampo(ctx, 'valor-linea', 6, 'muestra')}${esc(datos.muestra)}</td>
 </tr>
 <tr ${altoFila(ALTO_FILA_DATOS_PT)}>
 ${celda(ctx, 'rot-der', 5)}Observaciones:</td>
-${celda(ctx, 'dato-linea', 19)}${esc(datos.observaciones)}</td>
+${celdaCampo(ctx, 'dato-linea', 19, 'observaciones')}${esc(datos.observaciones)}</td>
 ${celda(ctx, 'rot-b', 4)}Entrega Total:</td>
-${celda(ctx, 'valor-linea', 6)}${esc(datos.entregaTotal)}</td>
+${celdaCampo(ctx, 'valor-linea', 6, 'entregaTotal')}${esc(datos.entregaTotal)}</td>
 </tr>
 <tr ${altoFila(ALTO_REGISTRAR_PT)}>
 ${celda(ctx, 'registrar', COLUMNAS)}Registrar Fecha, Cantidades y Pesos en letra legible:</td>
@@ -731,6 +756,17 @@ ${filasCuadricula(ctx, hoja, conCantidad)}
 </tbody>
 </table>`
 }
+
+// Solo en la vista previa (nunca en el PDF ni el Word): resalta los datos que se
+// pueden corregir con un clic, y marca con un lápiz naranja los ya corregidos.
+const LAPIZ_NARANJA =
+  "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23d97706' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'><path d='M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z'/></svg>\")"
+const ESTILOS_EDICION = `
+  [data-campo] { cursor: text; }
+  [data-campo]:hover { outline: 1.5px dashed #0e7490; outline-offset: -1px; background-color: #ecfeff; }
+  [data-campo][data-editado] { box-shadow: inset 0 0 0 1.5px #d97706; background-image: ${LAPIZ_NARANJA}; background-repeat: no-repeat; background-position: right 2px top 2px; background-size: 9px 9px; }
+  [data-campo][contenteditable] { outline: 2px solid #0e7490; outline-offset: -1px; background-color: #ffffff; background-image: none; cursor: text; }
+`
 
 function documentoFormulario(ctx: Contexto, cuerpo: string): string {
   const espaciosWord = ctx.paraWord
@@ -746,7 +782,7 @@ function documentoFormulario(ctx: Contexto, cuerpo: string): string {
 <meta charset="utf-8">
 <title>Formulario de ingreso de productos terminados a almacenes</title>
 ${configWord}
-<style>${ESTILOS}</style>
+<style>${ESTILOS}${ctx.editable ? ESTILOS_EDICION : ''}</style>
 </head>
 <body>
 <div class="WordSection1">
@@ -761,14 +797,15 @@ ${cuerpo}${
 }
 
 // Como se escribe la unidad en el formulario en papel (el de la OT 219988
-// dice "BOLSAS" sobre la columna de totales). La bobina va como "Bob" (así la
-// escribe el Excel y así la reconoce la planta).
+// dice "BOLSAS" sobre la columna de totales). La bobina va como "Bob" y la
+// lámina como "lamina": tal cual las escribe el Excel, que es como las
+// reconoce la planta (no abreviarlas ni cambiarles la forma).
 export const ROTULO_UNIDAD_PT: Record<UnidadPt, string> = {
   KG: 'Kg',
   BOLSAS: 'BOLSAS',
   MILLAR: 'Mill',
   BOBINA: 'Bob',
-  LAMINA: 'Lám'
+  LAMINA: 'lamina'
 }
 
 /** En qué se cuenta lo pesado (el To y la cantidad de cada paquete). En una OT
@@ -803,6 +840,75 @@ export function inicialesComercial(vendedor: string | null): string | undefined 
  * Rc-Arte: por ahora así, decidido por Elias).
  */
 export function datosFormularioDesdePt(pt: ProductoTerminado, pesajes?: PesajesPt): DatosFormularioPt {
+  return aplicarEdiciones(datosOriginalesDesdePt(pt, pesajes), pt.ediciones)
+}
+
+// Campos de texto del formulario que se pueden corregir a mano. Las claves son
+// las de DatosFormularioPt y las mismas que acepta el backend
+// (producto_terminado_controller._CAMPOS_EDITABLES): si se agrega una, va en los dos.
+export const CAMPOS_EDITABLES_FORMULARIO_PT = [
+  { clave: 'cliente', etiqueta: 'Cliente' },
+  { clave: 'unidad', etiqueta: 'Unidad' },
+  { clave: 'pedidoTotal', etiqueta: 'Pedido Total' },
+  { clave: 'fechaPedido', etiqueta: 'Fecha Pedido' },
+  { clave: 'fechaEntrega', etiqueta: 'Fecha Entrega' },
+  { clave: 'comercial', etiqueta: 'Comercial' },
+  { clave: 'ciudad', etiqueta: 'Ciudad' },
+  { clave: 'nuevo', etiqueta: 'Nuevo' },
+  { clave: 'rcArte', etiqueta: 'Rc-Arte' },
+  { clave: 'muestra', etiqueta: 'Muestra' },
+  { clave: 'entregaTotal', etiqueta: 'Entrega Total' },
+  { clave: 'condiciones', etiqueta: 'Condiciones' },
+  { clave: 'observaciones', etiqueta: 'Observaciones' }
+] as const
+
+export type CampoItemFormularioPt = keyof ItemFormularioPt
+
+/** Clave de una corrección de un renglón de ITEM (n desde 0): "items.0.codigo". */
+export function claveItemFormularioPt(n: number, campo: CampoItemFormularioPt): string {
+  return `items.${n}.${campo}`
+}
+
+/** Lo que el formulario trae hoy en un campo (clave general o "items.N.campo"). */
+export function valorCampoFormularioPt(datos: DatosFormularioPt, clave: string): string {
+  const partes = clave.split('.')
+  if (partes[0] === 'items') {
+    const item = datos.items?.[Number(partes[1])]
+    return item?.[partes[2] as CampoItemFormularioPt] ?? ''
+  }
+  return (datos as Record<string, unknown>)[clave] === undefined ? '' : String((datos as Record<string, unknown>)[clave])
+}
+
+/** Las correcciones de la OT después de escribir `texto` en `clave`. Escribir lo
+ * mismo que el original no cuenta como corregido (se quita la corrección). */
+export function edicionesTrasEditar(pt: ProductoTerminado, clave: string, texto: string): Record<string, string> {
+  const original = datosFormularioDesdePt({ ...pt, ediciones: {} })
+  const ediciones = { ...pt.ediciones }
+  const limpio = texto.trim()
+  if (limpio === valorCampoFormularioPt(original, clave)) delete ediciones[clave]
+  else ediciones[clave] = limpio
+  return ediciones
+}
+
+/** Pone encima de los datos de la OT las correcciones hechas a mano. Una
+ * corrección vacía es válida: deja el campo en blanco. */
+function aplicarEdiciones(datos: DatosFormularioPt, ediciones: Record<string, string> | undefined): DatosFormularioPt {
+  if (!ediciones) return datos
+  const resultado: DatosFormularioPt = { ...datos, items: (datos.items ?? []).map((item) => ({ ...item })) }
+  for (const [clave, texto] of Object.entries(ediciones)) {
+    const partes = clave.split('.')
+    if (partes[0] === 'items') {
+      const n = Number(partes[1])
+      while (resultado.items!.length <= n) resultado.items!.push({})
+      resultado.items![n][partes[2] as CampoItemFormularioPt] = texto
+    } else {
+      ;(resultado as Record<string, unknown>)[clave] = texto
+    }
+  }
+  return resultado
+}
+
+function datosOriginalesDesdePt(pt: ProductoTerminado, pesajes?: PesajesPt): DatosFormularioPt {
   return {
     registros: pesajes && pt.unidad ? registrosDesdePesajes(pt.unidad, pesajes) : undefined,
     cliente: pt.cliente ?? undefined,

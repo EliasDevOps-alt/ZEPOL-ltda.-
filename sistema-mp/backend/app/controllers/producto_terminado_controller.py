@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -165,7 +166,7 @@ def confirmar_unidad(db: Session, numero_ot: str, unidad: str) -> ProductoTermin
     mismo que una en kilos)."""
     if unidad not in UNIDADES:
         raise HTTPException(
-            status.HTTP_400_BAD_REQUEST, "Unidad inválida: tiene que ser Kg, Bolsas, Mill, Bob o Lám"
+            status.HTTP_400_BAD_REQUEST, "Unidad inválida: tiene que ser Kg, Bolsas, Mill, Bob o lamina"
         )
     producto_terminado = obtener(db, numero_ot)
     if producto_terminado is None:
@@ -188,6 +189,65 @@ def fijar_moneda(db: Session, numero_ot: str, moneda: Optional[str]) -> Producto
     if producto_terminado is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Esa OT todavía no se abrió en Producto Terminado")
     producto_terminado.moneda = (moneda or "").strip() or None
+    db.commit()
+    db.refresh(producto_terminado)
+    return producto_terminado
+
+
+# Campos del formulario que se pueden corregir a mano. Los nombres son los de
+# DatosFormularioPt (frontend/lib/formularioPt.ts); "items.N.campo" es el campo
+# de un renglón de ITEM (el formulario tiene 5).
+_CAMPOS_EDITABLES = {
+    "cliente",
+    "unidad",  # el rótulo impreso ("lamina", "Bob"...): no cambia la unidad con que se calcula
+    "pedidoTotal",
+    "fechaPedido",
+    "fechaEntrega",
+    "comercial",
+    "ciudad",
+    "nuevo",
+    "rcArte",
+    "muestra",
+    "entregaTotal",
+    "condiciones",
+    "observaciones",
+} | {f"items.{n}.{campo}" for n in range(5) for campo in ("codigo", "producto", "total")}
+_LARGO_MAXIMO_EDICION = 500
+
+
+def ediciones_del_formulario(producto_terminado: ProductoTerminado) -> Dict[str, str]:
+    """Las correcciones guardadas, o {} si no hay (o si el JSON no se puede leer:
+    mejor mostrar el formulario con los datos originales que fallar)."""
+    if not producto_terminado.ediciones_formulario:
+        return {}
+    try:
+        datos = json.loads(producto_terminado.ediciones_formulario)
+    except ValueError:
+        return {}
+    if not isinstance(datos, dict):
+        return {}
+    return {k: v for k, v in datos.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def fijar_ediciones(db: Session, numero_ot: str, ediciones: Dict[str, str]) -> ProductoTerminado:
+    """Guarda las correcciones a mano de los textos del formulario (el conjunto
+    completo: lo que falte vuelve al valor original). Valen SOLO para el
+    formulario — no se escriben en el Excel ni en la OT, y sincronizar_desde_excel
+    no las toca: así se puede corregir un dato sin afectar el registro de la
+    empresa, y la corrección sobrevive a reimprimir y a los cambios del Excel."""
+    producto_terminado = obtener_abierto(db, numero_ot)
+    limpias: Dict[str, str] = {}
+    for campo, texto in ediciones.items():
+        if campo not in _CAMPOS_EDITABLES:
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Campo del formulario inválido: {campo}")
+        texto = texto.strip()
+        if len(texto) > _LARGO_MAXIMO_EDICION:
+            raise HTTPException(
+                status.HTTP_400_BAD_REQUEST,
+                f"El texto es demasiado largo (máximo {_LARGO_MAXIMO_EDICION} caracteres).",
+            )
+        limpias[campo] = texto
+    producto_terminado.ediciones_formulario = json.dumps(limpias, ensure_ascii=False) if limpias else None
     db.commit()
     db.refresh(producto_terminado)
     return producto_terminado
@@ -256,7 +316,7 @@ def _validar_pesaje(
     if unidad is None:
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST,
-            "Falta confirmar la unidad de esta OT (Kg, Bolsas, Mill, Bob o Lám) antes de pesar.",
+            "Falta confirmar la unidad de esta OT (Kg, Bolsas, Mill, Bob o lamina) antes de pesar.",
         )
     if peso_bruto <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "El peso bruto tiene que ser mayor a 0.")
