@@ -10,7 +10,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
-import { NOMBRE_CANTIDAD_PT, ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
+import { llevaCantidad, NOMBRE_CANTIDAD_PT, ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
 import {
   ALTO_ETIQUETA_MM,
   ANCHO_ETIQUETA_MM,
@@ -140,7 +140,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
   })
 
   const unidad = pt.unidad
-  const rotuloPaquetes = unidad === 'KG' ? 'Bo' : 'Pq'
+  const rotuloPaquetes = unidad && !llevaCantidad(unidad) ? 'Bo' : 'Pq'
   const rotuloTo = unidad ? ROTULO_TO[unidad] : ''
 
   const etiquetas = useExportarEtiquetas(pt)
@@ -283,7 +283,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                       <th className="px-3 py-1 text-right">Bruto</th>
                       <th className="px-3 py-1 text-right">Tara</th>
                       <th className="px-3 py-1 text-right">Neto</th>
-                      {unidad !== 'KG' && <th className="px-3 py-1 text-right">Cantidad</th>}
+                      {llevaCantidad(unidad) && <th className="px-3 py-1 text-right">Cantidad</th>}
                       <th className="px-3 py-1">Pesador</th>
                       <th />
                     </tr>
@@ -295,7 +295,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                           key={p.id}
                           pesaje={p}
                           unidad={unidad}
-                          columnas={unidad !== 'KG' ? 8 : 7}
+                          columnas={llevaCantidad(unidad) ? 8 : 7}
                           onCancelar={() => setEditando(null)}
                           onGuardado={(nuevo) => {
                             setEditando(null)
@@ -312,7 +312,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                           <td className="px-3 py-1 text-right">{num(p.peso_bruto)}</td>
                           <td className="px-3 py-1 text-right">{num(p.tara)}</td>
                           <td className="px-3 py-1 text-right font-medium">{num(p.peso_neto)}</td>
-                          {unidad !== 'KG' && (
+                          {llevaCantidad(unidad) && (
                             <td className="px-3 py-1 text-right">{p.cantidad !== null ? num(p.cantidad) : ''}</td>
                           )}
                           <td className="px-3 py-1" title={p.pesador_nombre}>
@@ -394,7 +394,7 @@ function FilaEdicion({
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
-  const conCantidad = unidad !== 'KG'
+  const conCantidad = llevaCantidad(unidad)
   const [fecha, setFecha] = useState(pesaje.fecha)
   const [pesoBruto, setPesoBruto] = useState(num(pesaje.peso_bruto))
   const [tara, setTara] = useState(num(pesaje.tara))
@@ -536,7 +536,7 @@ function Avance({
           <span className="text-muted-foreground">Kg:</span> <strong>{num(datos.total_kg, 2)}</strong>
         </span>
         <span>
-          <span className="text-muted-foreground">{unidad === 'KG' ? 'Bobinas' : 'Paquetes'}:</span>{' '}
+          <span className="text-muted-foreground">{llevaCantidad(unidad) ? 'Paquetes' : 'Bobinas'}:</span>{' '}
           <strong>{datos.total_paquetes}</strong>
         </span>
         {porcentaje !== null && (
@@ -570,7 +570,7 @@ function FormularioPesaje({
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
-  const conCantidad = unidad !== 'KG'
+  const conCantidad = llevaCantidad(unidad)
 
   const [fecha, setFecha] = useState(hoyISO())
   const [pesoBruto, setPesoBruto] = useState('')
@@ -700,7 +700,7 @@ function FormularioPesaje({
             <div className="space-y-3 rounded-md border border-success/40 bg-success/10 p-3">
               <p className="text-sm text-success">
                 Pesaje N° {registrado.numero} registrado: {num(registrado.peso_neto)} kg netos
-                {registrado.cantidad !== null ? `, ${num(registrado.cantidad)} ${ROTULO_TO[unidad]}` : ''}.
+                {conCantidad && registrado.cantidad !== null ? `, ${num(registrado.cantidad)} ${ROTULO_TO[unidad]}` : ''}.
               </p>
               <div className="flex flex-wrap items-end gap-4">
                 <VistaEtiqueta pt={pt} pesaje={registrado} />

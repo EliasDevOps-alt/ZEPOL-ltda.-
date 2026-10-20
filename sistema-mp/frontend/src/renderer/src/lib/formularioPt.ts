@@ -55,9 +55,6 @@ const BASE_CELDA = 'padding:0;vertical-align:middle;line-height:1.05;font-size:8
  * (Word) desde `celda()`.
  */
 const ESTILOS_CELDA: Record<string, string> = {
-  // cuadrícula fina de la hoja (el gris está medido del formulario original)
-  g: `border:${FINA}`,
-  'g-top': `border:${FINA};border-top:${GRUESA}`,
   // recuadro del formulario
   b: `border:${GRUESA}`,
   titulo: `border:${GRUESA};font-size:13pt;font-weight:bold;text-align:center;line-height:1.12`,
@@ -99,24 +96,7 @@ const ESTILOS_CELDA: Record<string, string> = {
   'dato-linea': `border-bottom:${FINA};padding:0 3pt`,
   'pedido-total': 'font-size:9pt;font-weight:bold;text-align:right;padding-right:5pt',
   total: `border:${GRUESA};font-size:10pt;font-weight:bold;text-align:center`,
-  registrar: `border:${GRUESA};font-size:8.5pt;padding-left:3pt`,
-  // 7.5pt y no 8: "Verificado Por" no entra a 8pt (en el original también sale
-  // cortado, pero no hay razón para copiar el recorte).
-  'pie-b': `border:${GRUESA};font-size:7.5pt;font-weight:bold;padding-left:2pt`,
-  'pie-franja': `border-top:${GRUESA};border-bottom:${GRUESA};font-size:7.5pt;font-weight:bold;text-align:center`,
-  franja: `border-top:${GRUESA};border-bottom:${GRUESA}`,
-  // Pesajes escritos en la cuadrícula (ver lineasRegistro).
-  'reg-num': `border:${FINA};text-align:right;padding-right:2pt;font-size:8pt;white-space:nowrap`,
-  'reg-guion': `border:${FINA};text-align:center;font-size:8pt`,
-  'reg-sub': `border:${FINA};border-top:1pt solid #000;text-align:right;padding-right:2pt;font-size:8pt;font-weight:bold;white-space:nowrap`,
-  // Fecha y resumen llevan fondo gris para que cada día se ubique de un
-  // vistazo (pedido de Elias). Grises claros: se imprimen bien en blanco y
-  // negro sin tapar el texto.
-  'reg-fecha': `border:${FINA};text-align:center;font-size:8.5pt;font-weight:bold;white-space:nowrap;background:#E7E7E7`,
-  'reg-resumen': `border:${FINA};font-size:7.5pt;font-weight:bold;padding-left:2pt;white-space:nowrap;background:#D9D9D9`,
-  'reg-resumen-chico': `border:${FINA};font-size:6pt;font-weight:bold;padding-left:1pt;white-space:nowrap;background:#D9D9D9`,
-  // Total de la hoja, abajo al centro ("To hoja = ..." del papel).
-  'reg-total': `border:1.5pt solid #000;font-size:8.5pt;font-weight:bold;text-align:center;white-space:nowrap;background:#D9D9D9`
+  registrar: `border:${GRUESA};font-size:8.5pt;padding-left:3pt`
 }
 
 export interface ItemFormularioPt {
@@ -128,6 +108,8 @@ export interface ItemFormularioPt {
 /** Un pesaje escrito en la cuadrícula: el peso NETO (la tara no va) y, en
  * Bolsas/Mill, las bolsas del paquete. */
 export interface PesajeFormularioPt {
+  /** N° BOB/PAQ de la etiqueta. */
+  numero: number
   neto: number
   cantidad: number | null
 }
@@ -203,10 +185,6 @@ function celdaCampo(ctx: Contexto, estilo: string, colspan: number, clave: strin
   return celda(ctx, estilo, colspan, `data-campo="${clave}"${editado}`)
 }
 
-function celdasCuadricula(ctx: Contexto, cantidad: number, estilo = 'g'): string {
-  return `${celda(ctx, estilo)}</td>`.repeat(cantidad)
-}
-
 /**
  * Las casillas del Nº OT, una por carácter, de izquierda a derecha como se
  * escribiría a mano. Si el número no entra (más de 9 caracteres) se muestra
@@ -253,33 +231,46 @@ ${celdaCampo(ctx, 'valor-linea', 6, claveDerecha)}${esc(valorDerecha)}</td>
 </tr>`
 }
 
-// --- Pesajes en la cuadrícula ------------------------------------------
+// --- Registro de pesos --------------------------------------------------
 //
-// Como a mano en el papel (OT 219988): la hoja se divide en 4 columnas de 8
-// casillas y los días van EN HORIZONTAL, uno al lado del otro. Cada día
-// ocupa una columna por cada 10 pesajes ("peso neto - cantidad"; en Kg solo
-// el peso) con su subtotal debajo; arriba lleva la fecha (a lo ancho de sus
-// columnas) y debajo de su última columna el resumen en 3 renglones (To/Kg,
-// Pq o Bo/Per., N°/%). El día siguiente sigue en la próxima columna libre de
-// la misma franja; cuando la franja se llena, se baja a la siguiente.
+// La hoja donde se anotan los pesos, con el reparto de siempre y sin cuadrícula
+// (2026-10-20). El sistema ya registra los pesos, y de la hoja que se llenaba a
+// mano lo que no gustaba eran los cuadros; lo que sí servía se conserva:
 //
-// Historia: primero cada día ocupaba una franja entera (un día de 2 pesajes
-// dejaba 3 columnas vacías); después se probó fluir en vertical, columna por
-// columna, y Elias lo quería horizontal. Esto es lo que pidió: horizontal y
-// sin columnas desperdiciadas. Nada puede quedar afuera: lo que no entra en
-// una hoja sigue en otra, y los textos largos se achican (estiloResumen).
-// N° va siempre en blanco (número de solicitud que el sistema no tiene).
+//  - Los pesajes van en columnas de 10 ("peso - cantidad"; en Kg solo el peso),
+//    cada una con su subtotal en negrita debajo.
+//  - La hoja se divide en 4 columnas de pesajes y los días van EN HORIZONTAL, uno
+//    al lado del otro: cada día ocupa una columna por cada 10 pesajes, con su
+//    fecha arriba (a lo ancho de sus columnas) y su resumen debajo de su última
+//    columna (To/Kg, Pq o Bo y quién pesó, Nº de solicitud en blanco y %). El día
+//    siguiente sigue en la próxima columna libre de la misma franja; cuando la
+//    franja se llena se baja a la siguiente. Así no se desperdician columnas.
+//
+// Lo que cambió: ya no hay casillas ni líneas alrededor de cada número (solo una
+// línea fina sobre cada subtotal y una separación fina entre días), cada pesaje
+// lleva el N° de su etiqueta, y el recuadro de firmas pasó a una franja de 3
+// renglones al pie (antes ocupaba la esquina derecha y la 4ª columna llegaba
+// solo hasta el renglón 28), junto con el total de la hoja.
+//
+// Historia (no volver atrás): primero cada día ocupaba una franja entera (un día
+// de 2 pesajes dejaba 3 columnas vacías); después se probó fluir en vertical,
+// columna por columna, y Elias lo quería horizontal. Tras pasar a registrar en el
+// sistema se probó una lista de a 4 por renglón sin subtotales (opción B de las
+// propuestas) y el jefe de área pidió volver a los grupos de 10 con su suma, sin
+// los cuadros. Nada puede quedar afuera: lo que no entra en una hoja sigue en
+// otra, y los textos largos se achican.
 const COLUMNAS_REGISTRO = 4
 const ANCHO_COLUMNA_REGISTRO = 8
-// Renglones de la cuadrícula debajo de "Registrar Fecha...": 28 limpios, 7
-// con el recuadro de firmas a la derecha y uno final limpio. El recuadro
-// ocupa las casillas 25-34 y tapa solo la 4ª columna de pesajes: las 3
-// primeras usan los 36 renglones, la 4ª solo los primeros 28.
-const FILAS_CUADRICULA = 36
-const FILAS_SIN_PIE = 28
-const FILAS_PIE = 7
+// 33 renglones de pesajes + 3 del pie = los 36 de la cuadrícula de antes.
+const FILAS_REGISTRO = 33
 const PESAJES_POR_COLUMNA = 10
 const RENGLONES_RESUMEN = 3
+const LINEA_FINA = '0.5pt solid #bbb'
+const LINEA_SUBTOTAL = '0.5pt solid #444'
+const SEPARADOR_DIA = '0.75pt solid #444'
+const MARCO = '1pt solid #000'
+const GRIS_FECHA = '#E7E7E7'
+const GRIS_TOTAL = '#D9D9D9'
 
 // Lo que va en un renglón de UNA columna de pesajes (8 casillas).
 type CeldaRegistro =
@@ -287,73 +278,37 @@ type CeldaRegistro =
   // otras quedan 'cubierta' y no generan casillas.
   | { tipo: 'fecha'; fecha: string; continua: boolean; columnas: number }
   | { tipo: 'cubierta' }
-  | { tipo: 'pesaje'; peso: number; cantidad: number | null }
+  | { tipo: 'pesaje'; numero: number; peso: number; cantidad: number | null }
   | { tipo: 'subtotal'; peso: number; cantidad: number | null }
   | { tipo: 'resumen'; renglon: 1 | 2 | 3; dia: DiaFormularioPt }
 
-// Bordes gruesos de una columna de pesajes en un renglón: el recuadro de
-// cada día (fecha + pesajes + resumen) y, más fino, el del resumen. Así se
-// ve de un vistazo qué pesajes son de qué día (pedido de Elias).
-interface Marco {
-  arriba?: string
-  abajo?: string
-  izquierda?: string
-  derecha?: string
-}
-const MARCO_DIA = '1.5pt solid #000'
-const MARCO_RESUMEN = '1pt solid #000'
-
-// Una hoja: por renglón de la cuadrícula, lo que tiene cada una de las 4
-// columnas de pesajes (null = cuadrícula vacía) y sus bordes gruesos.
-interface Hoja {
+// Una hoja: por renglón, lo que tiene cada una de las 4 columnas de pesajes
+// (null = vacío) y dónde va la separación fina del primer renglón de un día.
+interface HojaRegistro {
   celdas: (CeldaRegistro | null)[][]
-  marcos: Marco[][]
-  // Suma de lo escrito en esta hoja, para "To hoja = ... / Kg = ..." del pie
-  // (pedido de Elias). Sale de los pesajes de la hoja, no de los resúmenes:
-  // un día partido entre dos hojas suma en cada una lo que tiene.
+  separa: boolean[][]
+  // Suma de lo escrito en esta hoja, para el total del pie. Sale de los pesajes
+  // de la hoja, no de los resúmenes: un día partido entre dos hojas suma en
+  // cada una lo suyo.
   pesajes: number
-  toHoja: number
-  kgHoja: number
+  to: number
+  kg: number
 }
 
-function hojaVacia(): Hoja {
+function nuevaHoja(): HojaRegistro {
   return {
-    celdas: Array.from({ length: FILAS_CUADRICULA }, () =>
-      Array<CeldaRegistro | null>(COLUMNAS_REGISTRO).fill(null)
-    ),
-    marcos: Array.from({ length: FILAS_CUADRICULA }, () =>
-      Array.from({ length: COLUMNAS_REGISTRO }, (): Marco => ({}))
-    ),
+    celdas: Array.from({ length: FILAS_REGISTRO }, () => Array<CeldaRegistro | null>(COLUMNAS_REGISTRO).fill(null)),
+    separa: Array.from({ length: FILAS_REGISTRO }, () => Array<boolean>(COLUMNAS_REGISTRO).fill(false)),
     pesajes: 0,
-    toHoja: 0,
-    kgHoja: 0
+    to: 0,
+    kg: 0
   }
 }
 
-/** Marca el borde de un rectángulo de la hoja (renglones y columnas de
- * pesajes, inclusive). */
-function marcarRecuadro(
-  hoja: Hoja,
-  filas: [number, number],
-  columnas: [number, number],
-  borde: string
-): void {
-  for (let f = filas[0]; f <= filas[1]; f++) {
-    for (let c = columnas[0]; c <= columnas[1]; c++) {
-      const m = hoja.marcos[f][c]
-      if (f === filas[0]) m.arriba = borde
-      if (f === filas[1]) m.abajo = borde
-      if (c === columnas[0]) m.izquierda = borde
-      if (c === columnas[1]) m.derecha = borde
-    }
-  }
-}
-
-/** Hasta qué renglón puede bajar una columna: la 4ª choca con el recuadro
- * de firmas; las otras llegan hasta el anteúltimo renglón, porque el último
- * es el del total de la hoja. */
-function limiteColumna(columna: number): number {
-  return columna === COLUMNAS_REGISTRO - 1 ? FILAS_SIN_PIE : FILAS_CUADRICULA - 1
+/** Hasta dónde puede bajar una columna: ahora las 4 llegan hasta el final de la
+ * zona de pesajes (el pie es una franja aparte). */
+function limiteColumna(): number {
+  return FILAS_REGISTRO
 }
 
 /** Número con punto decimal como se escribe en el papel: entre `minimo` y
@@ -378,7 +333,7 @@ function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean): BloqueDia[] 
     const grupo = dia.pesajes.slice(i, i + PESAJES_POR_COLUMNA)
     bloques.push({
       celdas: [
-        ...grupo.map((p): CeldaRegistro => ({ tipo: 'pesaje', peso: p.neto, cantidad: p.cantidad })),
+        ...grupo.map((p): CeldaRegistro => ({ tipo: 'pesaje', numero: p.numero, peso: p.neto, cantidad: p.cantidad })),
         {
           tipo: 'subtotal',
           peso: redondearPeso(grupo.reduce((suma, p) => suma + p.neto, 0)),
@@ -402,26 +357,25 @@ function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean): BloqueDia[] 
  * el bloque más largo. Un día se pone entero en la franja actual si le
  * alcanzan las columnas libres; si no, arranca en una franja nueva, y solo
  * se parte (repitiendo la fecha con "(cont.)") cuando no entra ni en una
- * franja vacía — más de 40 pesajes, o una franja al pie donde la 4ª columna
- * ya no está. Siempre hay al menos una hoja.
+ * franja vacía (más de 40 pesajes). Siempre hay al menos una hoja.
  */
-function lineasRegistro(registros: RegistrosFormularioPt | undefined): Hoja[] {
-  const conCantidad = registros?.conCantidad ?? false
-  const hojas: Hoja[] = [hojaVacia()]
+function repartirRegistro(registros: RegistrosFormularioPt | undefined): HojaRegistro[] {
+  const conCantidad = registros?.conCantidad ?? false // solo suma lo escrito: sin pesajes no hay nada que sumar
+  const hojas: HojaRegistro[] = [nuevaHoja()]
   let inicio = 0 // renglón donde empieza la franja actual (el de las fechas)
   let columna = 0 // próxima columna libre de la franja
   let alto = 0 // renglones que ocupa la franja actual, fecha incluida
 
-  const hoja = (): Hoja => hojas[hojas.length - 1]
+  const hoja = (): HojaRegistro => hojas[hojas.length - 1]
   const entra = (col: number, bloque: BloqueDia): boolean =>
-    col < COLUMNAS_REGISTRO && inicio + 1 + bloque.celdas.length <= limiteColumna(col)
+    col < COLUMNAS_REGISTRO && inicio + 1 + bloque.celdas.length <= limiteColumna()
   const nuevaFranja = (): void => {
     inicio += alto
     columna = 0
     alto = 0
   }
-  const nuevaHoja = (): void => {
-    hojas.push(hojaVacia())
+  const nuevaPagina = (): void => {
+    hojas.push(nuevaHoja())
     inicio = 0
     columna = 0
     alto = 0
@@ -438,20 +392,15 @@ function lineasRegistro(registros: RegistrosFormularioPt | undefined): Hoja[] {
         h.celdas[inicio + 1 + fila][columna + i] = c
         if (c.tipo === 'pesaje') {
           h.pesajes++
-          h.kgHoja = redondearPeso(h.kgHoja + c.peso)
-          h.toHoja = redondearPeso(h.toHoja + (conCantidad ? (c.cantidad ?? 0) : c.peso))
+          h.kg = redondearPeso(h.kg + c.peso)
+          h.to = redondearPeso(h.to + (conCantidad ? (c.cantidad ?? 0) : c.peso))
         }
       })
-      const resumen = bloque.celdas.findIndex((c) => c.tipo === 'resumen')
-      if (resumen >= 0) {
-        const primera = inicio + 1 + resumen
-        marcarRecuadro(h, [primera, primera + RENGLONES_RESUMEN - 1], [columna + i, columna + i], MARCO_RESUMEN)
-      }
       altoDia = Math.max(altoDia, 1 + bloque.celdas.length)
     })
-    // El recuadro del día va después del del resumen: donde coinciden, gana
-    // el más grueso.
-    marcarRecuadro(h, [inicio, inicio + altoDia - 1], [columna, columna + tramo.length - 1], MARCO_DIA)
+    // Una separación fina a la izquierda del día, a todo su alto, para ubicar de
+    // un vistazo qué pesajes son de qué día.
+    for (let f = inicio; f < inicio + altoDia; f++) h.separa[f][columna] = true
     alto = Math.max(alto, altoDia)
     columna += tramo.length
   }
@@ -478,11 +427,11 @@ function lineasRegistro(registros: RegistrosFormularioPt | undefined): Hoja[] {
         nuevaFranja()
       } else if (inicio > 0) {
         // No queda lugar ni para una columna en esta hoja.
-        nuevaHoja()
+        nuevaPagina()
       } else {
-        // Un bloque que no entra en una hoja vacía no puede existir (el
-        // más alto ocupa 1 + 10 + 1 + 3 = 15 renglones de 28), pero si
-        // pasara no hay que colgarse en un bucle infinito.
+        // Un bloque que no entra en una hoja vacía no puede existir (el más alto
+        // ocupa 1 + 10 + 1 + 3 = 15 renglones de 33), pero si pasara no hay que
+        // colgarse en un bucle infinito.
         throw new Error('Un bloque de pesajes no entra en una hoja vacía')
       }
     }
@@ -490,128 +439,165 @@ function lineasRegistro(registros: RegistrosFormularioPt | undefined): Hoja[] {
   return hojas
 }
 
-/** Letra más chica para un resumen que no entra a tamaño normal: nada puede
- * quedar cortado en el papel. `casillas` es el ancho disponible. */
-function estiloResumen(texto: string, casillas: number): string {
-  // ~4.3 pt por carácter en Arial Bold 7.5pt; cada casilla mide ~15 pt.
-  return texto.length * 4.3 > casillas * ANCHO_COLUMNA_PT - 3 ? 'reg-resumen-chico' : 'reg-resumen'
+/** Una celda del registro, con su estilo inline (así sale igual en pantalla, PDF y
+ * Word, que no aplica bien las clases). */
+function tdRegistro(span: number, html: string, css = ''): string {
+  return `<td colspan="${span}" width="${ANCHO_COLUMNA_PX * span}" style="${BASE_CELDA};padding:0 2.5pt;font-size:8pt;white-space:nowrap;overflow:hidden;${css}">${html}</td>`
 }
 
-// Una casilla (o varias unidas) de una columna de pesajes, antes de
-// aplicarle los bordes gruesos del recuadro.
+/** Letra más chica para un texto que no entra en `casillas` casillas: nada
+ * puede quedar cortado en el papel. */
+function ajustarTexto(texto: string, casillas: number, tamano: number, negrita: boolean): string {
+  // ~0.58 y ~0.52 veces el tamaño por carácter, en Arial negrita y normal.
+  const porCaracter = negrita ? 0.58 : 0.52
+  const disponible = casillas * ANCHO_COLUMNA_PT - 5
+  const cabe = disponible / (Math.max(1, texto.length) * porCaracter)
+  return `font-size:${Math.max(5.5, Math.min(tamano, Math.floor(cabe * 2) / 2))}pt;`
+}
+
+// Una casilla (o varias unidas) de una columna de pesajes.
 interface Parte {
-  estilo: string
   casillas: number
   html: string
+  css: string
 }
 
-function resumen(texto: string, casillas: number): Parte {
-  return { estilo: estiloResumen(texto, casillas), casillas, html: esc(texto) }
+function parteResumen(texto: string, casillas: number): Parte {
+  return {
+    casillas,
+    html: esc(texto),
+    css: `background:${GRIS_TOTAL};font-weight:bold;${ajustarTexto(texto, casillas, 7.5, true)}`
+  }
 }
 
-/** Las casillas de una columna de pesajes en un renglón (8, o las de la
- * fecha si abarca varias columnas; ninguna si está cubierta por una fecha). */
-function partesRegistro(c: CeldaRegistro | null, conCantidad: boolean): Parte[] {
-  const vacias = (n: number): Parte[] => Array.from({ length: n }, () => ({ estilo: 'g', casillas: 1, html: '' }))
-  if (c === null) return vacias(ANCHO_COLUMNA_REGISTRO)
+/** Las casillas de una columna de pesajes en un renglón (8, o las de la fecha si
+ * abarca varias columnas; ninguna si está cubierta por una fecha). `conLineas`
+ * solo en el formato en blanco: deja las líneas para escribir a mano. */
+function partesRegistro(c: CeldaRegistro | null, conCantidad: boolean, conLineas: boolean): Parte[] {
+  // Casillas de N° y de peso/cantidad dentro de las 8 de la columna.
+  const nW = conCantidad ? 2 : 3
+  const pW = conCantidad ? 3 : 5
+  const cW = ANCHO_COLUMNA_REGISTRO - nW - pW
+  const derecha = 'text-align:right;'
+  if (c === null) {
+    const linea = conLineas ? `border-bottom:${LINEA_FINA};` : ''
+    return conCantidad
+      ? [{ casillas: nW, html: '', css: linea }, { casillas: pW, html: '', css: linea }, { casillas: cW, html: '', css: linea }]
+      : [{ casillas: nW, html: '', css: linea }, { casillas: pW, html: '', css: linea }]
+  }
   if (c.tipo === 'cubierta') return []
   if (c.tipo === 'fecha') {
     const texto = c.continua ? `${c.fecha} (cont.)` : c.fecha
-    return [{ estilo: 'reg-fecha', casillas: ANCHO_COLUMNA_REGISTRO * c.columnas, html: esc(texto) }]
+    const casillas = ANCHO_COLUMNA_REGISTRO * c.columnas
+    return [
+      {
+        casillas,
+        html: esc(texto),
+        css: `background:${GRIS_FECHA};font-weight:bold;text-align:center;${ajustarTexto(texto, casillas, 8.5, true)}`
+      }
+    ]
   }
   if (c.tipo === 'resumen') {
     const d = c.dia
-    if (c.renglon === 1) return [resumen(`To = ${numero(d.to, 2)}`, 4), resumen(`Kg = ${numero(d.kg, 2, 2)}`, 4)]
+    if (c.renglon === 1) return [parteResumen(`To = ${numero(d.to, 2)}`, 4), parteResumen(`Kg = ${numero(d.kg, 2, 2)}`, 4)]
     if (c.renglon === 2) {
       return [
-        resumen(`${conCantidad ? 'Pq' : 'Bo'} = ${d.paquetes}`, 3),
-        resumen(`Per. = ${d.pesadores.join(', ')}`, 5)
+        parteResumen(`${conCantidad ? 'Pq' : 'Bo'} = ${d.paquetes}`, 3),
+        parteResumen(`Per. = ${d.pesadores.join(', ')}`, 5)
       ]
     }
     const porcentaje = d.porcentaje !== null ? `${Math.round(d.porcentaje)}%` : ''
-    return [resumen('Nº =', 4), resumen(porcentaje, 4)]
+    return [parteResumen('Nº =', 4), parteResumen(porcentaje, 4)]
   }
-  const esSubtotal = c.tipo === 'subtotal'
-  const estilo = esSubtotal ? 'reg-sub' : 'reg-num'
-  const peso: Parte = { estilo, casillas: 3, html: numero(c.peso, esSubtotal ? 2 : 3, 2) }
-  if (!conCantidad || c.cantidad === null) return [peso, ...vacias(5)]
-  const guion = esSubtotal ? vacias(1) : [{ estilo: 'reg-guion', casillas: 1, html: '-' }]
-  return [peso, ...guion, { estilo, casillas: 3, html: numero(c.cantidad, 0) }, ...vacias(1)]
+  if (c.tipo === 'subtotal') {
+    // El subtotal del grupo: en negrita, con una línea fina arriba.
+    const sub = `${derecha}border-top:${LINEA_SUBTOTAL};font-weight:bold;font-size:8.5pt;`
+    return conCantidad
+      ? [
+          { casillas: nW, html: '', css: `border-top:${LINEA_SUBTOTAL};` },
+          { casillas: pW, html: numero(c.peso, 2, 2), css: sub },
+          { casillas: cW, html: c.cantidad !== null ? numero(c.cantidad, 0) : '', css: sub }
+        ]
+      : [
+          { casillas: nW, html: '', css: `border-top:${LINEA_SUBTOTAL};` },
+          { casillas: pW, html: numero(c.peso, 2, 2), css: sub }
+        ]
+  }
+  const peso = `${derecha}font-size:8.5pt;`
+  const n: Parte = { casillas: nW, html: String(c.numero), css: `${derecha}color:#666;font-size:7pt;` }
+  return conCantidad
+    ? [n, { casillas: pW, html: numero(c.peso, 3, 2), css: peso }, { casillas: cW, html: c.cantidad !== null ? numero(c.cantidad, 0) : '', css: peso }]
+    : [n, { casillas: pW, html: numero(c.peso, 3, 2), css: peso }]
 }
 
-/** Una casilla con, además de su estilo, los bordes gruesos del recuadro. En
- * Word van dentro del mismo style inline (no entiende dos declaraciones). */
-function tdMarcado(ctx: Contexto, parte: Parte, extra: string): string {
-  const span = parte.casillas > 1 ? ` colspan="${parte.casillas}"` : ''
-  const ancho = ` width="${ANCHO_COLUMNA_PX * parte.casillas}"`
-  const atributo = ctx.paraWord
-    ? ` style="${BASE_CELDA};${ESTILOS_CELDA[parte.estilo]}${extra ? `;${extra}` : ''}"`
-    : ` class="${parte.estilo}"${extra ? ` style="${extra}"` : ''}`
-  return `<td${span}${ancho}${atributo}>${parte.html}</td>`
-}
-
-function htmlCeldaRegistro(ctx: Contexto, hoja: Hoja, fila: number, columna: number, conCantidad: boolean): string {
-  const c = hoja.celdas[fila][columna]
-  const partes = partesRegistro(c, conCantidad)
-  const marco = hoja.marcos[fila][columna]
-  // Una fecha que abarca varias columnas toma el borde derecho de la última.
-  const ultima = c?.tipo === 'fecha' ? columna + c.columnas - 1 : columna
-  const derecha = hoja.marcos[fila][ultima].derecha
+function htmlCeldaRegistro(hoja: HojaRegistro, fila: number, columna: number, conCantidad: boolean, conLineas: boolean): string {
+  const partes = partesRegistro(hoja.celdas[fila][columna], conCantidad, conLineas)
+  // La separación fina va a la izquierda de la primera casilla del día (menos en
+  // la 1ª columna, donde ya está el marco de la hoja).
+  const separa = hoja.separa[fila][columna] && columna > 0
   return partes
-    .map((parte, i) => {
-      const bordes = [
-        marco.arriba && `border-top:${marco.arriba}`,
-        marco.abajo && `border-bottom:${marco.abajo}`,
-        i === 0 && marco.izquierda && `border-left:${marco.izquierda}`,
-        i === partes.length - 1 && derecha && `border-right:${derecha}`
-      ]
-        .filter(Boolean)
-        .join(';')
-      return tdMarcado(ctx, parte, bordes)
-    })
+    .map((parte, i) => tdRegistro(parte.casillas, parte.html, `${parte.css}${i === 0 && separa ? `border-left:${SEPARADOR_DIA};` : ''}`))
     .join('')
 }
 
-function filasCuadricula(ctx: Contexto, hoja: Hoja, conCantidad: boolean): string {
-  const alto = altoFila(ctx.paraWord ? ALTO_FILA_CUADRICULA_WORD_PT : ALTO_FILA_CUADRICULA_PT)
-  const columnas = (fila: number, cuantas: number): string =>
-    Array.from({ length: cuantas }, (_, c) => htmlCeldaRegistro(ctx, hoja, fila, c, conCantidad)).join('')
-  const sobrante = COLUMNAS - COLUMNAS_REGISTRO * ANCHO_COLUMNA_REGISTRO
-  const completa = (fila: number): string =>
-    `<tr ${alto}>${columnas(fila, COLUMNAS_REGISTRO)}${celdasCuadricula(ctx, sobrante)}</tr>`
-
-  // El recuadro de firmas: lo que va a la derecha de las 3 primeras columnas
-  // de pesajes en cada uno de sus 7 renglones (casillas 25-34).
-  const pie = [
-    `${celda(ctx, 'pie-b', 4)}Verificado Por</td>${celda(ctx, 'b', 6)}</td>`,
-    `${celda(ctx, 'pie-b', 4)}OT Concluida:</td>${celda(ctx, 'franja')}</td>${celda(ctx, 'pie-franja')}Si</td>${celda(ctx, 'b')}</td>${celda(ctx, 'pie-franja')}No</td>${celda(ctx, 'b', 2)}</td>`,
-    // Recuadro alto en blanco (firma / sello): 3 renglones.
-    `${celda(ctx, 'b', 10, 'rowspan="3"')}</td>`,
-    '',
-    '',
-    `${celda(ctx, 'pie-b', 2)}Fecha:</td>${celda(ctx, 'b', 3)}</td>${celda(ctx, 'pie-b', 2)}Hora:</td>${celda(ctx, 'b', 3)}</td>`,
-    `${celda(ctx, 'pie-b', 2)}Area:</td>${celda(ctx, 'b', 8)}</td>`
-  ]
-
-  const filas: string[] = []
-  for (let fila = 0; fila < FILAS_SIN_PIE; fila++) filas.push(completa(fila))
-  for (let i = 0; i < FILAS_PIE; i++) {
-    const fila = FILAS_SIN_PIE + i
-    filas.push(`<tr ${alto}>${columnas(fila, COLUMNAS_REGISTRO - 1)}${pie[i]}</tr>`)
-  }
-  filas.push(hoja.pesajes > 0 ? filaTotalHoja(ctx, hoja, alto) : completa(FILAS_SIN_PIE + FILAS_PIE))
-  return filas.join('\n')
+/** El pie: total de la hoja y el recuadro de firmas en una franja de 3 renglones. */
+function pieRegistro(hoja: HojaRegistro, conCantidad: boolean, alto: string): string {
+  const fila = (celdas: string): string => `<tr ${alto}>${celdas}</tr>`
+  const izquierda = `border-left:${MARCO};`
+  const derecha = `border-right:${MARCO};`
+  const rotulo = 'font-weight:bold;font-size:7.5pt;'
+  const total =
+    hoja.pesajes > 0
+      ? conCantidad
+        ? `To Hoja = ${numero(hoja.to, 2)} &nbsp;&nbsp;&nbsp; Kg = ${numero(hoja.kg, 2, 2)}`
+        : `Kg Hoja = ${numero(hoja.kg, 2, 2)}`
+      : conCantidad
+        ? 'To Hoja = &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Kg ='
+        : 'Kg Hoja ='
+  return [
+    fila(
+      tdRegistro(
+        34,
+        total,
+        `${izquierda}${derecha}border-top:${MARCO};background:${GRIS_TOTAL};font-weight:bold;text-align:center;font-size:8.5pt;`
+      )
+    ),
+    fila(
+      tdRegistro(5, 'Verificado Por:', `${izquierda}border-top:${SEPARADOR_DIA};${rotulo}`) +
+        tdRegistro(12, '', `border-top:${SEPARADOR_DIA};border-bottom:${LINEA_FINA};`) +
+        tdRegistro(3, 'Fecha:', `border-top:${SEPARADOR_DIA};${rotulo}text-align:right;`) +
+        tdRegistro(6, '', `border-top:${SEPARADOR_DIA};border-bottom:${LINEA_FINA};`) +
+        tdRegistro(3, 'Hora:', `border-top:${SEPARADOR_DIA};${rotulo}text-align:right;`) +
+        tdRegistro(5, '', `border-top:${SEPARADOR_DIA};border-bottom:${LINEA_FINA};${derecha}`)
+    ),
+    fila(
+      tdRegistro(5, 'OT Concluida:', `${izquierda}border-bottom:${MARCO};${rotulo}`) +
+        tdRegistro(2, 'Si', `border-bottom:${MARCO};text-align:right;${rotulo}`) +
+        tdRegistro(2, '', `border:${MARCO};`) +
+        tdRegistro(2, 'No', `border-bottom:${MARCO};text-align:right;${rotulo}`) +
+        tdRegistro(2, '', `border:${MARCO};`) +
+        tdRegistro(3, 'Area:', `border-bottom:${MARCO};text-align:right;${rotulo}`) +
+        tdRegistro(8, '', `border-bottom:${MARCO};`) +
+        tdRegistro(10, 'Firma y sello:', `border-bottom:${MARCO};${rotulo}${derecha}`)
+    )
+  ].join('\n')
 }
 
-/** Último renglón: "To hoja = ... / Kg = ..." remarcado y centrado, como lo
- * anotaban a mano al pie del papel. */
-function filaTotalHoja(ctx: Contexto, hoja: Hoja, alto: string): string {
-  const casillas = 6
-  const costado = (COLUMNAS - casillas * 2) / 2
-  return `<tr ${alto}>${celdasCuadricula(ctx, costado)}${celda(ctx, 'reg-total', casillas)}To Hoja = ${numero(
-    hoja.toHoja,
-    2
-  )}</td>${celda(ctx, 'reg-total', casillas)}Kg = ${numero(hoja.kgHoja, 2, 2)}</td>${celdasCuadricula(ctx, costado)}</tr>`
+/** Todos los renglones de una hoja del registro y su pie. Las 4 columnas de 8
+ * casillas van con una casilla de margen a cada lado (1 + 32 + 1 = 34). */
+function filasRegistro(ctx: Contexto, hoja: HojaRegistro, conCantidad: boolean): string {
+  const alto = altoFila(ctx.paraWord ? ALTO_FILA_CUADRICULA_WORD_PT : ALTO_FILA_CUADRICULA_PT)
+  // Sin pesajes (el formato en blanco) los renglones conservan sus líneas para
+  // poder escribir a mano; con pesajes quedan limpios.
+  const enBlanco = hoja.pesajes === 0
+  const filas: string[] = []
+  for (let fila = 0; fila < FILAS_REGISTRO; fila++) {
+    const columnas = Array.from({ length: COLUMNAS_REGISTRO }, (_, c) => htmlCeldaRegistro(hoja, fila, c, conCantidad, enBlanco)).join('')
+    filas.push(
+      `<tr ${alto}>${tdRegistro(1, '', `border-left:${MARCO};`)}${columnas}${tdRegistro(1, '', `border-right:${MARCO};`)}</tr>`
+    )
+  }
+  return `${filas.join('\n')}\n${pieRegistro(hoja, conCantidad, alto)}`
 }
 
 const ESTILOS = `
@@ -654,7 +640,7 @@ ${Object.entries(ESTILOS_CELDA)
  */
 /** Cuántas hojas ocupa el formulario con sus pesajes (al menos 1). */
 export function hojasFormularioPt(datos: DatosFormularioPt = {}): number {
-  return lineasRegistro(datos.registros).length
+  return repartirRegistro(datos.registros).length
 }
 
 export function generarHtmlFormularioPt(
@@ -672,9 +658,11 @@ export function generarHtmlFormularioPt(
     editable: !opciones.paraWord && opciones.editable !== undefined,
     editados: new Set(opciones.editable?.editados ?? [])
   }
-  const hojas = lineasRegistro(datos.registros)
-  const conCantidad = datos.registros?.conCantidad ?? false
-  const elegidas = opciones.soloHoja !== undefined ? [hojas[opciones.soloHoja] ?? hojaVacia()] : hojas
+  const hojas = repartirRegistro(datos.registros)
+  // Sin pesajes cargados (el formato en blanco) se dibujan los dos lugares, peso y
+  // cantidad, salvo que la unidad sea Kg o Bob, donde solo se pesa.
+  const conCantidad = datos.registros?.conCantidad ?? (datos.unidad !== 'Kg' && datos.unidad !== 'Bob')
+  const elegidas = opciones.soloHoja !== undefined ? [hojas[opciones.soloHoja] ?? nuevaHoja()] : hojas
   // El salto va en un div aparte con estilo inline (no en la tabla): Word no
   // respeta page-break-after sobre un <table> — mismo arreglo que formularioMp.
   const cuerpo = elegidas
@@ -687,7 +675,7 @@ export function generarHtmlFormularioPt(
 function tablaFormulario(
   ctx: Contexto,
   datos: DatosFormularioPt,
-  hoja: Hoja,
+  hoja: HojaRegistro,
   conCantidad: boolean
 ): string {
   const items = datos.items ?? []
@@ -750,9 +738,9 @@ ${celda(ctx, 'rot-b', 4)}Entrega Total:</td>
 ${celdaCampo(ctx, 'valor-linea', 6, 'entregaTotal')}${esc(datos.entregaTotal)}</td>
 </tr>
 <tr ${altoFila(ALTO_REGISTRAR_PT)}>
-${celda(ctx, 'registrar', COLUMNAS)}Registrar Fecha, Cantidades y Pesos en letra legible:</td>
+${celda(ctx, 'registrar', COLUMNAS)}Registro de pesos (N&ordm; = N&ordm; de la etiqueta del paquete)</td>
 </tr>
-${filasCuadricula(ctx, hoja, conCantidad)}
+${filasRegistro(ctx, hoja, conCantidad)}
 </tbody>
 </table>`
 }
@@ -806,6 +794,13 @@ export const ROTULO_UNIDAD_PT: Record<UnidadPt, string> = {
   MILLAR: 'Mill',
   BOBINA: 'Bob',
   LAMINA: 'lamina'
+}
+
+/** ¿Cada paquete lleva cantidad además del peso? No en Kg (solo se pesa) ni en
+ * Bob: una bobina es una bobina, se anota solo el peso y cada pesaje cuenta como
+ * una para el avance del pedido (pedido del jefe de área, 2026-10-20). */
+export function llevaCantidad(unidad: UnidadPt): boolean {
+  return unidad !== 'KG' && unidad !== 'BOBINA'
 }
 
 /** En qué se cuenta lo pesado (el To y la cantidad de cada paquete). En una OT
@@ -931,13 +926,13 @@ function datosOriginalesDesdePt(pt: ProductoTerminado, pesajes?: PesajesPt): Dat
 /** Pesajes de la OT agrupados por día, como se escriben en la cuadrícula. */
 function registrosDesdePesajes(unidad: UnidadPt, datos: PesajesPt): RegistrosFormularioPt {
   return {
-    conCantidad: unidad !== 'KG',
+    conCantidad: llevaCantidad(unidad),
     dias: datos.dias.map((dia) => ({
       fecha: formatearFecha(dia.fecha),
       pesajes: datos.pesajes
         .filter((p) => p.fecha === dia.fecha)
         .sort((a, b) => a.numero - b.numero)
-        .map((p) => ({ neto: p.peso_neto, cantidad: p.cantidad })),
+        .map((p) => ({ numero: p.numero, neto: p.peso_neto, cantidad: p.cantidad })),
       to: dia.to,
       kg: dia.kg,
       paquetes: dia.paquetes,

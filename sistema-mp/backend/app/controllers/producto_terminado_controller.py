@@ -311,7 +311,10 @@ def _validar_pesaje(
     producto_terminado: ProductoTerminado, peso_bruto: float, tara: float, cantidad: Optional[float]
 ) -> Optional[float]:
     """Reglas comunes a registrar y corregir un pesaje; devuelve la cantidad a
-    guardar (None en KG, donde la bobina se cuenta por peso)."""
+    guardar. En KG es None: la bobina se cuenta por peso. En BOBINA (el pedido
+    se cuenta en bobinas, ej. OT 220132: 250) tampoco se pide cantidad, solo el
+    peso, pero cada pesaje es UNA bobina: se guarda 1, así el avance cuenta
+    bobinas y no kilos."""
     unidad = producto_terminado.unidad
     if unidad is None:
         raise HTTPException(
@@ -324,6 +327,8 @@ def _validar_pesaje(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La tara tiene que ser menor que el peso bruto.")
     if unidad == "KG":
         return None
+    if unidad == "BOBINA":
+        return 1
     if cantidad is None or cantidad <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Falta la cantidad del paquete.")
     return cantidad
@@ -401,7 +406,8 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
     por día (la "tanda" es automática por fecha) To, Kg, Pq/Bo y los
     pesadores, y el acumulado con su % contra el pedido total.
 
-    To va en bolsas (unidades) en BOLSAS y MILLAR, y en kg netos en KG. El %
+    To va en bolsas (unidades) en BOLSAS y MILLAR, en bobinas (una por
+    pesaje) en BOBINA, y en kg netos en KG. El %
     compara contra el pedido en unidades reales (pedido_total_real: en
     MILLAR, × 1000). Va sin redondear: se redondea al mostrarlo (40.5 → 41,
     como en el papel)."""
@@ -411,6 +417,8 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
     def to_de(pesajes: List[PesajePt]) -> float:
         if unidad == "KG":
             return sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes)
+        if unidad == "BOBINA":
+            return float(len(pesajes))  # una bobina por pesaje, sin importar lo que quedó guardado en cantidad
         return sumar_cantidades(p.cantidad or 0 for p in pesajes)
 
     por_dia: Dict[date, List[PesajePt]] = {}
