@@ -233,7 +233,13 @@ function FilaEntrega({
           </Select>
         </div>
       </div>
-      <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={seleccion} onChange={setSeleccion} />
+      <CampoCantidad
+        unidad={unidad}
+        usaBobinas={usaBobinas}
+        datos={seleccion}
+        onChange={setSeleccion}
+        alEnter={() => !editar.isPending && editar.mutate()}
+      />
       <div className="mt-2 flex flex-col gap-1.5">
         <Label className="text-xs">Nota (opcional)</Label>
         <Input value={observacion} onChange={(e) => setObservacion(e.target.value)} />
@@ -414,7 +420,13 @@ function FilaDevolucion({
           </Select>
         </div>
       )}
-      <CampoCantidad unidad={unidad} usaBobinas={usaBobinas} datos={seleccion} onChange={setSeleccion} />
+      <CampoCantidad
+        unidad={unidad}
+        usaBobinas={usaBobinas}
+        datos={seleccion}
+        onChange={setSeleccion}
+        alEnter={() => !editar.isPending && editar.mutate()}
+      />
       {error && <p className="mt-2 text-destructive">{error}</p>}
       <div className="mt-2 flex gap-2">
         <Button type="button" size="sm" disabled={editar.isPending} onClick={() => editar.mutate()}>

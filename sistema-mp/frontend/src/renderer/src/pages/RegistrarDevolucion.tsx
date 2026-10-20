@@ -288,6 +288,7 @@ function IngresoLibreForm({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (registrar.isPending) return // un segundo Enter mientras guarda no registra otra vez
     if (!materialId) {
       setError('Elegí qué material está entrando a almacén')
       return
@@ -864,6 +865,7 @@ export function RegistrarDevolucion() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (mutation.isPending) return // un segundo Enter mientras guarda no registra otra vez
     const pedidosSeleccionados = Object.entries(seleccion)
     const ingresosSeleccionados = Object.entries(ingresos)
     if (pedidosSeleccionados.length === 0 && ingresosSeleccionados.length === 0) {

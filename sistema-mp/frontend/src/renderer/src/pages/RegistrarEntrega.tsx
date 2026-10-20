@@ -356,6 +356,7 @@ function EntregaLibreForm({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (registrar.isPending) return // un segundo Enter mientras guarda no registra otra vez
     if (!materialId) {
       setError('Elegí qué material se está entregando')
       return
@@ -517,6 +518,7 @@ function PendienteCard({
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (mutation.isPending) return // un segundo Enter mientras guarda no registra otra vez
     if (!form.materialId) {
       setError('Indica a qué material del catálogo corresponde')
       return
@@ -1090,6 +1092,7 @@ export function RegistrarEntrega() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault()
+    if (mutation.isPending) return // un segundo Enter mientras guarda no registra otra vez
     const pedidosSeleccionados = Object.entries(seleccion)
     if (pedidosSeleccionados.length === 0) {
       setError('Selecciona al menos un material')

@@ -24,7 +24,8 @@ export function CampoCantidad({
   usaBobinas = true,
   requerido,
   datos,
-  onChange
+  onChange,
+  alEnter
 }: {
   unidad: string
   // Propiedad del material (Material.usa_bobinas), no se adivina por el
@@ -36,6 +37,9 @@ export function CampoCantidad({
   requerido?: boolean
   datos: BobinasPedido
   onChange: (datos: BobinasPedido) => void
+  // Qué hacer con Enter cuando el campo NO está dentro de un <form> (dentro de uno,
+  // Enter envía el formulario por sí solo).
+  alEnter?: () => void
 }) {
   const total = redondearPeso(datos.bobinas.reduce((acc, b) => acc + (Number(b) || 0), 0))
   const sufijo = requerido === undefined ? '' : requerido ? ' (obligatorio)' : ' (opcional)'
@@ -53,6 +57,7 @@ export function CampoCantidad({
           min={0}
           value={datos.bobinas[0] ?? ''}
           onChange={(e) => onChange({ bobinas: [e.target.value] })}
+          onKeyDown={alApretarTecla}
         />
       </div>
     )
@@ -74,23 +79,16 @@ export function CampoCantidad({
     onChange({ bobinas: copia })
   }
 
-  // Enter pasa a la casilla siguiente (y la deja seleccionada para escribir
-  // encima), en vez de enviar el formulario: pesar 40 bobinas es escribir el
-  // peso y apretar Enter, sin tocar el mouse. Al escribir en la última casilla
-  // ya se agregó sola otra vacía, así que casi siempre hay una "siguiente".
-  // Enter NUNCA envía el formulario desde acá: un Enter de más sobre la última
-  // casilla vacía registraba la entrega entera sin querer.
+  // Tab pasa a la casilla siguiente de un solo toque (los botones X de quitar
+  // están fuera del orden del Tab, ver más abajo) y Enter GUARDA: dentro de un
+  // <form> lo hace el navegador solo; donde no hay <form> (la corrección de un
+  // movimiento en Historial) se llama a `alEnter`. Pedido de Elias (2026-10-20):
+  // el 13/10 Enter pasaba a la casilla siguiente, y el personal pidió volver a que
+  // guarde. Los envíos ignoran un segundo Enter mientras ya están guardando.
   function alApretarTecla(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== 'Enter') return
+    if (e.key !== 'Enter' || e.currentTarget.form) return
     e.preventDefault()
-    const casillas = Array.from(
-      e.currentTarget.closest('[data-campo-bobinas]')?.querySelectorAll<HTMLInputElement>('input[data-bobina]') ?? []
-    )
-    const siguiente = casillas[casillas.indexOf(e.currentTarget) + 1]
-    if (siguiente) {
-      siguiente.focus()
-      siguiente.select()
-    }
+    alEnter?.()
   }
 
   function quitarBobina(i: number) {
