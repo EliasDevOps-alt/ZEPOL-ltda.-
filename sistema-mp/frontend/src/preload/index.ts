@@ -18,7 +18,13 @@ const api = {
   exportarFormularioPdf: (html: string, nombreSugerido: string): Promise<string | null> =>
     ipcRenderer.invoke('formulario:exportarPdf', html, nombreSugerido),
   exportarFormularioWord: (html: string, nombreSugerido: string): Promise<string | null> =>
-    ipcRenderer.invoke('formulario:exportarWord', html, nombreSugerido)
+    ipcRenderer.invoke('formulario:exportarWord', html, nombreSugerido),
+  exportarFormularioExcel: (
+    html: string,
+    nombreSugerido: string,
+    orientacion: 'portrait' | 'landscape'
+  ): Promise<string | null> =>
+    ipcRenderer.invoke('formulario:exportarExcel', html, nombreSugerido, orientacion)
 }
 
 contextBridge.exposeInMainWorld('api', api)

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { FileText, Loader2, Pencil, Printer, Scale, Search, X } from 'lucide-react'
+import { FileText, Loader2, Pencil, Printer, Scale, Search, Sheet, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -62,7 +62,7 @@ function guardarSesion(clave: string, valor: string | null): void {
 
 type Estado =
   | { tipo: 'inactivo' }
-  | { tipo: 'exportando'; formato: 'pdf' | 'word' }
+  | { tipo: 'exportando'; formato: 'pdf' | 'word' | 'excel' }
   | { tipo: 'listo'; ruta: string }
   | { tipo: 'cancelado' }
   | { tipo: 'error'; mensaje: string }
@@ -191,13 +191,15 @@ export function ProductoTerminado() {
 
   const exportando = estado.tipo === 'exportando'
 
-  async function exportar(formato: 'pdf' | 'word'): Promise<void> {
+  async function exportar(formato: 'pdf' | 'word' | 'excel'): Promise<void> {
     setEstado({ tipo: 'exportando', formato })
     try {
       const ruta =
         formato === 'pdf'
           ? await window.api.exportarFormularioPdf(html, nombreArchivo)
-          : await window.api.exportarFormularioWord(generarDocumentoWordFormularioPt(datos), nombreArchivo)
+          : formato === 'excel'
+            ? await window.api.exportarFormularioExcel(html, nombreArchivo, 'portrait')
+            : await window.api.exportarFormularioWord(generarDocumentoWordFormularioPt(datos), nombreArchivo)
       setEstado(ruta ? { tipo: 'listo', ruta } : { tipo: 'cancelado' })
     } catch (error) {
       setEstado({
@@ -319,6 +321,14 @@ export function ProductoTerminado() {
                 <FileText className="h-4 w-4" />
               )}
               Exportar Word
+            </Button>
+            <Button variant="outline" onClick={() => exportar('excel')} disabled={exportando}>
+              {exportando && estado.formato === 'excel' ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sheet className="h-4 w-4" />
+              )}
+              Exportar Excel
             </Button>
           </div>
         </CardHeader>

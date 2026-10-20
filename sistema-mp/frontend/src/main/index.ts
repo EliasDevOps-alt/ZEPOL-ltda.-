@@ -3,6 +3,7 @@ import { join } from 'path'
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import log from 'electron-log/main'
+import { construirExcelDesdeHtml, type OrientacionHoja } from './excelFormulario'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
@@ -109,6 +110,21 @@ async function exportarFormularioWord(
   // Va tal cual, sin BOM: el documento es MHTML y cualquier byte antes de
   // "MIME-Version:" rompe la cabecera. El charset viaja dentro del MIME.
   writeFileSync(filePath, documento, 'utf-8')
+  return filePath
+}
+
+async function exportarFormularioExcel(
+  html: string,
+  nombreSugerido: string,
+  orientacion: OrientacionHoja
+): Promise<string | null> {
+  const { canceled, filePath } = await dialog.showSaveDialog({
+    title: 'Guardar formulario como Excel',
+    defaultPath: join(app.getPath('documents'), `${nombreSugerido}.xlsx`),
+    filters: [{ name: 'Libro de Excel', extensions: ['xlsx'] }]
+  })
+  if (canceled || !filePath) return null
+  writeFileSync(filePath, await construirExcelDesdeHtml(html, orientacion))
   return filePath
 }
 
@@ -263,6 +279,11 @@ app.whenReady().then(() => {
   ipcMain.handle(
     'formulario:exportarWord',
     (_event, html: string, nombreSugerido: string) => exportarFormularioWord(html, nombreSugerido)
+  )
+  ipcMain.handle(
+    'formulario:exportarExcel',
+    (_event, html: string, nombreSugerido: string, orientacion: OrientacionHoja) =>
+      exportarFormularioExcel(html, nombreSugerido, orientacion)
   )
 
   createWindow()
