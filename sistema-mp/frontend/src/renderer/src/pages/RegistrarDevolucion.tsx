@@ -16,6 +16,8 @@ import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn, redondearPeso } from '@renderer/lib/utils'
 import { formatearFecha, hoyISO } from '@renderer/lib/fechas'
+import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
+import { CodigoConLetra, LetraEntrega } from '@renderer/components/LetraEntrega'
 import type { Consumo, Devolucion, Entrega, Material, OtMaterialPendiente } from '@renderer/lib/types'
 
 interface EntradaDevolucion extends BobinasPedido {
@@ -346,6 +348,7 @@ function IngresoLibreForm({
 function PedidoDevolucionCard({
   pedido,
   entrega,
+  letra,
   seleccion,
   onChange,
   onQuitar
@@ -354,6 +357,8 @@ function PedidoDevolucionCard({
   // Si viene, la tarjeta es de ESA entrega (ver FuenteDevolucion): su proceso,
   // máquina, material y lo que queda por devolver salen de ella.
   entrega?: Entrega
+  // (A), (B)… cuando el material tuvo 2 o más entregas en la OT (ver letrasEntrega.ts).
+  letra?: string
   seleccion: SeleccionDevolucion
   onChange: (seleccion: SeleccionDevolucion) => void
   onQuitar: () => void
@@ -446,6 +451,12 @@ function PedidoDevolucionCard({
             </>
           )}
           {materialPrincipal}
+          {letra && (
+            <>
+              {' '}
+              <LetraEntrega letra={letra} />
+            </>
+          )}
           {materialPrincipal !== pedido.codigo_mp && (
             <span className="ml-1.5 text-xs font-normal text-warning">(pedido: {pedido.codigo_mp})</span>
           )}
@@ -625,6 +636,9 @@ export function RegistrarDevolucion() {
     queryFn: () => api.listarEntregas(apiBaseUrl, token, otBuscada!),
     enabled: !!otBuscada
   })
+
+  // Dos o más entregas del mismo material en la OT se rotulan (A), (B)… (ver letrasEntrega.ts).
+  const letras = useMemo(() => letrasDeEntregas(entregas.data ?? []), [entregas.data])
 
   // Las opciones de la lista: un pedido con 2+ entregas se abre en una opción por
   // entrega (cada una con su proceso/máquina/material/hora); el resto, una por
@@ -1022,7 +1036,7 @@ export function RegistrarDevolucion() {
                       <span className="flex flex-wrap items-center gap-2 font-medium">
                         {entregaFuente.proceso} — {entregaFuente.maquina} —{' '}
                         <span className={sustituida ? 'text-warning' : undefined}>
-                          {entregaFuente.codigo_mp_entregado}
+                          <CodigoConLetra codigo={entregaFuente.codigo_mp_entregado} letra={letras.get(entregaFuente.id)} />
                         </span>
                         {sustituida && (
                           <span className="inline-flex items-center gap-1 rounded-full bg-warning/10 px-2 py-0.5 text-xs font-medium text-warning">
@@ -1157,6 +1171,7 @@ export function RegistrarDevolucion() {
                     key={fuente.clave}
                     pedido={fuente.pedido}
                     entrega={fuente.entrega}
+                    letra={fuente.entrega ? letras.get(fuente.entrega.id) : undefined}
                     seleccion={seleccion[fuente.clave]}
                     onChange={(sel) => setSeleccion((prev) => ({ ...prev, [fuente.clave]: sel }))}
                     onQuitar={() => toggleSeleccion(fuente)}

@@ -20,9 +20,10 @@ import {
   formatearFechaHoraCompleta,
   hoyISO,
   mesActualISO,
-  textoDeEntrega,
   ultimoDiaDelMes
 } from '@renderer/lib/fechas'
+import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
+import { CodigoConLetra, LetraEntrega, TextoDeEntrega } from '@renderer/components/LetraEntrega'
 import type { Consumo, Devolucion, Entrega, Material, Proceso } from '@renderer/lib/types'
 
 const ESTILO_ESTADO: Record<Consumo['estado_entrega'], string> = {
@@ -50,9 +51,12 @@ function FilaEntrega({
   materiales,
   materialOptions,
   procesos,
+  letra,
   onCambiado
 }: {
   entrega: Entrega
+  // (A), (B)… cuando el material tuvo 2 o más entregas en la OT (ver letrasEntrega.ts).
+  letra?: string
   // Proceso/máquina del pedido, para saber si esta entrega puntual quedó en
   // uno distinto y para preseleccionar el picker al corregirla.
   pedido: { proceso: string; proceso_id: number; maquina: string; maquina_id: number }
@@ -125,6 +129,12 @@ function FilaEntrega({
         <div className="flex justify-between">
           <span>
             {formatearFechaHora(entrega.fecha, entrega.hora)} · {entrega.codigo_mp_entregado}
+            {letra && (
+              <>
+                {' '}
+                <LetraEntrega letra={letra} />
+              </>
+            )}
             {entrega.codigo_mp_entregado !== entrega.codigo_mp ? (
               <span className="text-warning"> (pedido: {entrega.codigo_mp})</span>
             ) : (
@@ -267,6 +277,7 @@ function FilaDevolucion({
   materiales,
   materialOptions,
   entregasDelPedido = [],
+  letras,
   onCambiado
 }: {
   devolucion: Devolucion
@@ -275,9 +286,12 @@ function FilaDevolucion({
   materialOptions: { value: string; label: string }[]
   // Entregas del pedido, para poder cambiar de cuál entrega es este sobrante.
   entregasDelPedido?: Entrega[]
+  // Letras (A), (B)… de las entregas de la OT, para decir "de la entrega B".
+  letras?: ReadonlyMap<number, string>
   onCambiado: () => void
 }) {
   const { apiBaseUrl } = useConfig()
+
   const { sesion } = useAuth()
   const token = sesion!.token
   const confirmar = useConfirm()
@@ -344,9 +358,14 @@ function FilaDevolucion({
           </span>
         </div>
         <p className="text-muted-foreground">{devolucion.usuario}</p>
-        {textoDeEntrega(devolucion.entrega_fecha, devolucion.entrega_hora, devolucion.fecha) && (
+        {devolucion.entrega_hora && (
           <p className="font-medium text-primary">
-            {textoDeEntrega(devolucion.entrega_fecha, devolucion.entrega_hora, devolucion.fecha)}
+            <TextoDeEntrega
+              entregaFecha={devolucion.entrega_fecha}
+              entregaHora={devolucion.entrega_hora}
+              fechaDevolucion={devolucion.fecha}
+              letra={devolucion.entrega_id != null ? letras?.get(devolucion.entrega_id) : undefined}
+            />
           </p>
         )}
         {devolucion.usa_bobinas && (
@@ -413,7 +432,8 @@ function FilaDevolucion({
               <SelectItem value="ninguna">Sin especificar (del pedido en general)</SelectItem>
               {entregasPosibles.map((e) => (
                 <SelectItem key={e.id} value={String(e.id)}>
-                  {formatearFechaHora(e.fecha, e.hora)} — entregado {e.total_entregado} {unidad}
+                  {formatearFechaHora(e.fecha, e.hora)}
+                  {letras?.get(e.id) ? ` (${letras.get(e.id)})` : ''} — entregado {e.total_entregado} {unidad}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -531,6 +551,8 @@ export function Historial() {
     }
     return mapa
   }, [consumo.data])
+
+  const letras = useMemo(() => letrasDeEntregas(entregas.data ?? []), [entregas.data])
 
   const entregasPorPedido = useMemo(() => {
     const mapa = new Map<number, typeof entregas.data>()
@@ -742,8 +764,26 @@ export function Historial() {
                   // pedía la OT queda en la etiqueta ⇄ (igual que en Registro
                   // SID y Consultar OT). Antes era al revés y parecía que lo
                   // entregado era el código del pedido.
-                  const materialesEntregados = [...new Set(susEntregas.map((e) => e.codigo_mp_entregado))]
-                  const tituloMaterial = materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
+                  const materialesEntregados = [
+                    ...new Map(
+                      susEntregas.map(
+                        (e) =>
+                          [
+                            `${e.codigo_mp_entregado}|${letras.get(e.id) ?? ''}`,
+                            { codigo: e.codigo_mp_entregado, letra: letras.get(e.id) }
+                          ] as const
+                      )
+                    ).values()
+                  ]
+                  const tituloMaterial =
+                    materialesEntregados.length > 0
+                      ? materialesEntregados.map((m, i) => (
+                          <span key={`${m.codigo}|${m.letra ?? ''}`}>
+                            {i > 0 && ' / '}
+                            <CodigoConLetra codigo={m.codigo} letra={m.letra} />
+                          </span>
+                        ))
+                      : pedido.codigo_mp
                   return (
                     <Card key={pedido.ot_material_id}>
                       <CardHeader className="flex-row items-start justify-between">
@@ -846,6 +886,7 @@ export function Historial() {
                                   materiales={materiales.data ?? []}
                                   materialOptions={materialOptions}
                                   procesos={procesos.data ?? []}
+                                  letra={letras.get(e.id)}
                                   onCambiado={alCorregirMovimiento}
                                 />
                               ))}
@@ -876,6 +917,7 @@ export function Historial() {
                                   materiales={materiales.data ?? []}
                                   materialOptions={materialOptions}
                                   entregasDelPedido={susEntregas}
+                                  letras={letras}
                                   onCambiado={alCorregirMovimiento}
                                 />
                               ))}

@@ -19,6 +19,8 @@ import * as api from '@renderer/lib/api'
 import { ApiError } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
 import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
+import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
+import { CodigoConLetra } from '@renderer/components/LetraEntrega'
 import type { Consumo, Entrega, Material, OtMaterialPendiente, Proceso } from '@renderer/lib/types'
 
 interface EntradaMaterial extends BobinasPedido {
@@ -922,6 +924,9 @@ export function RegistrarEntrega() {
   // en planta — se registran en Crear OT, pero no aparecen aquí.
   const pedidosVisibles = useMemo(() => pedidos.data?.filter((p) => !p.es_tinta), [pedidos.data])
 
+  // Dos o más entregas del mismo material en la OT se rotulan (A), (B)… (ver letrasEntrega.ts).
+  const letras = useMemo(() => letrasDeEntregas(entregas.data ?? []), [entregas.data])
+
   // Las opciones de la lista: un pedido con 2+ entregas se abre en una opción por
   // ENTREGA (cada una con su proceso, máquina, material y hora — aunque dos hayan
   // ido al mismo proceso y máquina, la hora las distingue); con 0 o 1 entrega,
@@ -1131,10 +1136,19 @@ export function RegistrarEntrega() {
                   {confirmacion.usa_bobinas
                     ? `${confirmacion.bobinas.length} ${confirmacion.bobinas.length === 1 ? 'bobina' : 'bobinas'} · `
                     : ''}
-                  {confirmacion.total_entregado} {confirmacion.unidad} de {confirmacion.codigo_mp}
-                  {confirmacion.codigo_mp_entregado !== confirmacion.codigo_mp
-                    ? ` — se entregó como ${confirmacion.codigo_mp_entregado}`
-                    : ''}{' '}
+                  {confirmacion.total_entregado} {confirmacion.unidad} de{' '}
+                  {confirmacion.codigo_mp_entregado !== confirmacion.codigo_mp ? (
+                    confirmacion.codigo_mp
+                  ) : (
+                    <CodigoConLetra codigo={confirmacion.codigo_mp} letra={letras.get(confirmacion.id)} />
+                  )}
+                  {confirmacion.codigo_mp_entregado !== confirmacion.codigo_mp && (
+                    <>
+                      {' '}
+                      — se entregó como{' '}
+                      <CodigoConLetra codigo={confirmacion.codigo_mp_entregado} letra={letras.get(confirmacion.id)} />
+                    </>
+                  )}{' '}
                   ({confirmacion.proceso} · {confirmacion.maquina}).
                 </p>
                 {confirmacion.pedido_creado && (
@@ -1233,9 +1247,26 @@ export function RegistrarEntrega() {
                 ]
                 // El principal es lo que REALMENTE se entregó; el código que
                 // pedía la OT va en la etiqueta "pedido: X".
-                const materialesEntregados = [...new Set(susEntregas.map((e) => e.codigo_mp_entregado))]
+                const materialesEntregados = [
+                  ...new Map(
+                    susEntregas.map(
+                      (e) =>
+                        [
+                          `${e.codigo_mp_entregado}|${letras.get(e.id) ?? ''}`,
+                          { codigo: e.codigo_mp_entregado, letra: letras.get(e.id) }
+                        ] as const
+                    )
+                  ).values()
+                ]
                 const tituloMaterial =
-                  materialesEntregados.length > 0 ? materialesEntregados.join(' / ') : pedido.codigo_mp
+                  materialesEntregados.length > 0
+                    ? materialesEntregados.map((m, i) => (
+                        <span key={`${m.codigo}|${m.letra ?? ''}`}>
+                          {i > 0 && ' / '}
+                          <CodigoConLetra codigo={m.codigo} letra={m.letra} />
+                        </span>
+                      ))
+                    : pedido.codigo_mp
                 // Donde se entregó (la última vez); si todavía no hay entregas, donde está el pedido.
                 const ultima = susEntregas.at(-1)
                 const tituloProceso = ultima ? ultima.proceso : pedido.proceso

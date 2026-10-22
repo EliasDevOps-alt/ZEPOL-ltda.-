@@ -11,6 +11,8 @@ import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
 import { formatearFecha } from '@renderer/lib/fechas'
+import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
+import { CodigoConLetra, LetraEntrega } from '@renderer/components/LetraEntrega'
 import { redondearPeso } from '@renderer/lib/utils'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
@@ -37,7 +39,7 @@ function DesgloseHoras({
   conHora = false
 }: {
   total: string
-  items: { clave: string; texto: string }[]
+  items: { clave: string; texto: React.ReactNode }[]
   // En una fila que ya es de UNA entrega se muestra su hora aunque sea una sola línea.
   conHora?: boolean
 }) {
@@ -132,14 +134,8 @@ export function Consulta() {
     enabled: !!otBuscada
   })
 
-  const entregadosPorPedido = useMemo(() => {
-    const mapa = new Map<number, string[]>()
-    for (const e of entregas.data ?? []) {
-      const actuales = mapa.get(e.ot_material_id) ?? []
-      if (!actuales.includes(e.codigo_mp_entregado)) mapa.set(e.ot_material_id, [...actuales, e.codigo_mp_entregado])
-    }
-    return mapa
-  }, [entregas.data])
+  // Dos o más entregas del mismo material en la OT se rotulan (A), (B)… (ver letrasEntrega.ts).
+  const letras = useMemo(() => letrasDeEntregas(entregas.data ?? []), [entregas.data])
 
   // Los ingresos a almacén de un material fabricado que todavía no tiene
   // pedido (ver "Registrar ingreso" en Registrar Devolución) no existen en
@@ -266,9 +262,19 @@ export function Consulta() {
                       return {
                         clave: `d${d.id}`,
                         // Dentro de una fila de destino ya se sabe de cuál entrega es.
-                        texto:
-                          `${formatearFecha(d.fecha)} ${d.hora.slice(0, 5)} · ${d.total_devuelto} ${row.unidad}` +
-                          (deEntrega && !destino ? ` (de la entrega de las ${deEntrega.hora.slice(0, 5)})` : '')
+                        texto: (
+                          <>
+                            {`${formatearFecha(d.fecha)} ${d.hora.slice(0, 5)} · ${d.total_devuelto} ${row.unidad}`}
+                            {deEntrega && !destino && letras.has(deEntrega.id) && (
+                              <>
+                                {' '}
+                                (de la entrega <LetraEntrega letra={letras.get(deEntrega.id) as string} conParentesis={false} />,{' '}
+                                {deEntrega.hora.slice(0, 5)})
+                              </>
+                            )}
+                            {deEntrega && !destino && !letras.has(deEntrega.id) && ` (de la entrega de las ${deEntrega.hora.slice(0, 5)})`}
+                          </>
+                        )
                       }
                     })
                   const suma = (lista: { total_entregado?: number; total_devuelto?: number }[], campo: 'total_entregado' | 'total_devuelto') =>
@@ -279,13 +285,13 @@ export function Consulta() {
                   const maquina = sinEntrega ? '—' : (destino?.maquina ?? ultima?.maquina ?? row.maquina)
 
                   // Material: el que REALMENTE salió (con ⇄ si no es el del pedido).
+                  const entregasDelPedido = entregasPorPedido.get(row.ot_material_id) ?? []
                   const materiales = destino
-                    ? [destino.material]
-                    : (() => {
-                        const entregados = entregadosPorPedido.get(row.ot_material_id) ?? []
-                        return entregados.length > 0 ? entregados : [row.codigo_mp]
-                      })()
-                  const sustituido = !sinEntrega && materiales.some((c) => c !== row.codigo_mp)
+                    ? [{ codigo: destino.material, letra: letras.get(destino.entregas[0].id) }]
+                    : entregasDelPedido.length > 0
+                      ? entregasDelPedido.map((e) => ({ codigo: e.codigo_mp_entregado, letra: letras.get(e.id) }))
+                      : [{ codigo: row.codigo_mp, letra: undefined as string | undefined }]
+                  const sustituido = !sinEntrega && materiales.some((m) => m.codigo !== row.codigo_mp)
 
                   return (
                     <tr key={fila.clave} className="border-b border-border last:border-0">
@@ -301,9 +307,12 @@ export function Consulta() {
                           </>
                         ) : (
                           <>
-                            {materiales.map((c) => (
-                              <div key={c} className={cn('whitespace-nowrap', c !== row.codigo_mp && 'text-warning')}>
-                                {c}
+                            {materiales.map((m) => (
+                              <div
+                                key={`${m.codigo}|${m.letra ?? ''}`}
+                                className={cn('whitespace-nowrap', m.codigo !== row.codigo_mp && 'text-warning')}
+                              >
+                                <CodigoConLetra codigo={m.codigo} letra={m.letra} />
                               </div>
                             ))}
                             {sustituido && (

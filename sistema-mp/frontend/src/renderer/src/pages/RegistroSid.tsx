@@ -15,9 +15,10 @@ import {
   formatearFechaHoraCompleta,
   hoyISO,
   mesActualISO,
-  textoDeEntrega,
   ultimoDiaDelMes
 } from '@renderer/lib/fechas'
+import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
+import { LetraEntrega, TextoDeEntrega } from '@renderer/components/LetraEntrega'
 import type { Consumo, Devolucion, Entrega } from '@renderer/lib/types'
 
 type ModoFecha = 'dia' | 'mes' | 'todos'
@@ -50,7 +51,7 @@ interface FilaTabla {
   // Código que pedía la OT (para el tooltip del ícono de sustitución).
   pedidoCodigo: string
   // "de la entrega de las 11:00" cuando el sobrante dice de cuál entrega es.
-  deEntrega: string | null
+  deEntrega: React.ReactNode
   cantidad: string
   // Peso de cada bobina registrada (vacío si el material no se entrega en bobinas).
   bobinas: number[]
@@ -163,6 +164,8 @@ export function RegistroSid() {
     queryKey: ['entregas-todas'],
     queryFn: () => api.listarEntregas(apiBaseUrl, token)
   })
+  // Dos o más entregas del mismo material en la OT se rotulan (A), (B)… (ver letrasEntrega.ts).
+  const letras = useMemo(() => letrasDeEntregas(entregas.data ?? []), [entregas.data])
   const devoluciones = useQuery({
     queryKey: ['devoluciones-todas'],
     queryFn: () => api.listarDevolucionesPorOt(apiBaseUrl, token)
@@ -428,7 +431,14 @@ export function RegistroSid() {
       material: d.codigo_mp,
       sustituido: !!pedido && d.codigo_mp !== pedido.codigo_mp,
       pedidoCodigo: pedido?.codigo_mp ?? '',
-      deEntrega: textoDeEntrega(d.entrega_fecha, d.entrega_hora, d.fecha),
+      deEntrega: d.entrega_hora ? (
+        <TextoDeEntrega
+          entregaFecha={d.entrega_fecha}
+          entregaHora={d.entrega_hora}
+          fechaDevolucion={d.fecha}
+          letra={d.entrega_id != null ? letras.get(d.entrega_id) : undefined}
+        />
+      ) : null,
       cantidad: `${d.total_devuelto} ${unidad}`,
       bobinas: d.usa_bobinas ? d.bobinas : [],
       fecha: formatearFechaHora(d.fecha, d.hora),
@@ -458,7 +468,11 @@ export function RegistroSid() {
               material: e.codigo_mp_entregado,
               sustituido: e.codigo_mp_entregado !== p.codigo_mp,
               pedidoCodigo: p.codigo_mp,
-              deEntrega: null,
+              deEntrega: letras.has(e.id) ? (
+                <>
+                  entrega <LetraEntrega letra={letras.get(e.id) as string} conParentesis={false} />
+                </>
+              ) : null,
               cantidad: `${e.total_entregado} ${p.unidad}`,
               bobinas: e.usa_bobinas ? e.bobinas : [],
               fecha: formatearFechaHora(e.fecha, e.hora),
@@ -479,7 +493,7 @@ export function RegistroSid() {
       for (const d of ordenar(g.ingresosSueltos)) filas.push(deDevolucion(d, d.unidad))
     }
     return filas
-  }, [pestana, grupos, gruposIngresos, entregasPorPedido, devolucionesPorPedido])
+  }, [pestana, grupos, gruposIngresos, entregasPorPedido, devolucionesPorPedido, letras])
 
   const hayResultados = pestana === 'ingresados' ? gruposIngresos.length > 0 : grupos.length > 0
 
@@ -662,6 +676,7 @@ export function RegistroSid() {
                 entregasPorPedido={entregasPorPedido}
                 devolucionesPorPedido={devolucionesPorPedido}
                 devolucionesTodasPorPedido={devolucionesTodasPorPedido}
+                letras={letras}
                 marcarEntregaSid={marcarEntregaSid}
                 marcarDevolucionSid={marcarDevolucionSid}
               />
@@ -815,6 +830,7 @@ function GrupoOt({
   entregasPorPedido,
   devolucionesPorPedido,
   devolucionesTodasPorPedido,
+  letras,
   marcarEntregaSid,
   marcarDevolucionSid
 }: {
@@ -827,6 +843,8 @@ function GrupoOt({
   entregasPorPedido: Map<number, Entrega[]>
   devolucionesPorPedido: Map<number, Devolucion[]>
   devolucionesTodasPorPedido: Map<number, Devolucion[]>
+  // Letras (A), (B)… de las entregas de la OT (ver letrasEntrega.ts).
+  letras: ReadonlyMap<number, string>
   marcarEntregaSid: MutacionSid
   marcarDevolucionSid: MutacionSid
 }) {
@@ -870,6 +888,7 @@ function GrupoOt({
               susEntregas={entregasPorPedido.get(p.ot_material_id) ?? []}
               susDevoluciones={devolucionesPorPedido.get(p.ot_material_id) ?? []}
               todasSusDevoluciones={devolucionesTodasPorPedido.get(p.ot_material_id) ?? []}
+              letras={letras}
               marcarEntregaSid={marcarEntregaSid}
               marcarDevolucionSid={marcarDevolucionSid}
             />
@@ -995,12 +1014,15 @@ function FilaMaterial({
   susEntregas,
   susDevoluciones,
   todasSusDevoluciones,
+  letras,
   marcarEntregaSid,
   marcarDevolucionSid
 }: {
   pedido: Consumo
   pestana: Pestana
   susEntregas: Entrega[]
+  // Letras (A), (B)… de las entregas de la OT (ver letrasEntrega.ts).
+  letras: ReadonlyMap<number, string>
   // Las del rango de fecha elegido (lo que se lista) y todas las del pedido
   // (para que el Completo/Pendiente de cada sección no dependa del día visto).
   susDevoluciones: Devolucion[]
@@ -1046,10 +1068,20 @@ function FilaMaterial({
           key={e.id}
           fecha={formatearFechaHora(e.fecha, e.hora)}
           etiqueta={
-            e.codigo_mp_entregado !== pedido.codigo_mp ? (
-              <span className="text-warning">
-                {e.codigo_mp_entregado} (pedido: {pedido.codigo_mp})
-              </span>
+            letras.has(e.id) || e.codigo_mp_entregado !== pedido.codigo_mp ? (
+              <>
+                {letras.has(e.id) && (
+                  <span className="font-medium text-primary">
+                    entrega <LetraEntrega letra={letras.get(e.id) as string} conParentesis={false} />
+                  </span>
+                )}
+                {letras.has(e.id) && e.codigo_mp_entregado !== pedido.codigo_mp && ' · '}
+                {e.codigo_mp_entregado !== pedido.codigo_mp && (
+                  <span className="text-warning">
+                    {e.codigo_mp_entregado} (pedido: {pedido.codigo_mp})
+                  </span>
+                )}
+              </>
             ) : null
           }
           cantidad={e.total_entregado}
@@ -1109,7 +1141,14 @@ function FilaMaterial({
                   </span>
                 )}
                 {d.entrega_id !== null && (
-                  <span className="text-primary">{textoDeEntrega(d.entrega_fecha, d.entrega_hora, d.fecha)}</span>
+                  <span className="text-primary">
+                    <TextoDeEntrega
+                      entregaFecha={d.entrega_fecha}
+                      entregaHora={d.entrega_hora}
+                      fechaDevolucion={d.fecha}
+                      letra={d.entrega_id != null ? letras.get(d.entrega_id) : undefined}
+                    />
+                  </span>
                 )}
               </>
             ) : null
