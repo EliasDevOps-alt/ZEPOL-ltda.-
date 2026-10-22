@@ -47,6 +47,26 @@ def _validar_entrega_de_la_devolucion(db, entrega_id, ot_material, material, es_
     return entrega.id
 
 
+def _entrega_unica_sin_duda(db, ot_material, material, es_ingreso_produccion) -> Optional[int]:
+    """Si el sobrante no dice de cuál entrega es pero el pedido tiene UNA sola
+    entrega, y es del mismo material que se devuelve, de ahí tiene que haber
+    salido: no hay otra posible, así que se vincula sola. Sin esto, la pantalla
+    de devolución (que con 0 o 1 entrega muestra una única opción, la del
+    pedido) lo dejaba sin vínculo, y cuando después llegaba una segunda entrega
+    Consultar OT lo mostraba como un tercero, "devuelto sin indicar entrega"
+    (OT 220384: 162.4 kg devueltos entre dos entregas del BOPP20620).
+
+    Con 2 o más entregas, o con otro material, sigue siendo opcional y no se
+    adivina. Solo se usa al REGISTRAR: al corregir una devolución quitar el
+    vínculo tiene que seguir siendo posible."""
+    if es_ingreso_produccion or ot_material is None:
+        return None
+    entregas = db.scalars(select(Entrega).where(Entrega.ot_material_id == ot_material.id)).all()
+    if len(entregas) == 1 and entregas[0].material_id == material.id:
+        return entregas[0].id
+    return None
+
+
 def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.DevolucionCreate) -> Devolucion:
     if (data.ot_material_id is None) == (data.pendiente_id is None):
         raise HTTPException(
@@ -76,6 +96,8 @@ def registrar_devolucion(db: Session, usuario: Usuario, data: schemas.Devolucion
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Material no encontrado")
 
     entrega_id = _validar_entrega_de_la_devolucion(db, data.entrega_id, ot_material, material, data.es_ingreso_produccion)
+    if entrega_id is None:
+        entrega_id = _entrega_unica_sin_duda(db, ot_material, material, data.es_ingreso_produccion)
 
     # No se bloquea si la cantidad supera lo entregado registrado en el
     # sistema: el registro de entregas puede estar incompleto o el conteo
