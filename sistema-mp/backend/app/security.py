@@ -4,12 +4,13 @@ import os
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
 from .database import get_db
+from .services import actividad
 from .models import Usuario
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "dev-secret-change-me")
@@ -32,7 +33,9 @@ def create_access_token(usuario_id: int) -> str:
     return jwt.encode({"sub": str(usuario_id), "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def get_current_usuario(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> Usuario:
+def get_current_usuario(
+    request: Request, token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)
+) -> Usuario:
     credenciales_invalidas = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Credenciales inválidas",
@@ -47,6 +50,8 @@ def get_current_usuario(token: str = Depends(oauth2_scheme), db: Session = Depen
     usuario = db.get(Usuario, usuario_id)
     if usuario is None or not usuario.activo:
         raise credenciales_invalidas
+    # Quién está usando el sistema ahora (ver services/actividad.py).
+    actividad.registrar(usuario.id, usuario.inicial, usuario.nombre, request.client.host if request.client else None)
     return usuario
 
 

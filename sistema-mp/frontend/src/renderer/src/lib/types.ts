@@ -24,6 +24,16 @@ export interface UsuarioLogin {
   nombre: string
 }
 
+export interface UsuarioConectado {
+  usuario_id: number
+  inicial: string
+  nombre: string
+  // Nombre de la PC si se pudo resolver; si no, solo la IP.
+  pc: string | null
+  ip: string
+  segundos: number
+}
+
 export interface UsuarioAdmin {
   id: number
   inicial: string
@@ -645,7 +655,15 @@ export interface DiaPesajePt {
   fecha: string
   // Pq (bolsas/millar) o Bo (kg).
   paquetes: number
-  // Bolsas en BOLSAS/MILLAR; peso neto en KG.
+  // Suma de bobinas de los pesajes del día (KG y BOBINA).
+  bobinas: number
+  // N° que dio el SID a este día de la OT; null = todavía no registrado.
+  numero_sid: string | null
+  // Se tocaron pesajes del día después de anotar el N°: hay que revisar.
+  sid_revisar: boolean
+  sid_registrado_por: string | null
+  sid_registrado_en: string | null
+  // Bolsas en BOLSAS/MILLAR; bobinas en BOBINA; peso neto en KG.
   to: number
   kg: number
   pesadores: string[]
@@ -654,11 +672,25 @@ export interface DiaPesajePt {
   porcentaje_acumulado: number | null
 }
 
+/** Un día pesado de una OT y su estado en el SID (lista de pendientes). */
+export interface SidDiaPt {
+  numero_ot: string
+  cliente: string | null
+  fecha: string
+  pesajes: number
+  kg: number
+  numero_sid: string | null
+  revisar: boolean
+  registrado_por: string | null
+  registrado_en: string | null
+}
+
 export interface PesajesPt {
   pesajes: PesajePt[]
   dias: DiaPesajePt[]
   total_to: number
   total_kg: number
   total_paquetes: number
+  total_bobinas: number
   porcentaje: number | null
 }

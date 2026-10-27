@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { FileText, Loader2, Pencil, Printer, Scale, Search, Sheet, X } from 'lucide-react'
+import { FileText, ListChecks, Loader2, Pencil, Printer, Scale, Search, Sheet, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
@@ -19,6 +19,7 @@ import type { ProductoTerminado as ProductoTerminadoDatos } from '@renderer/lib/
 import { ConfirmarUnidadPt } from '@renderer/components/ConfirmarUnidadPt'
 import { CorreccionesFormularioPt } from '@renderer/components/CorreccionesFormularioPt'
 import { RegistroPesoPt } from '@renderer/components/RegistroPesoPt'
+import { SidPendientesPt } from '@renderer/components/SidPendientesPt'
 import { VisorHojas } from '@renderer/components/VisorHojas'
 import { cn } from '@renderer/lib/utils'
 
@@ -34,7 +35,7 @@ const PAGINA_ALTO_PX = 1056
 const MARGEN_VERTICAL_PX = 69
 const MARGEN_HORIZONTAL_PX = 62
 
-type Pestana = 'formulario' | 'peso'
+type Pestana = 'formulario' | 'peso' | 'sid'
 
 // La OT abierta y la pestaña se recuerdan mientras dure la sesión de la app:
 // al ir a otra pantalla y volver, se sigue en la misma OT (pedido de Elias).
@@ -77,7 +78,7 @@ export function ProductoTerminado() {
   // null = formato en blanco (para imprimir y llenar a mano, como antes).
   const [pt, setPt] = useState<ProductoTerminadoDatos | null>(null)
   const [pestana, setPestana] = useState<Pestana>(() =>
-    leerSesion(CLAVE_PESTANA) === 'peso' ? 'peso' : 'formulario'
+    leerSesion(CLAVE_PESTANA) === 'peso' ? 'peso' : leerSesion(CLAVE_PESTANA) === 'sid' ? 'sid' : 'formulario'
   )
 
   const abrir = useMutation({
@@ -122,6 +123,24 @@ export function ProductoTerminado() {
   function alEditarHoja(clave: string, texto: string): Promise<unknown> {
     const actual = ptRef.current
     if (!actual) return Promise.resolve()
+    // La casilla "Nº =" de un día no es una corrección del formulario: es el N°
+    // real que dio el SID, y se guarda aparte (clave "sid.AAAA-MM-DD").
+    if (clave.startsWith('sid.')) {
+      if (texto !== '' && !/^[0-9]+$/.test(texto)) {
+        setErrorEdicion('El N° del SID son solo números.')
+        return Promise.reject(new Error('N° del SID inválido'))
+      }
+      return api
+        .fijarSidDiaPt(apiBaseUrl, token, actual.numero_ot, clave.slice(4), texto)
+        .then(() => {
+          setErrorEdicion(null)
+          return pesajes.refetch()
+        })
+        .catch((error: unknown) => {
+          setErrorEdicion(error instanceof Error ? error.message : String(error))
+          throw error
+        })
+    }
     const nuevas = edicionesTrasEditar({ ...actual, ediciones: edicionesRef.current }, clave, texto)
     edicionesRef.current = nuevas
     enVueloRef.current++
@@ -241,7 +260,8 @@ export function ProductoTerminado() {
               {(
                 [
                   ['formulario', 'Formulario de ingreso', FileText],
-                  ['peso', 'Registro de peso', Scale]
+                  ['peso', 'Registro de peso', Scale],
+                  ['sid', 'SID de pesajes', ListChecks]
                 ] as const
               ).map(([valor, etiqueta, Icono]) => (
                 <button
@@ -300,6 +320,15 @@ export function ProductoTerminado() {
             Busca una OT para registrar sus pesajes.
           </p>
         ))}
+
+      {pestana === 'sid' && (
+        <SidPendientesPt
+          onAbrirOt={(numero) => {
+            abrir.mutate(numero)
+            cambiarPestana('peso')
+          }}
+        />
+      )}
 
       {pestana === 'formulario' && (
       <Card>

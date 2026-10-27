@@ -416,6 +416,21 @@ CREATE TABLE pesajes_pt (
     CHECK (tara < peso_bruto)
 );
 
+-- N° que el SID asigna a un día pesado de una OT. Lo anota una persona (no lo
+-- calcula el sistema): sin fila, ese día todavía no se registró en el SID.
+-- `revisar` = se agregó, corrigió o borró un pesaje de ese día DESPUÉS de
+-- anotar el N°: hay que revisar si el SID quedó al día.
+CREATE TABLE pt_sid_dias (
+    id                     SERIAL PRIMARY KEY,
+    producto_terminado_id  INTEGER     NOT NULL REFERENCES productos_terminados(id) ON DELETE CASCADE,
+    fecha                  DATE        NOT NULL,
+    numero_sid             VARCHAR(20) NOT NULL CHECK (numero_sid ~ '^[0-9]+$'),
+    revisar                BOOLEAN     NOT NULL DEFAULT FALSE,
+    registrado_por_id      INTEGER     REFERENCES usuarios(id),
+    registrado_en          TIMESTAMP   NOT NULL DEFAULT now(),
+    UNIQUE (producto_terminado_id, fecha)
+);
+
 -- ============================================================
 -- Vista de consumo neto por pedido (material dentro de una OT+proceso)
 -- ============================================================

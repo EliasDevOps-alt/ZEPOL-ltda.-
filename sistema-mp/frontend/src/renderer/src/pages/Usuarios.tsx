@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { KeyRound, Pencil, Plus, X } from 'lucide-react'
+import { KeyRound, Monitor, Pencil, Plus, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -43,6 +43,67 @@ const FORM_VACIO: FormState = {
   activo: true,
   password: '',
   modulosRestringidos: []
+}
+
+const MINUTOS_CONECTADO = [5, 15, 30]
+
+function haceCuanto(segundos: number): string {
+  if (segundos < 60) return 'hace instantes'
+  const minutos = Math.round(segundos / 60)
+  return `hace ${minutos} min`
+}
+
+/** Quién usó el sistema hace poco y desde qué PC. Sirve para saber si se puede
+ * reiniciar el servidor. Es una foto en memoria del backend: tras un reinicio
+ * arranca vacía y se va llenando a medida que las estaciones hacen peticiones. */
+function Conectados() {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const token = sesion!.token
+  const [minutos, setMinutos] = useState(5)
+
+  const conectados = useQuery({
+    queryKey: ['usuarios-conectados', minutos],
+    queryFn: () => api.listarUsuariosConectados(apiBaseUrl, token, minutos),
+    refetchInterval: 15000
+  })
+
+  return (
+    <Card className="mb-6">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Monitor className="h-4 w-4" />
+          Conectados ahora
+          {conectados.data && <span className="text-muted-foreground">({conectados.data.length})</span>}
+        </CardTitle>
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Actividad en los últimos</span>
+          {MINUTOS_CONECTADO.map((m) => (
+            <Button key={m} size="sm" variant={minutos === m ? 'default' : 'outline'} onClick={() => setMinutos(m)}>
+              {m} min
+            </Button>
+          ))}
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {conectados.isError && <p className="text-sm text-destructive">No se pudo cargar quién está conectado.</p>}
+        {conectados.data && conectados.data.length === 0 && (
+          <p className="text-sm text-muted-foreground">
+            Nadie con actividad en los últimos {minutos} min. Tras reiniciar el servidor esta lista parte vacía y se llena
+            cuando las estaciones vuelven a pedir datos.
+          </p>
+        )}
+        {conectados.data?.map((c) => (
+          <div key={c.usuario_id} className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-border px-3 py-2 text-sm">
+            <strong>{c.nombre}</strong>
+            <span className="text-muted-foreground">({c.inicial})</span>
+            <span>{c.pc ? `${c.pc} · ${c.ip}` : c.ip}</span>
+            <span className="ml-auto text-muted-foreground">{haceCuanto(c.segundos)}</span>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  )
 }
 
 export function Usuarios() {
@@ -171,6 +232,8 @@ export function Usuarios() {
           Nuevo usuario
         </Button>
       </div>
+
+      <Conectados />
 
       {form && (
         <Card ref={formRef} className="mb-6 border-primary/40">

@@ -43,6 +43,18 @@ class UsuarioAdminOut(BaseModel):
     modulos_restringidos: List[str] = []
 
 
+class UsuarioConectadoOut(BaseModel):
+    """Alguien que usó el sistema hace poco, y desde qué PC."""
+
+    usuario_id: int
+    inicial: str
+    nombre: str
+    # Nombre de la PC si se pudo resolver; si no, None y solo se ve la IP.
+    pc: Optional[str]
+    ip: str
+    segundos: int
+
+
 class UsuarioCreate(BaseModel):
     inicial: str
     nombre: str
@@ -773,8 +785,8 @@ class PesajePtCreate(BaseModel):
     fecha: date
     peso_bruto: float = Field(gt=0)
     tara: float = Field(default=0, ge=0)
-    # Bolsas del paquete, en unidades (también en una OT en MILLAR). Sin
-    # cantidad en KG.
+    # Bolsas del paquete, en unidades (también en una OT en MILLAR). En KG y
+    # BOBINA son las bobinas pesadas juntas (1 si no se manda).
     cantidad: Optional[float] = Field(default=None, gt=0)
 
 
@@ -787,7 +799,7 @@ class PesajePtOut(BaseModel):
     peso_bruto: float
     tara: float
     peso_neto: float
-    # Bolsas del paquete, en unidades; None en KG.
+    # Bolsas del paquete, en unidades; en KG y BOBINA, las bobinas pesadas juntas.
     cantidad: Optional[float]
     # Inicial del usuario que pesó — lo que va en PESADOR / Per.
     pesador: str
@@ -803,7 +815,15 @@ class DiaPesajePtOut(BaseModel):
     fecha: date
     # Pq (bolsas/millar) o Bo (kg): cuántos paquetes o bobinas se pesaron.
     paquetes: int
-    # To del día: bolsas en BOLSAS/MILLAR, peso neto en KG.
+    # Bobinas del día (suma de la cantidad de cada pesaje); solo cuenta en KG y BOBINA.
+    bobinas: float = 0
+    # N° que dio el SID a este día de la OT (None = todavía no registrado).
+    numero_sid: Optional[str] = None
+    # Se tocaron pesajes de este día después de anotar el N°.
+    sid_revisar: bool = False
+    sid_registrado_por: Optional[str] = None
+    sid_registrado_en: Optional[datetime] = None
+    # To del día: bolsas en BOLSAS/MILLAR, bobinas en BOBINA, peso neto en KG.
     to: float
     kg: float
     pesadores: List[str]
@@ -812,10 +832,30 @@ class DiaPesajePtOut(BaseModel):
     porcentaje_acumulado: Optional[float]
 
 
+class SidDiaPtIn(BaseModel):
+    # Solo dígitos; None o vacío borra el N° (el día vuelve a estar pendiente).
+    numero_sid: Optional[str] = None
+
+
+class SidDiaPtOut(BaseModel):
+    """Un día pesado de una OT y su estado en el SID."""
+
+    numero_ot: str
+    cliente: Optional[str]
+    fecha: date
+    pesajes: int
+    kg: float
+    numero_sid: Optional[str]
+    revisar: bool
+    registrado_por: Optional[str]
+    registrado_en: Optional[datetime]
+
+
 class PesajesPtOut(BaseModel):
     pesajes: List[PesajePtOut]
     dias: List[DiaPesajePtOut]
     total_to: float
     total_kg: float
     total_paquetes: int
+    total_bobinas: float = 0
     porcentaje: Optional[float]

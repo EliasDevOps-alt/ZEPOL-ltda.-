@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import date
+from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -37,6 +40,8 @@ def _serializar(producto_terminado: ProductoTerminado) -> schemas.ProductoTermin
 
 def _serializar_pesaje(pesaje: PesajePt) -> schemas.PesajePtOut:
     cantidad = float(pesaje.cantidad) if pesaje.cantidad is not None else None
+    if cantidad is None and pesaje.producto_terminado.unidad in producto_terminado_controller.UNIDADES_CON_BOBINAS:
+        cantidad = 1.0  # pesajes de KG anteriores al campo: una bobina
     return schemas.PesajePtOut(
         id=pesaje.id,
         numero=pesaje.numero,
@@ -51,6 +56,39 @@ def _serializar_pesaje(pesaje: PesajePt) -> schemas.PesajePtOut:
         editado_por=pesaje.editado_por.inicial if pesaje.editado_por else None,
         editado_en=pesaje.editado_en,
     )
+
+
+@router.get("/sid-dias", response_model=List[schemas.SidDiaPtOut])
+def listar_sid_dias(estado: str = "pendientes", q: str = "", db: Session = Depends(get_db)):
+    """Días pesados de todas las OT con su N° del SID. Antes de "/{numero_ot}"
+    para que "sid-dias" no se tome por un número de OT."""
+    if estado not in ("pendientes", "registrados", "todos"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "estado debe ser pendientes, registrados o todos")
+    return producto_terminado_controller.listar_sid_dias(db, estado, q)
+
+
+@router.put(
+    "/{numero_ot}/sid/{fecha}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(security.requiere_modulo("producto_terminado"))],
+)
+def fijar_sid_dia(
+    numero_ot: str,
+    fecha: date,
+    data: schemas.SidDiaPtIn,
+    db: Session = Depends(get_db),
+    usuario: Usuario = Depends(security.get_current_usuario),
+):
+    producto_terminado_controller.fijar_sid_dia(db, numero_ot, fecha, data.numero_sid, usuario)
+
+
+@router.post(
+    "/{numero_ot}/sid/{fecha}/revisado",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(security.requiere_modulo("producto_terminado"))],
+)
+def confirmar_revision_sid_dia(numero_ot: str, fecha: date, db: Session = Depends(get_db)):
+    producto_terminado_controller.confirmar_revision_sid_dia(db, numero_ot, fecha)
 
 
 # Va antes de "/{numero_ot}" a propósito: si no, "pesajes" se tomaría como un

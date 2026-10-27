@@ -94,6 +94,7 @@ const ESTILOS_CELDA: Record<string, string> = {
   // valor de la columna derecha: solo subrayado + borde del marco
   'valor-linea': `border-bottom:${GRUESA};border-right:${GRUESA};padding:0 3pt;text-align:center`,
   'dato-linea': `border-bottom:${FINA};padding:0 3pt`,
+  'cierre-der': `border-right:${GRUESA}`,
   'pedido-total': 'font-size:9pt;font-weight:bold;text-align:right;padding-right:5pt',
   total: `border:${GRUESA};font-size:10pt;font-weight:bold;text-align:center`,
   registrar: `border:${GRUESA};font-size:8.5pt;padding-left:3pt`
@@ -122,14 +123,29 @@ export interface DiaFormularioPt {
   to: number
   kg: number
   paquetes: number
+  /** Suma de las bobinas de los pesajes del día (Kg y Bob). */
+  bobinas: number
+  /** AAAA-MM-DD del día: identifica la casilla del N° del SID al corregirla en la hoja. */
+  fechaIso?: string
+  /** N° que el SID dio a este día (lo anota una persona); vacío = sin registrar. */
+  numeroSid?: string
+  /** Se tocaron pesajes del día después de anotar el N°. */
+  sidRevisar?: boolean
   pesadores: string[]
   /** % acumulado sin redondear; null si no hay pedido total. */
   porcentaje: number | null
 }
 
 export interface RegistrosFormularioPt {
-  /** true en Bolsas/Mill (peso — cantidad); false en Kg (solo el peso). */
+  /** true si cada pesaje se escribe "peso — cantidad" (bolsas, láminas o, en Kg y
+   * Bob, las bobinas pesadas juntas). */
   conCantidad: boolean
+  /** true en Kg: el To es el peso (no la suma de las cantidades) y se suma
+   * aparte la cantidad de bobinas ("Bo"). */
+  porPeso: boolean
+  /** Kg y Bob: una bobina por pesaje es lo normal y no se anota en el papel;
+   * solo se escribe cuando son 2 o más (pedido de Elias, 2026-10-22). */
+  sinUno?: boolean
   dias: DiaFormularioPt[]
 }
 
@@ -262,7 +278,12 @@ ${celdaCampo(ctx, 'valor-linea', 6, claveDerecha)}${esc(valorDerecha)}</td>
 const COLUMNAS_REGISTRO = 4
 const ANCHO_COLUMNA_REGISTRO = 8
 // 33 renglones de pesajes + 3 del pie = los 36 de la cuadrícula de antes.
-const FILAS_REGISTRO = 33
+// 32 y no 33: el renglón que sobra lo ocupa el número de hoja, debajo del marco.
+const FILAS_REGISTRO = 32
+// Desde la 2ª hoja el encabezado se reduce (sin ítems, fechas ni condiciones: 8
+// renglones de 17.67pt menos) y ese lugar se usa para más renglones de pesajes.
+// 11 × 12.05pt = 132pt de los 141pt que se liberan: queda holgura para Word.
+const FILAS_EXTRA_CONTINUACION = 11
 const PESAJES_POR_COLUMNA = 10
 const RENGLONES_RESUMEN = 3
 const LINEA_FINA = '0.5pt solid #bbb'
@@ -278,37 +299,42 @@ type CeldaRegistro =
   // otras quedan 'cubierta' y no generan casillas.
   | { tipo: 'fecha'; fecha: string; continua: boolean; columnas: number }
   | { tipo: 'cubierta' }
-  | { tipo: 'pesaje'; numero: number; peso: number; cantidad: number | null }
+  | { tipo: 'pesaje'; numero: number; peso: number; cantidad: number | null; sinUno: boolean }
   | { tipo: 'subtotal'; peso: number; cantidad: number | null }
-  | { tipo: 'resumen'; renglon: 1 | 2 | 3; dia: DiaFormularioPt }
+  | { tipo: 'resumen'; renglon: 1 | 2 | 3; dia: DiaFormularioPt; porPeso: boolean }
 
 // Una hoja: por renglón, lo que tiene cada una de las 4 columnas de pesajes
 // (null = vacío) y dónde va la separación fina del primer renglón de un día.
 interface HojaRegistro {
   celdas: (CeldaRegistro | null)[][]
   separa: boolean[][]
-  // Suma de lo escrito en esta hoja, para el total del pie. Sale de los pesajes
-  // de la hoja, no de los resúmenes: un día partido entre dos hojas suma en
-  // cada una lo suyo.
+  // Suma de lo escrito hasta esta hoja (la suya y las anteriores), para el total
+  // del pie. Sale de los pesajes, no de los resúmenes: un día partido entre dos
+  // hojas suma en cada una lo suyo.
   pesajes: number
   to: number
   kg: number
+  bobinas: number
+  /** Unidad Kg: el pie muestra "To Hoja = kg  Bo = bobinas". */
+  porPeso: boolean
 }
 
-function nuevaHoja(): HojaRegistro {
+function nuevaHoja(porPeso = false, filas = FILAS_REGISTRO): HojaRegistro {
   return {
-    celdas: Array.from({ length: FILAS_REGISTRO }, () => Array<CeldaRegistro | null>(COLUMNAS_REGISTRO).fill(null)),
-    separa: Array.from({ length: FILAS_REGISTRO }, () => Array<boolean>(COLUMNAS_REGISTRO).fill(false)),
+    celdas: Array.from({ length: filas }, () => Array<CeldaRegistro | null>(COLUMNAS_REGISTRO).fill(null)),
+    separa: Array.from({ length: filas }, () => Array<boolean>(COLUMNAS_REGISTRO).fill(false)),
     pesajes: 0,
     to: 0,
-    kg: 0
+    kg: 0,
+    bobinas: 0,
+    porPeso
   }
 }
 
 /** Hasta dónde puede bajar una columna: ahora las 4 llegan hasta el final de la
  * zona de pesajes (el pie es una franja aparte). */
-function limiteColumna(): number {
-  return FILAS_REGISTRO
+function limiteColumna(hoja: HojaRegistro): number {
+  return hoja.celdas.length
 }
 
 /** Número con punto decimal como se escribe en el papel: entre `minimo` y
@@ -327,26 +353,30 @@ interface BloqueDia {
   celdas: CeldaRegistro[]
 }
 
-function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean): BloqueDia[] {
+function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean, porPeso: boolean, sinUno: boolean): BloqueDia[] {
   const bloques: BloqueDia[] = []
   for (let i = 0; i < dia.pesajes.length; i += PESAJES_POR_COLUMNA) {
     const grupo = dia.pesajes.slice(i, i + PESAJES_POR_COLUMNA)
     bloques.push({
       celdas: [
-        ...grupo.map((p): CeldaRegistro => ({ tipo: 'pesaje', numero: p.numero, peso: p.neto, cantidad: p.cantidad })),
+        ...grupo.map((p): CeldaRegistro => ({ tipo: 'pesaje', numero: p.numero, peso: p.neto, cantidad: p.cantidad, sinUno })),
         {
           tipo: 'subtotal',
           peso: redondearPeso(grupo.reduce((suma, p) => suma + p.neto, 0)),
-          cantidad: conCantidad ? redondearPeso(grupo.reduce((suma, p) => suma + (p.cantidad ?? 0), 0)) : null
+          // Con "sinUno" el subtotal de bobinas solo se escribe si algún pesaje del grupo tiene más de una.
+          cantidad:
+            conCantidad && !(sinUno && grupo.every((p) => p.cantidad === 1))
+              ? redondearPeso(grupo.reduce((suma, p) => suma + (p.cantidad ?? 0), 0))
+              : null
         }
       ]
     })
   }
   if (bloques.length === 0) bloques.push({ celdas: [] })
   bloques[bloques.length - 1].celdas.push(
-    { tipo: 'resumen', renglon: 1, dia },
-    { tipo: 'resumen', renglon: 2, dia },
-    { tipo: 'resumen', renglon: 3, dia }
+    { tipo: 'resumen', renglon: 1, dia, porPeso },
+    { tipo: 'resumen', renglon: 2, dia, porPeso },
+    { tipo: 'resumen', renglon: 3, dia, porPeso }
   )
   return bloques
 }
@@ -361,21 +391,23 @@ function bloquesDelDia(dia: DiaFormularioPt, conCantidad: boolean): BloqueDia[] 
  */
 function repartirRegistro(registros: RegistrosFormularioPt | undefined): HojaRegistro[] {
   const conCantidad = registros?.conCantidad ?? false // solo suma lo escrito: sin pesajes no hay nada que sumar
-  const hojas: HojaRegistro[] = [nuevaHoja()]
+  const porPeso = registros?.porPeso ?? false
+  const sinUno = registros?.sinUno ?? false
+  const hojas: HojaRegistro[] = [nuevaHoja(porPeso)]
   let inicio = 0 // renglón donde empieza la franja actual (el de las fechas)
   let columna = 0 // próxima columna libre de la franja
   let alto = 0 // renglones que ocupa la franja actual, fecha incluida
 
   const hoja = (): HojaRegistro => hojas[hojas.length - 1]
   const entra = (col: number, bloque: BloqueDia): boolean =>
-    col < COLUMNAS_REGISTRO && inicio + 1 + bloque.celdas.length <= limiteColumna()
+    col < COLUMNAS_REGISTRO && inicio + 1 + bloque.celdas.length <= limiteColumna(hoja())
   const nuevaFranja = (): void => {
     inicio += alto
     columna = 0
     alto = 0
   }
   const nuevaPagina = (): void => {
-    hojas.push(nuevaHoja())
+    hojas.push(nuevaHoja(porPeso, FILAS_REGISTRO + FILAS_EXTRA_CONTINUACION))
     inicio = 0
     columna = 0
     alto = 0
@@ -393,7 +425,8 @@ function repartirRegistro(registros: RegistrosFormularioPt | undefined): HojaReg
         if (c.tipo === 'pesaje') {
           h.pesajes++
           h.kg = redondearPeso(h.kg + c.peso)
-          h.to = redondearPeso(h.to + (conCantidad ? (c.cantidad ?? 0) : c.peso))
+          h.to = redondearPeso(h.to + (conCantidad && !porPeso ? (c.cantidad ?? 0) : c.peso))
+          h.bobinas = redondearPeso(h.bobinas + (c.cantidad ?? 0))
         }
       })
       altoDia = Math.max(altoDia, 1 + bloque.celdas.length)
@@ -406,7 +439,7 @@ function repartirRegistro(registros: RegistrosFormularioPt | undefined): HojaReg
   }
 
   for (const dia of registros?.dias ?? []) {
-    let pendientes = bloquesDelDia(dia, conCantidad)
+    let pendientes = bloquesDelDia(dia, conCantidad, porPeso, sinUno)
     let continua = false
     while (pendientes.length > 0) {
       // ¿Cuántos bloques seguidos entran desde la columna libre?
@@ -436,13 +469,26 @@ function repartirRegistro(registros: RegistrosFormularioPt | undefined): HojaReg
       }
     }
   }
+  // El total del pie es acumulado: cada hoja suma lo suyo más lo de las anteriores,
+  // así la última muestra el total de la OT (pedido de Elias, 2026-10-22).
+  let to = 0
+  let kg = 0
+  let bobinas = 0
+  for (const h of hojas) {
+    to = redondearPeso(to + h.to)
+    kg = redondearPeso(kg + h.kg)
+    bobinas = redondearPeso(bobinas + h.bobinas)
+    h.to = to
+    h.kg = kg
+    h.bobinas = bobinas
+  }
   return hojas
 }
 
 /** Una celda del registro, con su estilo inline (así sale igual en pantalla, PDF y
  * Word, que no aplica bien las clases). */
-function tdRegistro(span: number, html: string, css = ''): string {
-  return `<td colspan="${span}" width="${ANCHO_COLUMNA_PX * span}" style="${BASE_CELDA};padding:0 2.5pt;font-size:8pt;white-space:nowrap;overflow:hidden;${css}">${html}</td>`
+function tdRegistro(span: number, html: string, css = '', atributos = ''): string {
+  return `<td colspan="${span}" width="${ANCHO_COLUMNA_PX * span}"${atributos} style="${BASE_CELDA};padding:0 2.5pt;font-size:8pt;white-space:nowrap;overflow:hidden;${css}">${html}</td>`
 }
 
 /** Letra más chica para un texto que no entra en `casillas` casillas: nada
@@ -460,6 +506,10 @@ interface Parte {
   casillas: number
   html: string
   css: string
+  /** Dato que se corrige con un clic en la vista previa (`data-campo`). */
+  campo?: string
+  /** Se dibuja con la marca naranja (hoy: N° del SID para revisar). */
+  marcado?: boolean
 }
 
 function parteResumen(texto: string, casillas: number): Parte {
@@ -499,15 +549,28 @@ function partesRegistro(c: CeldaRegistro | null, conCantidad: boolean, conLineas
   }
   if (c.tipo === 'resumen') {
     const d = c.dia
-    if (c.renglon === 1) return [parteResumen(`To = ${numero(d.to, 2)}`, 4), parteResumen(`Kg = ${numero(d.kg, 2, 2)}`, 4)]
+    if (c.renglon === 1) {
+      // En Kg el To es el peso, así que en vez de repetirlo como "Kg" va el total de bobinas.
+      return [
+        parteResumen(`To = ${numero(d.to, 2)}`, 4),
+        parteResumen(c.porPeso ? `Bo = ${numero(d.bobinas, 0)}` : `Kg = ${numero(d.kg, 2, 2)}`, 4)
+      ]
+    }
     if (c.renglon === 2) {
       return [
-        parteResumen(`${conCantidad ? 'Pq' : 'Bo'} = ${d.paquetes}`, 3),
+        parteResumen(`Pq = ${d.paquetes}`, 3),
         parteResumen(`Per. = ${d.pesadores.join(', ')}`, 5)
       ]
     }
     const porcentaje = d.porcentaje !== null ? `${Math.round(d.porcentaje)}%` : ''
-    return [parteResumen('Nº =', 4), parteResumen(porcentaje, 4)]
+    // El N° del SID lo anota una persona (el sistema no lo calcula): se escribe
+    // con un clic en esta casilla de la vista previa.
+    const numeroSid = parteResumen(d.numeroSid ?? '', 3)
+    if (d.fechaIso) {
+      numeroSid.campo = `sid.${d.fechaIso}`
+      numeroSid.marcado = d.sidRevisar
+    }
+    return [parteResumen('Nº =', 2), numeroSid, parteResumen(porcentaje, 3)]
   }
   if (c.tipo === 'subtotal') {
     // El subtotal del grupo: en negrita, con una línea fina arriba.
@@ -526,34 +589,50 @@ function partesRegistro(c: CeldaRegistro | null, conCantidad: boolean, conLineas
   const peso = `${derecha}font-size:8.5pt;`
   const n: Parte = { casillas: nW, html: String(c.numero), css: `${derecha}color:#666;font-size:7pt;` }
   return conCantidad
-    ? [n, { casillas: pW, html: numero(c.peso, 3, 2), css: peso }, { casillas: cW, html: c.cantidad !== null ? numero(c.cantidad, 0) : '', css: peso }]
+    ? [n, { casillas: pW, html: numero(c.peso, 3, 2), css: peso }, { casillas: cW, html: c.cantidad !== null && !(c.sinUno && c.cantidad === 1) ? numero(c.cantidad, 0) : '', css: peso }]
     : [n, { casillas: pW, html: numero(c.peso, 3, 2), css: peso }]
 }
 
-function htmlCeldaRegistro(hoja: HojaRegistro, fila: number, columna: number, conCantidad: boolean, conLineas: boolean): string {
+function htmlCeldaRegistro(
+  ctx: Contexto,
+  hoja: HojaRegistro,
+  fila: number,
+  columna: number,
+  conCantidad: boolean,
+  conLineas: boolean
+): string {
   const partes = partesRegistro(hoja.celdas[fila][columna], conCantidad, conLineas)
   // La separación fina va a la izquierda de la primera casilla del día (menos en
   // la 1ª columna, donde ya está el marco de la hoja).
   const separa = hoja.separa[fila][columna] && columna > 0
   return partes
-    .map((parte, i) => tdRegistro(parte.casillas, parte.html, `${parte.css}${i === 0 && separa ? `border-left:${SEPARADOR_DIA};` : ''}`))
+    .map((parte, i) => {
+      const atributos =
+        ctx.editable && parte.campo ? ` data-campo="${parte.campo}"${parte.marcado ? ' data-editado="1"' : ''}` : ''
+      return tdRegistro(
+        parte.casillas,
+        parte.html,
+        `${parte.css}${i === 0 && separa ? `border-left:${SEPARADOR_DIA};` : ''}`,
+        atributos
+      )
+    })
     .join('')
 }
 
 /** El pie: total de la hoja y el recuadro de firmas en una franja de 3 renglones. */
-function pieRegistro(hoja: HojaRegistro, conCantidad: boolean, alto: string): string {
+function pieRegistro(hoja: HojaRegistro, conCantidad: boolean, alto: string, pagina: string): string {
   const fila = (celdas: string): string => `<tr ${alto}>${celdas}</tr>`
   const izquierda = `border-left:${MARCO};`
   const derecha = `border-right:${MARCO};`
   const rotulo = 'font-weight:bold;font-size:7.5pt;'
   const total =
     hoja.pesajes > 0
-      ? conCantidad
-        ? `To Hoja = ${numero(hoja.to, 2)} &nbsp;&nbsp;&nbsp; Kg = ${numero(hoja.kg, 2, 2)}`
-        : `Kg Hoja = ${numero(hoja.kg, 2, 2)}`
-      : conCantidad
-        ? 'To Hoja = &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Kg ='
-        : 'Kg Hoja ='
+      ? hoja.porPeso
+        ? `To Acum. = ${numero(hoja.to, 2, 2)} &nbsp;&nbsp;&nbsp; Bo = ${numero(hoja.bobinas, 0)}`
+        : `To Acum. = ${numero(hoja.to, 2)} &nbsp;&nbsp;&nbsp; Kg = ${numero(hoja.kg, 2, 2)}`
+      : hoja.porPeso
+        ? 'To Acum. = &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Bo ='
+        : 'To Acum. = &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; Kg ='
   return [
     fila(
       tdRegistro(
@@ -579,25 +658,28 @@ function pieRegistro(hoja: HojaRegistro, conCantidad: boolean, alto: string): st
         tdRegistro(3, 'Area:', `border-bottom:${MARCO};text-align:right;${rotulo}`) +
         tdRegistro(8, '', `border-bottom:${MARCO};`) +
         tdRegistro(10, 'Firma y sello:', `border-bottom:${MARCO};${rotulo}${derecha}`)
-    )
+    ),
+    // El número de hoja ("1-2") va fuera del marco, centrado abajo, como el
+    // pie de página de un documento.
+    fila(tdRegistro(34, pagina, 'text-align:center;font-size:8.5pt;font-weight:bold;'))
   ].join('\n')
 }
 
 /** Todos los renglones de una hoja del registro y su pie. Las 4 columnas de 8
  * casillas van con una casilla de margen a cada lado (1 + 32 + 1 = 34). */
-function filasRegistro(ctx: Contexto, hoja: HojaRegistro, conCantidad: boolean): string {
+function filasRegistro(ctx: Contexto, hoja: HojaRegistro, conCantidad: boolean, pagina: string): string {
   const alto = altoFila(ctx.paraWord ? ALTO_FILA_CUADRICULA_WORD_PT : ALTO_FILA_CUADRICULA_PT)
   // Sin pesajes (el formato en blanco) los renglones conservan sus líneas para
   // poder escribir a mano; con pesajes quedan limpios.
   const enBlanco = hoja.pesajes === 0
   const filas: string[] = []
-  for (let fila = 0; fila < FILAS_REGISTRO; fila++) {
-    const columnas = Array.from({ length: COLUMNAS_REGISTRO }, (_, c) => htmlCeldaRegistro(hoja, fila, c, conCantidad, enBlanco)).join('')
+  for (let fila = 0; fila < hoja.celdas.length; fila++) {
+    const columnas = Array.from({ length: COLUMNAS_REGISTRO }, (_, c) => htmlCeldaRegistro(ctx, hoja, fila, c, conCantidad, enBlanco)).join('')
     filas.push(
       `<tr ${alto}>${tdRegistro(1, '', `border-left:${MARCO};`)}${columnas}${tdRegistro(1, '', `border-right:${MARCO};`)}</tr>`
     )
   }
-  return `${filas.join('\n')}\n${pieRegistro(hoja, conCantidad, alto)}`
+  return `${filas.join('\n')}\n${pieRegistro(hoja, conCantidad, alto, pagina)}`
 }
 
 const ESTILOS = `
@@ -660,13 +742,17 @@ export function generarHtmlFormularioPt(
   }
   const hojas = repartirRegistro(datos.registros)
   // Sin pesajes cargados (el formato en blanco) se dibujan los dos lugares, peso y
-  // cantidad, salvo que la unidad sea Kg o Bob, donde solo se pesa.
-  const conCantidad = datos.registros?.conCantidad ?? (datos.unidad !== 'Kg' && datos.unidad !== 'Bob')
-  const elegidas = opciones.soloHoja !== undefined ? [hojas[opciones.soloHoja] ?? nuevaHoja()] : hojas
+  // cantidad (en Kg y Bob son las bobinas pesadas juntas).
+  const conCantidad = datos.registros?.conCantidad ?? true
+  const elegidas =
+    opciones.soloHoja !== undefined
+      ? [hojas[opciones.soloHoja] ?? nuevaHoja(datos.registros?.porPeso ?? false)]
+      : hojas
+  const primeraElegida = opciones.soloHoja ?? 0
   // El salto va en un div aparte con estilo inline (no en la tabla): Word no
   // respeta page-break-after sobre un <table> — mismo arreglo que formularioMp.
   const cuerpo = elegidas
-    .map((hoja) => tablaFormulario(ctx, datos, hoja, conCantidad))
+    .map((hoja, i) => tablaFormulario(ctx, datos, hoja, conCantidad, primeraElegida + i, hojas.length))
     .join('\n<div style="page-break-after:always"></div>\n')
 
   return documentoFormulario(ctx, cuerpo)
@@ -676,8 +762,12 @@ function tablaFormulario(
   ctx: Contexto,
   datos: DatosFormularioPt,
   hoja: HojaRegistro,
-  conCantidad: boolean
+  conCantidad: boolean,
+  indiceHoja: number,
+  totalHojas: number
 ): string {
+  // Desde la 2ª hoja el encabezado lleva solo cliente, OT y pedido total.
+  const continuacion = indiceHoja > 0
   const items = datos.items ?? []
   const item = (i: number): ItemFormularioPt => items[i] ?? {}
   const logo = ctx.paraWord ? URL_LOGO_MHTML : LOGO_ZEPOL_BASE64
@@ -705,7 +795,13 @@ ${celdaCampo(ctx, estiloClienteValor(datos.cliente), COLS_CLIENTE_VALOR, 'client
 ${celda(ctx, 'ot-rotulo', COLS_OT_ROTULO)}N&ordm; OT.:</td>
 ${casillasNumeroOt(ctx, datos.numeroOt)}
 </tr>
-<tr ${altoFila(ALTO_FILA_DATOS_PT)}>
+${continuacion ? `<tr ${altoFila(ALTO_FILA_DATOS_PT)}>
+${celda(ctx, 'lat-izq', 16)}</td>
+${celda(ctx, 'pedido-total', 5)}Pedido Total</td>
+${celdaCampo(ctx, 'total', 3, 'pedidoTotal')}${esc(datos.pedidoTotal) || '0.00'}</td>
+${celda(ctx, 'cierre-der', 10)}</td>
+</tr>
+` : `<tr ${altoFila(ALTO_FILA_DATOS_PT)}>
 ${celda(ctx, 'lat-izq', 3)}</td>
 ${celda(ctx, 'cabecera-col', 3)}CODIGO</td>
 ${celda(ctx, 'cabecera-col', 15)}PRODUCTO</td>
@@ -737,10 +833,11 @@ ${celdaCampo(ctx, 'dato-linea', 19, 'observaciones')}${esc(datos.observaciones)}
 ${celda(ctx, 'rot-b', 4)}Entrega Total:</td>
 ${celdaCampo(ctx, 'valor-linea', 6, 'entregaTotal')}${esc(datos.entregaTotal)}</td>
 </tr>
+`}
 <tr ${altoFila(ALTO_REGISTRAR_PT)}>
 ${celda(ctx, 'registrar', COLUMNAS)}Registro de pesos (N&ordm; = N&ordm; de la etiqueta del paquete)</td>
 </tr>
-${filasRegistro(ctx, hoja, conCantidad)}
+${filasRegistro(ctx, hoja, conCantidad, `${indiceHoja + 1}-${totalHojas}`)}
 </tbody>
 </table>`
 }
@@ -796,11 +893,28 @@ export const ROTULO_UNIDAD_PT: Record<UnidadPt, string> = {
   LAMINA: 'lamina'
 }
 
-/** ¿Cada paquete lleva cantidad además del peso? No en Kg (solo se pesa) ni en
- * Bob: una bobina es una bobina, se anota solo el peso y cada pesaje cuenta como
- * una para el avance del pedido (pedido del jefe de área, 2026-10-20). */
-export function llevaCantidad(unidad: UnidadPt): boolean {
-  return unidad !== 'KG' && unidad !== 'BOBINA'
+/** ¿Cada pesaje lleva cantidad además del peso? Siempre: en Bolsas/Mill/lamina
+ * son las unidades del paquete y en Kg/Bob las bobinas que se pesaron juntas
+ * (las chicas se empacan de a 5 o 7 y se pesan como una; 1 por defecto, pedido
+ * de Elias 2026-10-22). Se deja como función por si alguna unidad futura no la lleva. */
+export function llevaCantidad(_unidad: UnidadPt): boolean {
+  return true
+}
+
+/** ¿La cantidad del pesaje cuenta bobinas (y no bolsas/láminas)? */
+export function cantidadEsBobinas(unidad: UnidadPt): boolean {
+  return unidad === 'KG' || unidad === 'BOBINA'
+}
+
+/** ¿El To / avance se mide con esa cantidad? No en Kg: ahí avanza por peso. */
+export function avanzaPorCantidad(unidad: UnidadPt): boolean {
+  return unidad !== 'KG'
+}
+
+/** Rótulo de la cantidad de un pesaje: "bobinas", "bolsas" o "láminas". */
+export function nombreEnvases(unidad: UnidadPt, cantidad?: number): string {
+  if (cantidadEsBobinas(unidad)) return cantidad === 1 ? 'bobina' : 'bobinas'
+  return NOMBRE_CANTIDAD_PT[unidad]
 }
 
 /** En qué se cuenta lo pesado (el To y la cantidad de cada paquete). En una OT
@@ -927,6 +1041,8 @@ function datosOriginalesDesdePt(pt: ProductoTerminado, pesajes?: PesajesPt): Dat
 function registrosDesdePesajes(unidad: UnidadPt, datos: PesajesPt): RegistrosFormularioPt {
   return {
     conCantidad: llevaCantidad(unidad),
+    porPeso: !avanzaPorCantidad(unidad),
+    sinUno: cantidadEsBobinas(unidad),
     dias: datos.dias.map((dia) => ({
       fecha: formatearFecha(dia.fecha),
       pesajes: datos.pesajes
@@ -936,6 +1052,10 @@ function registrosDesdePesajes(unidad: UnidadPt, datos: PesajesPt): RegistrosFor
       to: dia.to,
       kg: dia.kg,
       paquetes: dia.paquetes,
+      bobinas: dia.bobinas,
+      fechaIso: dia.fecha,
+      numeroSid: dia.numero_sid ?? undefined,
+      sidRevisar: dia.sid_revisar,
       pesadores: dia.pesadores,
       porcentaje: dia.porcentaje_acumulado
     }))

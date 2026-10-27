@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -9,7 +10,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from ..models import OrdenTrabajo, PesajePt, ProductoTerminado, ProductoTerminadoItem, Usuario
+from ..models import OrdenTrabajo, PesajePt, ProductoTerminado, ProductoTerminadoItem, PtSidDia, Usuario
 from ..services import excel_oc_mp
 from . import ordenes_controller
 from .pedidos_controller import sumar_cantidades
@@ -253,6 +254,16 @@ def fijar_ediciones(db: Session, numero_ot: str, ediciones: Dict[str, str]) -> P
     return producto_terminado
 
 
+# Unidades en que cada pesaje lleva cuántas bobinas se pesaron juntas.
+UNIDADES_CON_BOBINAS = ("KG", "BOBINA")
+
+
+def bobinas_de(pesajes: List[PesajePt]) -> float:
+    """Bobinas de un grupo de pesajes. Un pesaje sin cantidad guardada (los de
+    KG anteriores a este campo) es una bobina."""
+    return sumar_cantidades(p.cantidad if p.cantidad is not None else 1 for p in pesajes)
+
+
 def pedido_total_real(producto_terminado: ProductoTerminado) -> Optional[float]:
     """Pedido total en unidades reales (bolsas o kg), para comparar contra los
     pesajes. None si falta el total o la unidad."""
@@ -302,6 +313,8 @@ def registrar_pesaje(
         usuario_id=usuario.id,
     )
     db.add(pesaje)
+    db.flush()
+    _revisar_sid_de_dias(db, producto_terminado.id, [fecha])
     db.commit()
     db.refresh(pesaje)
     return pesaje
@@ -311,10 +324,10 @@ def _validar_pesaje(
     producto_terminado: ProductoTerminado, peso_bruto: float, tara: float, cantidad: Optional[float]
 ) -> Optional[float]:
     """Reglas comunes a registrar y corregir un pesaje; devuelve la cantidad a
-    guardar. En KG es None: la bobina se cuenta por peso. En BOBINA (el pedido
-    se cuenta en bobinas, ej. OT 220132: 250) tampoco se pide cantidad, solo el
-    peso, pero cada pesaje es UNA bobina: se guarda 1, así el avance cuenta
-    bobinas y no kilos."""
+    guardar. En KG y BOBINA es el número de bobinas del pesaje (1 si no se
+    manda). El avance en KG sigue siendo por peso; en BOBINA (el pedido se
+    cuenta en bobinas, ej. OT 220132: 250) es la suma de esas bobinas, y el
+    peso se registra igual."""
     unidad = producto_terminado.unidad
     if unidad is None:
         raise HTTPException(
@@ -325,10 +338,14 @@ def _validar_pesaje(
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "El peso bruto tiene que ser mayor a 0.")
     if tara < 0 or tara >= peso_bruto:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "La tara tiene que ser menor que el peso bruto.")
-    if unidad == "KG":
-        return None
-    if unidad == "BOBINA":
-        return 1
+    if unidad in UNIDADES_CON_BOBINAS:
+        # La cantidad es cuántas bobinas se pesaron juntas (1 por defecto; las
+        # chicas se empacan de a 5 o 7 y se pesan como una sola).
+        if cantidad is None:
+            return 1
+        if cantidad <= 0 or cantidad != int(cantidad):
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "La cantidad de bobinas tiene que ser un número entero mayor a 0.")
+        return cantidad
     if cantidad is None or cantidad <= 0:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Falta la cantidad del paquete.")
     return cantidad
@@ -351,11 +368,14 @@ def editar_pesaje(
     if pesaje is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesaje no encontrado")
     pesaje.cantidad = _validar_pesaje(pesaje.producto_terminado, peso_bruto, tara, cantidad)
+    fecha_anterior = pesaje.fecha
     pesaje.fecha = fecha
     pesaje.peso_bruto = peso_bruto
     pesaje.tara = tara
     pesaje.editado_por_id = usuario.id
     pesaje.editado_en = datetime.now()
+    db.flush()
+    _revisar_sid_de_dias(db, pesaje.producto_terminado_id, [fecha_anterior, fecha])
     db.commit()
     db.refresh(pesaje)
     return pesaje
@@ -390,6 +410,7 @@ def eliminar_pesaje(db: Session, pesaje_id: int) -> None:
     if pesaje is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesaje no encontrado")
     producto_terminado_id = pesaje.producto_terminado_id
+    fecha_borrada = pesaje.fecha
     # Mismo candado que al registrar (ver registrar_pesaje): dos estaciones no
     # pueden numerar a la vez.
     db.execute(
@@ -398,7 +419,117 @@ def eliminar_pesaje(db: Session, pesaje_id: int) -> None:
     db.delete(pesaje)
     db.flush()
     renumerar_pesajes(db, producto_terminado_id)
+    _revisar_sid_de_dias(db, producto_terminado_id, [fecha_borrada])
     db.commit()
+
+
+def _revisar_sid_de_dias(db: Session, producto_terminado_id: int, fechas: List[date]) -> None:
+    """Tras agregar, corregir o borrar un pesaje: los días tocados que ya tenían
+    N° del SID quedan marcados para revisar (el SID se registró con otros
+    datos). Un día que se quedó sin pesajes pierde su N°: ya no existe."""
+    for fecha in set(fechas):
+        fila = db.scalar(
+            select(PtSidDia).where(
+                PtSidDia.producto_terminado_id == producto_terminado_id, PtSidDia.fecha == fecha
+            )
+        )
+        if fila is None:
+            continue
+        quedan = db.scalar(
+            select(func.count())
+            .select_from(PesajePt)
+            .where(PesajePt.producto_terminado_id == producto_terminado_id, PesajePt.fecha == fecha)
+        )
+        if quedan:
+            fila.revisar = True
+        else:
+            db.delete(fila)
+
+
+def fijar_sid_dia(
+    db: Session, numero_ot: str, fecha: date, numero_sid: Optional[str], usuario: Usuario
+) -> None:
+    """Anota (o borra, si viene vacío) el N° que el SID dio a un día pesado de la
+    OT. Solo dígitos. Al anotarlo se limpia la marca de "revisar": quien lo
+    anota está viendo el día tal como quedó."""
+    producto_terminado = obtener_abierto(db, numero_ot)
+    texto = (numero_sid or "").strip()
+    if texto and not re.fullmatch(r"[0-9]{1,20}", texto):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "El N° del SID son solo números.")
+    hay_pesajes = db.scalar(
+        select(func.count())
+        .select_from(PesajePt)
+        .where(PesajePt.producto_terminado_id == producto_terminado.id, PesajePt.fecha == fecha)
+    )
+    if not hay_pesajes:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Ese día no tiene pesajes en esta OT.")
+    fila = db.scalar(
+        select(PtSidDia).where(
+            PtSidDia.producto_terminado_id == producto_terminado.id, PtSidDia.fecha == fecha
+        )
+    )
+    if not texto:
+        if fila is not None:
+            db.delete(fila)
+    elif fila is None:
+        db.add(
+            PtSidDia(
+                producto_terminado_id=producto_terminado.id,
+                fecha=fecha,
+                numero_sid=texto,
+                registrado_por_id=usuario.id,
+            )
+        )
+    else:
+        fila.numero_sid = texto
+        fila.revisar = False
+        fila.registrado_por_id = usuario.id
+        fila.registrado_en = datetime.now()
+    db.commit()
+
+
+def confirmar_revision_sid_dia(db: Session, numero_ot: str, fecha: date) -> None:
+    """El N° sigue valiendo: se revisó el día y se apaga la marca."""
+    producto_terminado = obtener_abierto(db, numero_ot)
+    fila = db.scalar(
+        select(PtSidDia).where(
+            PtSidDia.producto_terminado_id == producto_terminado.id, PtSidDia.fecha == fecha
+        )
+    )
+    if fila is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Ese día no tiene N° del SID.")
+    fila.revisar = False
+    db.commit()
+
+
+def listar_sid_dias(db: Session, estado: str, busqueda: str) -> List[Dict[str, Any]]:
+    """Cada día pesado de cada OT con su estado en el SID. estado: 'pendientes'
+    (sin N° o para revisar), 'registrados' (con N°) o 'todos'."""
+    filas = db.execute(
+        text(
+            "SELECT ot.numero_ot, ot.cliente, p.fecha, COUNT(*) AS pesajes, "
+            "       SUM(p.peso_bruto - p.tara) AS kg, s.numero_sid, s.revisar, "
+            "       u.inicial AS registrado_por, s.registrado_en "
+            "FROM pesajes_pt p "
+            "JOIN productos_terminados pt ON pt.id = p.producto_terminado_id "
+            "JOIN ordenes_trabajo ot ON ot.id = pt.ot_id "
+            "LEFT JOIN pt_sid_dias s ON s.producto_terminado_id = pt.id AND s.fecha = p.fecha "
+            "LEFT JOIN usuarios u ON u.id = s.registrado_por_id "
+            "WHERE (:q = '' OR ot.numero_ot ILIKE :pat OR ot.cliente ILIKE :pat) "
+            "GROUP BY ot.numero_ot, ot.cliente, p.fecha, s.numero_sid, s.revisar, u.inicial, s.registrado_en "
+            "ORDER BY p.fecha DESC, ot.numero_ot"
+        ),
+        {"q": busqueda.strip(), "pat": f"%{busqueda.strip()}%"},
+    ).mappings().all()
+    resultado = []
+    for f in filas:
+        registrado = f["numero_sid"] is not None
+        if estado == "pendientes" and registrado and not f["revisar"]:
+            continue
+        if estado == "registrados" and not registrado:
+            continue
+        resultado.append({**f, "kg": float(f["kg"]), "revisar": bool(f["revisar"])})
+    return resultado
 
 
 def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
@@ -418,16 +549,18 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
         if unidad == "KG":
             return sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes)
         if unidad == "BOBINA":
-            return float(len(pesajes))  # una bobina por pesaje, sin importar lo que quedó guardado en cantidad
+            return bobinas_de(pesajes)
         return sumar_cantidades(p.cantidad or 0 for p in pesajes)
 
     por_dia: Dict[date, List[PesajePt]] = {}
     for pesaje in producto_terminado.pesajes:
         por_dia.setdefault(pesaje.fecha, []).append(pesaje)
 
+    sid_por_fecha = {s.fecha: s for s in producto_terminado.sid_dias}
     dias = []
     acumulado = 0.0
     for fecha in sorted(por_dia):
+        sid = sid_por_fecha.get(fecha)
         pesajes = por_dia[fecha]
         to = to_de(pesajes)
         acumulado += to
@@ -439,6 +572,11 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
             {
                 "fecha": fecha,
                 "paquetes": len(pesajes),
+                "bobinas": bobinas_de(pesajes),
+                "numero_sid": sid.numero_sid if sid else None,
+                "sid_revisar": bool(sid and sid.revisar),
+                "sid_registrado_por": sid.registrado_por.inicial if sid and sid.registrado_por else None,
+                "sid_registrado_en": sid.registrado_en if sid else None,
                 "to": to,
                 "kg": sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes),
                 "pesadores": pesadores,
@@ -453,5 +591,6 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
         "total_to": acumulado,
         "total_kg": total_kg,
         "total_paquetes": len(producto_terminado.pesajes),
+        "total_bobinas": bobinas_de(producto_terminado.pesajes),
         "porcentaje": (acumulado / pedido_real * 100) if pedido_real else None,
     }

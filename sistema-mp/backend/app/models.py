@@ -510,6 +510,9 @@ class ProductoTerminado(Base):
     pesajes: Mapped[List["PesajePt"]] = relationship(
         back_populates="producto_terminado", order_by="PesajePt.numero"
     )
+    sid_dias: Mapped[List["PtSidDia"]] = relationship(
+        back_populates="producto_terminado", cascade="all, delete-orphan"
+    )
 
 
 class ProductoTerminadoItem(Base):
@@ -561,3 +564,25 @@ class PesajePt(Base):
     producto_terminado: Mapped["ProductoTerminado"] = relationship(back_populates="pesajes")
     usuario: Mapped["Usuario"] = relationship(foreign_keys="PesajePt.usuario_id")
     editado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="PesajePt.editado_por_id")
+
+
+class PtSidDia(Base):
+    """N° del SID de un día pesado de una OT (uno por OT y por día; lo anota una
+    persona). Sin fila, ese día no está registrado en el SID. `revisar` se
+    enciende cuando cambian los pesajes de un día que ya tenía N°."""
+
+    __tablename__ = "pt_sid_dias"
+    __table_args__ = (UniqueConstraint("producto_terminado_id", "fecha"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    producto_terminado_id: Mapped[int] = mapped_column(
+        ForeignKey("productos_terminados.id", ondelete="CASCADE")
+    )
+    fecha: Mapped[date] = mapped_column(Date)
+    numero_sid: Mapped[str] = mapped_column(String(20))
+    revisar: Mapped[bool] = mapped_column(default=False)
+    registrado_por_id: Mapped[Optional[int]] = mapped_column(ForeignKey("usuarios.id"))
+    registrado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    producto_terminado: Mapped["ProductoTerminado"] = relationship(back_populates="sid_dias")
+    registrado_por: Mapped[Optional["Usuario"]] = relationship(foreign_keys="PtSidDia.registrado_por_id")

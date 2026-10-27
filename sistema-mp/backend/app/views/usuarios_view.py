@@ -9,6 +9,7 @@ from .. import schemas, security
 from ..controllers import usuarios_controller
 from ..database import get_db
 from ..models import Usuario
+from ..services import actividad
 
 router = APIRouter(prefix="/usuarios", tags=["usuarios"], dependencies=[Depends(security.requiere_admin)])
 
@@ -27,6 +28,14 @@ def _serializar(usuario: Usuario) -> schemas.UsuarioAdminOut:
 @router.get("", response_model=List[schemas.UsuarioAdminOut])
 def listar_usuarios(db: Session = Depends(get_db)):
     return [_serializar(u) for u in usuarios_controller.listar_usuarios(db)]
+
+
+@router.get("/conectados", response_model=List[schemas.UsuarioConectadoOut])
+def listar_conectados(minutos: int = 5):
+    """Quién hizo alguna petición en los últimos `minutos` y desde qué PC.
+    Es una foto en memoria: se vacía al reiniciar el backend."""
+    minutos = max(1, min(minutos, 60))
+    return actividad.conectados(minutos)
 
 
 @router.post("", response_model=schemas.UsuarioAdminOut, status_code=status.HTTP_201_CREATED)

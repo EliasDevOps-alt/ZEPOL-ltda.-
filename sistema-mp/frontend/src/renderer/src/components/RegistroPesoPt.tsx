@@ -6,11 +6,19 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@renderer/components/ui/card'
 import { useConfirm } from '@renderer/components/ConfirmProvider'
+import { EditorSidDiaPt } from '@renderer/components/EditorSidDiaPt'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
-import { llevaCantidad, NOMBRE_CANTIDAD_PT, ROTULO_UNIDAD_PT } from '@renderer/lib/formularioPt'
+import {
+  avanzaPorCantidad,
+  cantidadEsBobinas,
+  llevaCantidad,
+  NOMBRE_CANTIDAD_PT,
+  nombreEnvases,
+  ROTULO_UNIDAD_PT
+} from '@renderer/lib/formularioPt'
 import {
   ALTO_ETIQUETA_MM,
   ANCHO_ETIQUETA_MM,
@@ -31,6 +39,17 @@ function num(valor: number, decimales = 3): string {
 /** En qué se cuenta el To (y la cantidad de cada paquete): bolsas, bobinas o
  * láminas según la unidad de la OT (en millares también bolsas). */
 const ROTULO_TO = NOMBRE_CANTIDAD_PT
+
+/** Rótulo de la casilla de cantidad de un pesaje. */
+function rotuloCampoCantidad(unidad: UnidadPt): string {
+  return cantidadEsBobinas(unidad) ? 'Bobinas (pesadas juntas)' : `Cantidad (${ROTULO_TO[unidad]})`
+}
+
+/** Valor de la casilla de cantidad; vacía en Kg/Bob es 1 bobina. */
+function cantidadDelCampo(unidad: UnidadPt, texto: string): number {
+  if (texto === '') return cantidadEsBobinas(unidad) ? 1 : 0
+  return Number(texto)
+}
 
 /** Pedido total como se escribe en el Excel, y en millares su equivalente en
  * bolsas para compararlo con lo pesado. */
@@ -140,7 +159,6 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
   })
 
   const unidad = pt.unidad
-  const rotuloPaquetes = unidad && !llevaCantidad(unidad) ? 'Bo' : 'Pq'
   const rotuloTo = unidad ? ROTULO_TO[unidad] : ''
 
   const etiquetas = useExportarEtiquetas(pt)
@@ -255,10 +273,12 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                   <span>
                     To = {num(dia.to, 2)} {rotuloTo}
                   </span>
-                  <span>Kg = {num(dia.kg, 2)}</span>
-                  <span>
-                    {rotuloPaquetes} = {dia.paquetes}
-                  </span>
+                  {unidad && !avanzaPorCantidad(unidad) ? (
+                    <span>Bo = {num(dia.bobinas)}</span>
+                  ) : (
+                    <span>Kg = {num(dia.kg, 2)}</span>
+                  )}
+                  <span>Pq = {dia.paquetes}</span>
                   <span>Per. = {dia.pesadores.join(', ')}</span>
                   {dia.porcentaje_acumulado !== null && (
                     <span className="font-semibold">{Math.round(dia.porcentaje_acumulado)}% acumulado</span>
@@ -274,6 +294,15 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                     Etiquetas del día
                   </Button>
                 </div>
+                <div className="border-b border-border px-3 py-2">
+                  <EditorSidDiaPt
+                    numeroOt={pt.numero_ot}
+                    fecha={dia.fecha}
+                    numeroSid={dia.numero_sid}
+                    revisar={dia.sid_revisar}
+                    registradoPor={dia.sid_registrado_por}
+                  />
+                </div>
                 <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="text-left text-xs text-muted-foreground">
@@ -283,7 +312,9 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                       <th className="px-3 py-1 text-right">Bruto</th>
                       <th className="px-3 py-1 text-right">Tara</th>
                       <th className="px-3 py-1 text-right">Neto</th>
-                      {llevaCantidad(unidad) && <th className="px-3 py-1 text-right">Cantidad</th>}
+                      {llevaCantidad(unidad) && (
+                        <th className="px-3 py-1 text-right">{cantidadEsBobinas(unidad) ? 'Bobinas' : 'Cantidad'}</th>
+                      )}
                       <th className="px-3 py-1">Pesador</th>
                       <th />
                     </tr>
@@ -399,11 +430,12 @@ function FilaEdicion({
   const [pesoBruto, setPesoBruto] = useState(num(pesaje.peso_bruto))
   const [tara, setTara] = useState(num(pesaje.tara))
   const [cantidad, setCantidad] = useState(pesaje.cantidad !== null ? num(pesaje.cantidad) : '')
+  const cantidadNum = cantidadDelCampo(unidad, cantidad)
 
   const bruto = Number(pesoBruto)
   const taraNum = tara === '' ? 0 : Number(tara)
   const neto = pesoBruto !== '' && !Number.isNaN(bruto) && !Number.isNaN(taraNum) ? bruto - taraNum : null
-  const valido = fecha !== '' && bruto > 0 && neto !== null && neto > 0 && (!conCantidad || Number(cantidad) > 0)
+  const valido = fecha !== '' && bruto > 0 && neto !== null && neto > 0 && (!conCantidad || cantidadNum > 0)
 
   const guardar = useMutation({
     mutationFn: () =>
@@ -411,7 +443,7 @@ function FilaEdicion({
         fecha,
         peso_bruto: bruto,
         tara: taraNum,
-        cantidad: conCantidad ? Number(cantidad) : null
+        cantidad: conCantidad ? cantidadNum : null
       }),
     onSuccess: onGuardado
   })
@@ -466,13 +498,13 @@ function FilaEdicion({
           </div>
           {conCantidad && (
             <div className="space-y-1">
-              <Label htmlFor={`ed-cantidad-${pesaje.id}`}>Cantidad ({ROTULO_TO[unidad]})</Label>
+              <Label htmlFor={`ed-cantidad-${pesaje.id}`}>{rotuloCampoCantidad(unidad)}</Label>
               <Input
                 id={`ed-cantidad-${pesaje.id}`}
                 type="number"
                 inputMode="decimal"
                 step="1"
-                min="0"
+                min="1"
                 value={cantidad}
                 onChange={(e) => setCantidad(e.target.value)}
                 className="h-8 w-28"
@@ -513,6 +545,7 @@ function Avance({
     total_to: number
     total_kg: number
     total_paquetes: number
+    total_bobinas: number
     porcentaje: number | null
   }
 }) {
@@ -536,9 +569,13 @@ function Avance({
           <span className="text-muted-foreground">Kg:</span> <strong>{num(datos.total_kg, 2)}</strong>
         </span>
         <span>
-          <span className="text-muted-foreground">{llevaCantidad(unidad) ? 'Paquetes' : 'Bobinas'}:</span>{' '}
-          <strong>{datos.total_paquetes}</strong>
+          <span className="text-muted-foreground">Paquetes:</span> <strong>{datos.total_paquetes}</strong>
         </span>
+        {cantidadEsBobinas(unidad) && (
+          <span>
+            <span className="text-muted-foreground">Bobinas:</span> <strong>{num(datos.total_bobinas)}</strong>
+          </span>
+        )}
         {porcentaje !== null && (
           <span>
             <span className="text-muted-foreground">Avance:</span> <strong>{Math.round(porcentaje)}%</strong>
@@ -576,6 +613,7 @@ function FormularioPesaje({
   const [pesoBruto, setPesoBruto] = useState('')
   const [tara, setTara] = useState('')
   const [cantidad, setCantidad] = useState('')
+  const cantidadNum = cantidadDelCampo(unidad, cantidad)
   const [registrado, setRegistrado] = useState<Pesaje | null>(null)
   const pesoRef = useRef<HTMLInputElement>(null)
   const etiquetas = useExportarEtiquetas(pt)
@@ -602,7 +640,7 @@ function FormularioPesaje({
         fecha,
         peso_bruto: bruto,
         tara: taraNum,
-        cantidad: conCantidad ? Number(cantidad) : null
+        cantidad: conCantidad ? cantidadNum : null
       }),
     onSuccess: (pesaje) => {
       setRegistrado(pesaje)
@@ -613,7 +651,7 @@ function FormularioPesaje({
   })
 
   const valido =
-    fecha !== '' && bruto > 0 && taraNum >= 0 && neto !== null && neto > 0 && (!conCantidad || Number(cantidad) > 0)
+    fecha !== '' && bruto > 0 && taraNum >= 0 && neto !== null && neto > 0 && (!conCantidad || cantidadNum > 0)
 
   function enviar(e: React.FormEvent): void {
     e.preventDefault()
@@ -661,13 +699,14 @@ function FormularioPesaje({
             </div>
             {conCantidad && (
               <div className="space-y-1">
-                <Label htmlFor="pesaje-cantidad">Cantidad ({ROTULO_TO[unidad]})</Label>
+                <Label htmlFor="pesaje-cantidad">{rotuloCampoCantidad(unidad)}</Label>
                 <Input
                   id="pesaje-cantidad"
                   type="number"
                   inputMode="decimal"
                   step="1"
-                  min="0"
+                  min="1"
+                  placeholder={cantidadEsBobinas(unidad) ? '1' : undefined}
                   value={cantidad}
                   onChange={(e) => setCantidad(e.target.value)}
                 />
@@ -700,7 +739,10 @@ function FormularioPesaje({
             <div className="space-y-3 rounded-md border border-success/40 bg-success/10 p-3">
               <p className="text-sm text-success">
                 Pesaje N° {registrado.numero} registrado: {num(registrado.peso_neto)} kg netos
-                {conCantidad && registrado.cantidad !== null ? `, ${num(registrado.cantidad)} ${ROTULO_TO[unidad]}` : ''}.
+                {conCantidad && registrado.cantidad !== null
+                  ? `, ${num(registrado.cantidad)} ${nombreEnvases(unidad, registrado.cantidad)}`
+                  : ''}
+                .
               </p>
               <div className="flex flex-wrap items-end gap-4">
                 <VistaEtiqueta pt={pt} pesaje={registrado} />

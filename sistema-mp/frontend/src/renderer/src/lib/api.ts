@@ -35,6 +35,8 @@ import type {
   PesajePt,
   PesajePtCreate,
   PesajesPt,
+  UsuarioConectado,
+  SidDiaPt,
   ProductoTerminado,
   UnidadPt,
   Proceso,
@@ -88,6 +90,10 @@ export function listarUsuariosLogin(baseUrl: string) {
   // recién despertando), se corta y se reintenta enseguida en vez de dejar la
   // pantalla esperando sin decir nada.
   return request<UsuarioLogin[]>(baseUrl, '/auth/usuarios', { signal: AbortSignal.timeout(5000) })
+}
+
+export function listarUsuariosConectados(baseUrl: string, token: string, minutos = 5) {
+  return request<UsuarioConectado[]>(baseUrl, `/usuarios/conectados?minutos=${minutos}`, { token })
 }
 
 export function listarUsuarios(baseUrl: string, token: string) {
@@ -216,6 +222,29 @@ export function guardarEdicionesFormularioPt(
 
 export function listarPesajesPt(baseUrl: string, token: string, numeroOt: string) {
   return request<PesajesPt>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/pesajes`, { token })
+}
+
+/** Anota el N° que el SID dio a un día pesado de la OT; vacío lo borra. */
+export function fijarSidDiaPt(baseUrl: string, token: string, numeroOt: string, fecha: string, numeroSid: string) {
+  return request<void>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/sid/${fecha}`, {
+    method: 'PUT',
+    token,
+    body: { numero_sid: numeroSid }
+  })
+}
+
+/** El N° sigue valiendo: se revisó el día y se apaga la marca. */
+export function confirmarRevisionSidDiaPt(baseUrl: string, token: string, numeroOt: string, fecha: string) {
+  return request<void>(baseUrl, `/producto-terminado/${encodeURIComponent(numeroOt)}/sid/${fecha}/revisado`, {
+    method: 'POST',
+    token
+  })
+}
+
+export function listarSidDiasPt(baseUrl: string, token: string, estado: string, q: string) {
+  const params = new URLSearchParams({ estado })
+  if (q.trim()) params.set('q', q.trim())
+  return request<SidDiaPt[]>(baseUrl, `/producto-terminado/sid-dias?${params}`, { token })
 }
 
 export function registrarPesajePt(baseUrl: string, token: string, numeroOt: string, data: PesajePtCreate) {
