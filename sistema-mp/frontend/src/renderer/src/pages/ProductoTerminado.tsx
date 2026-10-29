@@ -228,6 +228,30 @@ export function ProductoTerminado() {
     }
   }
 
+  const [imprimiendo, setImprimiendo] = useState(false)
+  const [avisoImpresion, setAvisoImpresion] = useState<{ error: boolean; texto: string } | null>(null)
+
+  useEffect(() => {
+    if (!avisoImpresion || avisoImpresion.error) return
+    const id = setTimeout(() => setAvisoImpresion(null), 8000)
+    return () => clearTimeout(id)
+  }, [avisoImpresion])
+
+  async function imprimir(): Promise<void> {
+    setImprimiendo(true)
+    setAvisoImpresion(null)
+    try {
+      const modo = await window.api.imprimirFormulario(html)
+      if (modo === 'directo') {
+        setAvisoImpresion({ error: false, texto: 'Formulario enviado a la impresora (carta, horizontal, ambas caras).' })
+      }
+    } catch (error) {
+      setAvisoImpresion({ error: true, texto: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setImprimiendo(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -335,7 +359,11 @@ export function ProductoTerminado() {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">Formulario de ingreso de productos terminados</CardTitle>
           <div className="flex items-center gap-2">
-            <Button onClick={() => exportar('pdf')} disabled={exportando}>
+            <Button onClick={imprimir} disabled={imprimiendo || exportando}>
+              {imprimiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Imprimir
+            </Button>
+            <Button variant="outline" onClick={() => exportar('pdf')} disabled={exportando}>
               {exportando && estado.formato === 'pdf' ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -461,6 +489,17 @@ export function ProductoTerminado() {
           {estado.tipo === 'cancelado' && (
             <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
               Exportación cancelada.
+            </p>
+          )}
+          {avisoImpresion && (
+            <p
+              className={
+                avisoImpresion.error
+                  ? 'rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'
+                  : 'rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success'
+              }
+            >
+              {avisoImpresion.error ? `No se pudo imprimir: ${avisoImpresion.texto}` : avisoImpresion.texto}
             </p>
           )}
           {estado.tipo === 'error' && (

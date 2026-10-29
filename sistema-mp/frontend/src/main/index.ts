@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs'
 import { autoUpdater } from 'electron-updater'
 import log from 'electron-log/main'
 import { construirExcelDesdeHtml, type OrientacionHoja } from './excelFormulario'
+import { imprimirPdfDirecto } from './impresionDirecta'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
@@ -93,6 +94,77 @@ async function exportarFormularioPdf(html: string, nombreSugerido: string): Prom
       unlinkSync(rutaTemporal)
     } catch {
       // Un temporal que no se pudo borrar no justifica romper la exportación.
+    }
+  }
+}
+
+// Impresora de la planta para el formulario (HP LaserJet Pro M201dw).
+const IMPRESORA_FORMULARIO = /M201/i
+
+export type ResultadoImpresion = 'directo' | 'dialogo' | 'cancelado'
+
+// Botón "Imprimir": si esta PC tiene la HP instalada y un lector de PDF que
+// sepa imprimir, manda el formulario directo (Carta, horizontal, doble cara,
+// ver impresionDirecta.ts) sin preguntar nada. Si no, abre el cuadro de
+// impresión de Windows para elegir a mano.
+async function imprimirFormulario(html: string): Promise<ResultadoImpresion> {
+  const ventana = new BrowserWindow({ show: false, webPreferences: { sandbox: false } })
+  const rutaHtml = join(app.getPath('temp'), `zepol-imprimir-${Date.now()}.html`)
+  const rutaPdf = rutaHtml.replace(/\.html$/, '.pdf')
+  try {
+    const impresora = (await ventana.webContents.getPrintersAsync()).find((p) => IMPRESORA_FORMULARIO.test(p.name))
+    if (impresora) {
+      writeFileSync(rutaHtml, html, 'utf-8')
+      await ventana.loadFile(rutaHtml)
+      writeFileSync(
+        rutaPdf,
+        await ventana.webContents.printToPDF({ pageSize: 'Letter', printBackground: true, preferCSSPageSize: true })
+      )
+      const resultado = await imprimirPdfDirecto(rutaPdf, impresora.name)
+      if (resultado === 'ok') return 'directo'
+      if (resultado === 'sin-trabajo') {
+        throw new Error('La impresora no recibió el trabajo. Revisa que esté encendida y con papel.')
+      }
+      // 'sin-lector-pdf': sigue al cuadro de impresión.
+    }
+  } finally {
+    ventana.destroy()
+    for (const ruta of [rutaHtml, rutaPdf]) {
+      try {
+        unlinkSync(ruta)
+      } catch {
+        // Un temporal que no se pudo borrar no justifica romper la impresión.
+      }
+    }
+  }
+  return (await imprimirConDialogo(html)) ? 'dialogo' : 'cancelado'
+}
+
+// Imprime el mismo HTML con el cuadro de impresión de Windows (silent: false):
+// ahí se elige la impresora y "imprimir en ambas caras". Devuelve false si se
+// canceló el cuadro.
+async function imprimirConDialogo(html: string): Promise<boolean> {
+  const rutaTemporal = join(app.getPath('temp'), `zepol-imprimir-${Date.now()}.html`)
+  writeFileSync(rutaTemporal, html, 'utf-8')
+  const ventana = new BrowserWindow({ show: false, webPreferences: { sandbox: false } })
+  try {
+    await ventana.loadFile(rutaTemporal)
+    return await new Promise<boolean>((resolve, reject) => {
+      ventana.webContents.print(
+        { silent: false, printBackground: true, landscape: true, pageSize: 'Letter' },
+        (exito, motivo) => {
+          if (exito) resolve(true)
+          else if (motivo === 'cancelled' || motivo === 'Print job canceled') resolve(false)
+          else reject(new Error(motivo || 'No se pudo imprimir'))
+        }
+      )
+    })
+  } finally {
+    ventana.destroy()
+    try {
+      unlinkSync(rutaTemporal)
+    } catch {
+      // Un temporal que no se pudo borrar no justifica romper la impresión.
     }
   }
 }
@@ -276,6 +348,7 @@ app.whenReady().then(() => {
     'formulario:exportarPdf',
     (_event, html: string, nombreSugerido: string) => exportarFormularioPdf(html, nombreSugerido)
   )
+  ipcMain.handle('formulario:imprimir', (_event, html: string) => imprimirFormulario(html))
   ipcMain.handle(
     'formulario:exportarWord',
     (_event, html: string, nombreSugerido: string) => exportarFormularioWord(html, nombreSugerido)

@@ -299,7 +299,8 @@ export function RegistroPesoPt({
       {
         titulo: 'Eliminar pesaje',
         textoConfirmar: 'Eliminar',
-        destructivo: true
+        destructivo: true,
+        enfocarConfirmar: true
       }
     )
     if (ok) eliminar.mutate(pesaje)

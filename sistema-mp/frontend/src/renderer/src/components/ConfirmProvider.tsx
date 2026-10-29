@@ -11,6 +11,10 @@ interface ConfirmOptions {
   // hay nada que decidir (reemplaza a window.alert(), mismo motivo que
   // confirm() más abajo).
   soloInformar?: boolean
+  // Al abrir, el foco va al botón de confirmar (en vez de Cancelar), así un
+  // Enter confirma. Solo donde se pidió: en los demás avisos Enter sigue
+  // cayendo en el botón por defecto de Radix.
+  enfocarConfirmar?: boolean
 }
 
 type ConfirmFn = (mensaje: string, opciones?: ConfirmOptions) => Promise<boolean>
@@ -50,6 +54,7 @@ interface Pendiente {
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [pendiente, setPendiente] = useState<Pendiente | null>(null)
   const resolverRef = useRef<((valor: boolean) => void) | null>(null)
+  const botonConfirmarRef = useRef<HTMLButtonElement>(null)
 
   const confirmar = useCallback<ConfirmFn>((mensaje, opciones) => {
     return new Promise<boolean>((resolve) => {
@@ -68,7 +73,13 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmContext.Provider value={confirmar}>
       {children}
       <Dialog open={pendiente !== null} onOpenChange={(abierto) => !abierto && cerrar(false)}>
-        <DialogContent>
+        <DialogContent
+          onOpenAutoFocus={(e) => {
+            if (!pendiente?.opciones?.enfocarConfirmar) return
+            e.preventDefault()
+            botonConfirmarRef.current?.focus()
+          }}
+        >
           <DialogTitle>{pendiente?.opciones?.titulo ?? 'Confirmar'}</DialogTitle>
           <p className="text-sm text-muted-foreground">{pendiente?.mensaje}</p>
           <div className="mt-6 flex justify-end gap-2">
@@ -78,6 +89,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               </Button>
             )}
             <Button
+              ref={botonConfirmarRef}
               type="button"
               variant={pendiente?.opciones?.destructivo ? 'destructive' : 'default'}
               onClick={() => cerrar(true)}
