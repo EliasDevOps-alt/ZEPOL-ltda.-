@@ -110,14 +110,24 @@ def sincronizar_desde_excel(db: Session, ot: OrdenTrabajo, datos_excel: Dict[str
         for i in producto_terminado.items
     ]
     if nuevos != actuales:
-        producto_terminado.items.clear()
-        db.flush()
+        # Se actualiza cada ítem en su lugar (por número) en vez de borrarlos y
+        # volver a crearlos: así el nombre corto puesto a mano sobrevive, y los
+        # pesajes, que dicen de qué ítem son por su número, siguen enganchados.
+        por_numero = {i.numero: i for i in producto_terminado.items}
         for numero, (codigo, descripcion, total) in enumerate(nuevos, start=1):
-            producto_terminado.items.append(
-                ProductoTerminadoItem(
-                    numero=numero, codigo_producto=codigo, descripcion_producto=descripcion, total=total
+            item = por_numero.pop(numero, None)
+            if item is None:
+                producto_terminado.items.append(
+                    ProductoTerminadoItem(
+                        numero=numero, codigo_producto=codigo, descripcion_producto=descripcion, total=total
+                    )
                 )
-            )
+            else:
+                item.codigo_producto = codigo
+                item.descripcion_producto = descripcion
+                item.total = total
+        for sobrante in por_numero.values():
+            producto_terminado.items.remove(sobrante)
     return producto_terminado
 
 
@@ -178,6 +188,20 @@ def confirmar_unidad(db: Session, numero_ot: str, unidad: str) -> ProductoTermin
             "Esta OT ya tiene pesajes registrados — no se puede cambiar la unidad.",
         )
     producto_terminado.unidad = unidad
+    db.commit()
+    db.refresh(producto_terminado)
+    return producto_terminado
+
+
+def fijar_nombre_corto(db: Session, numero_ot: str, numero: int, nombre: Optional[str]) -> ProductoTerminado:
+    """Nombre corto de un ítem (MANZANA, UVA...) para el recuadro "P." del
+    formulario y los botones de Registro de peso. Se escribe una vez por OT;
+    vacío vuelve al sugerido. No toca el Excel ni la descripción del ítem."""
+    producto_terminado = obtener_abierto(db, numero_ot)
+    item = next((i for i in producto_terminado.items if i.numero == numero), None)
+    if item is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"La OT no tiene ITEM {numero}")
+    item.nombre_corto = (nombre or "").strip().upper()[:30] or None
     db.commit()
     db.refresh(producto_terminado)
     return producto_terminado
@@ -287,6 +311,7 @@ def registrar_pesaje(
     tara: float,
     cantidad: Optional[float],
     usuario: Usuario,
+    item_numero: Optional[int] = None,
 ) -> PesajePt:
     """Un pesado (una bobina o un paquete). cantidad es el número de bolsas
     del paquete, en unidades, también en una OT en MILLAR (Elias: el pedido
@@ -294,6 +319,7 @@ def registrar_pesaje(
     lleva cantidad: la bobina se cuenta por peso."""
     producto_terminado = obtener_abierto(db, numero_ot)
     cantidad_real = _validar_pesaje(producto_terminado, peso_bruto, tara, cantidad)
+    item_numero = _validar_item(producto_terminado, item_numero)
 
     # Bloquea la fila de la OT mientras se calcula el correlativo: dos
     # estaciones pesando la misma OT a la vez no pueden sacar el mismo N°.
@@ -310,6 +336,7 @@ def registrar_pesaje(
         peso_bruto=peso_bruto,
         tara=tara,
         cantidad=cantidad_real,
+        item_numero=item_numero,
         usuario_id=usuario.id,
     )
     db.add(pesaje)
@@ -318,6 +345,17 @@ def registrar_pesaje(
     db.commit()
     db.refresh(pesaje)
     return pesaje
+
+
+def _validar_item(producto_terminado: ProductoTerminado, item_numero: Optional[int]) -> Optional[int]:
+    """De qué ítem es el pesaje. Solo tiene sentido en una OT de 2 o más ítems
+    (ej. OT 58091: manzana, uva y limón); en una de un solo ítem se guarda None
+    (todo es de ese ítem). None en una de varios = "sin separar"."""
+    if item_numero is None or len(producto_terminado.items) < 2:
+        return None
+    if not any(i.numero == item_numero for i in producto_terminado.items):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"La OT no tiene ITEM {item_numero}.")
+    return item_numero
 
 
 def _validar_pesaje(
@@ -359,8 +397,9 @@ def editar_pesaje(
     tara: float,
     cantidad: Optional[float],
     usuario: Usuario,
+    item_numero: Optional[int] = None,
 ) -> PesajePt:
-    """Corrige un pesaje mal cargado. El N° BOB/PAQ no cambia (su etiqueta ya
+    """Corrige un pesaje mal cargado (también de qué producto es). El N° BOB/PAQ no cambia (su etiqueta ya
     puede estar pegada: hay que reimprimirla) ni el pesador original; quién
     corrigió y cuándo queda en editado_por/editado_en, igual que en entregas
     y devoluciones — sin una tabla de auditoría aparte."""
@@ -368,6 +407,7 @@ def editar_pesaje(
     if pesaje is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Pesaje no encontrado")
     pesaje.cantidad = _validar_pesaje(pesaje.producto_terminado, peso_bruto, tara, cantidad)
+    pesaje.item_numero = _validar_item(pesaje.producto_terminado, item_numero)
     fecha_anterior = pesaje.fecha
     pesaje.fecha = fecha
     pesaje.peso_bruto = peso_bruto
@@ -586,7 +626,31 @@ def resumen_pesajes(producto_terminado: ProductoTerminado) -> Dict[str, Any]:
         )
 
     total_kg = sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in producto_terminado.pesajes)
+
+    # Avance por producto (solo OT de 2+ ítems): cada ítem contra su propio
+    # total; lo "sin separar" va aparte, sin %.
+    por_item = []
+    if len(producto_terminado.items) >= 2:
+        factor = FACTOR_UNIDAD.get(unidad or "", 1)
+        grupos = [(i.numero, i.total) for i in producto_terminado.items] + [(None, None)]
+        for numero, total in grupos:
+            pesajes = [p for p in producto_terminado.pesajes if p.item_numero == numero]
+            if numero is None and not pesajes:
+                continue
+            to = to_de(pesajes)
+            pedido = float(total) * factor if total else None
+            por_item.append(
+                {
+                    "item_numero": numero,
+                    "to": to,
+                    "kg": sumar_cantidades(Decimal(str(p.peso_bruto)) - Decimal(str(p.tara)) for p in pesajes),
+                    "paquetes": len(pesajes),
+                    "pedido": pedido,
+                    "porcentaje": (to / pedido * 100) if pedido else None,
+                }
+            )
     return {
+        "por_item": por_item,
         "dias": dias,
         "total_to": acumulado,
         "total_kg": total_kg,

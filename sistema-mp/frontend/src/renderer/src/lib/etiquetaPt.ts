@@ -58,9 +58,12 @@ export function datosEtiquetaDesdePesaje(pt: ProductoTerminado, pesaje: PesajePt
   return {
     numeroOt: pt.numero_ot,
     cliente: pt.cliente ?? '',
-    // Se pesa contra toda la OT, sin distinguir de qué ítem es cada paquete:
-    // con varios productos van todos.
-    producto: pt.items
+    // Si el paquete dice de qué producto es (OT de varios ítems), va ese; si se
+    // pesó "sin separar" o la OT tiene un solo ítem, van todos.
+    producto: (pt.items.filter((item) => item.numero === pesaje.item_numero).length
+      ? pt.items.filter((item) => item.numero === pesaje.item_numero)
+      : pt.items
+    )
       .map((item) => item.descripcion_producto)
       .filter(Boolean)
       .join(' / '),

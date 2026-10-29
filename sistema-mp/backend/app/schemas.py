@@ -736,6 +736,8 @@ class ProductoTerminadoItemOut(BaseModel):
     codigo_producto: Optional[str]
     descripcion_producto: Optional[str]
     total: Optional[float]
+    # Nombre corto puesto a mano (MANZANA); None = el frontend sugiere uno.
+    nombre_corto: Optional[str] = None
 
 
 class ProductoTerminadoOut(BaseModel):
@@ -776,6 +778,11 @@ class ConfirmarUnidadPtIn(BaseModel):
     unidad: str
 
 
+class NombreCortoItemPtIn(BaseModel):
+    # None o "" = volver al nombre sugerido.
+    nombre: Optional[str] = Field(default=None, max_length=30)
+
+
 class MonedaPtIn(BaseModel):
     # None o "" = sin moneda (se deja en blanco para escribirla a mano).
     moneda: Optional[str] = Field(default=None, max_length=20)
@@ -788,6 +795,8 @@ class PesajePtCreate(BaseModel):
     # Bolsas del paquete, en unidades (también en una OT en MILLAR). En KG y
     # BOBINA son las bobinas pesadas juntas (1 si no se manda).
     cantidad: Optional[float] = Field(default=None, gt=0)
+    # De qué ITEM es (OT de 2+ ítems). None = "sin separar" (o OT de un ítem).
+    item_numero: Optional[int] = Field(default=None, gt=0)
 
 
 class PesajePtOut(BaseModel):
@@ -801,6 +810,7 @@ class PesajePtOut(BaseModel):
     peso_neto: float
     # Bolsas del paquete, en unidades; en KG y BOBINA, las bobinas pesadas juntas.
     cantidad: Optional[float]
+    item_numero: Optional[int] = None
     # Inicial del usuario que pesó — lo que va en PESADOR / Per.
     pesador: str
     pesador_nombre: str
@@ -851,8 +861,23 @@ class SidDiaPtOut(BaseModel):
     registrado_en: Optional[datetime]
 
 
+class AvanceItemPtOut(BaseModel):
+    """Avance de un producto en una OT de varios ítems. item_numero None = lo
+    pesado "sin separar"."""
+
+    item_numero: Optional[int]
+    to: float
+    kg: float
+    paquetes: int
+    # Total del ítem en unidades reales; None sin total (o "sin separar").
+    pedido: Optional[float]
+    porcentaje: Optional[float]
+
+
 class PesajesPtOut(BaseModel):
     pesajes: List[PesajePtOut]
+    # Vacío en una OT de un solo ítem.
+    por_item: List[AvanceItemPtOut] = []
     dias: List[DiaPesajePtOut]
     total_to: float
     total_kg: float

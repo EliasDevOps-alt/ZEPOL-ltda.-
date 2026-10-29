@@ -28,12 +28,12 @@ const MAX_ITEMS_FORMULARIO = 5
 // Las dos de siempre; cualquier otra se escribe con "Otra".
 const MONEDAS = ['Bs.', '$us']
 
-// Hoja carta a 96dpi, y el área útil que queda descontando los márgenes que
-// define el @page del formulario (0.72in arriba/abajo, 0.645in a los lados).
-const PAGINA_ANCHO_PX = 816
-const PAGINA_ALTO_PX = 1056
-const MARGEN_VERTICAL_PX = 69
-const MARGEN_HORIZONTAL_PX = 62
+// Hoja carta HORIZONTAL a 96dpi, y el área útil que queda descontando los
+// márgenes que define el @page del formulario (0.5in arriba/abajo, 0.45in a los lados).
+const PAGINA_ANCHO_PX = 1056
+const PAGINA_ALTO_PX = 816
+const MARGEN_VERTICAL_PX = 48
+const MARGEN_HORIZONTAL_PX = 43
 
 type Pestana = 'formulario' | 'peso' | 'sid'
 
@@ -217,7 +217,7 @@ export function ProductoTerminado() {
         formato === 'pdf'
           ? await window.api.exportarFormularioPdf(html, nombreArchivo)
           : formato === 'excel'
-            ? await window.api.exportarFormularioExcel(html, nombreArchivo, 'portrait')
+            ? await window.api.exportarFormularioExcel(html, nombreArchivo, 'landscape')
             : await window.api.exportarFormularioWord(generarDocumentoWordFormularioPt(datos), nombreArchivo)
       setEstado(ruta ? { tipo: 'listo', ruta } : { tipo: 'cancelado' })
     } catch (error) {
@@ -314,7 +314,7 @@ export function ProductoTerminado() {
 
       {pestana === 'peso' &&
         (pt ? (
-          <RegistroPesoPt key={pt.numero_ot} pt={pt} />
+          <RegistroPesoPt key={pt.numero_ot} pt={pt} onPtCambiado={setPt} />
         ) : (
           <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
             Busca una OT para registrar sus pesajes.
@@ -364,8 +364,8 @@ export function ProductoTerminado() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             {pt
-              ? 'Formato P-LOG-001-F-04/V.4.0, tamaño carta. Así se va a ver impreso.'
-              : 'Formato P-LOG-001-F-04/V.4.0 en blanco, tamaño carta. Busca una OT para llenarlo con sus datos.'}
+              ? 'Formato P-LOG-001-F-04/V.4.0, tamaño carta horizontal. Así se va a ver impreso.'
+              : 'Formato P-LOG-001-F-04/V.4.0 en blanco, tamaño carta horizontal. Busca una OT para llenarlo con sus datos.'}
           </p>
 
           {pt && (

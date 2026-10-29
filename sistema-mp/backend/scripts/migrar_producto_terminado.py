@@ -27,6 +27,8 @@ COLUMNAS_POSTERIORES = [
     "ALTER TABLE productos_terminados ADD COLUMN IF NOT EXISTS ediciones_formulario TEXT",
     "ALTER TABLE pesajes_pt ADD COLUMN IF NOT EXISTS editado_por_id INTEGER REFERENCES usuarios(id)",
     "ALTER TABLE pesajes_pt ADD COLUMN IF NOT EXISTS editado_en TIMESTAMP",
+    "ALTER TABLE producto_terminado_items ADD COLUMN IF NOT EXISTS nombre_corto VARCHAR(30)",
+    "ALTER TABLE pesajes_pt ADD COLUMN IF NOT EXISTS item_numero SMALLINT CHECK (item_numero > 0)",
 ]
 
 

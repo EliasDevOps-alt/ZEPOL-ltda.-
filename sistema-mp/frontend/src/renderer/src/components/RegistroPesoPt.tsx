@@ -10,6 +10,7 @@ import { EditorSidDiaPt } from '@renderer/components/EditorSidDiaPt'
 import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
+import { redondearPeso } from '@renderer/lib/utils'
 import { formatearFecha, formatearFechaHoraCompleta, hoyISO } from '@renderer/lib/fechas'
 import {
   avanzaPorCantidad,
@@ -17,7 +18,9 @@ import {
   llevaCantidad,
   NOMBRE_CANTIDAD_PT,
   nombreEnvases,
-  ROTULO_UNIDAD_PT
+  nombresCortosItems,
+  ROTULO_UNIDAD_PT,
+  separaPorProducto
 } from '@renderer/lib/formularioPt'
 import {
   ALTO_ETIQUETA_MM,
@@ -26,7 +29,7 @@ import {
   generarHtmlEtiquetasPt,
   nombreArchivoEtiquetaPt
 } from '@renderer/lib/etiquetaPt'
-import type { PesajePt as Pesaje, ProductoTerminado, UnidadPt } from '@renderer/lib/types'
+import type { AvanceItemPt, PesajePt as Pesaje, ProductoTerminado, UnidadPt } from '@renderer/lib/types'
 
 /** Sin ceros de más y con punto decimal, como se escribe en el formulario. */
 function num(valor: number, decimales = 3): string {
@@ -60,6 +63,113 @@ function textoPedido(pt: ProductoTerminado): string {
   return pt.unidad === 'MILLAR' && pt.pedido_total_real !== null
     ? `${base} (${num(pt.pedido_total_real)} bolsas)`
     : base
+}
+
+/** Nombre del producto de un pesaje en una OT de varios productos. */
+function nombreProducto(nombres: Map<number, string>, itemNumero: number | null): string {
+  return itemNumero === null ? 'Sin separar' : (nombres.get(itemNumero) ?? `ITEM ${itemNumero}`)
+}
+
+/**
+ * Botones para elegir de qué producto es el pesaje (OT de 2+ ítems, ej. OT
+ * 58091: manzana, uva y limón) y la opción "Sin separar" para las OT que en la
+ * práctica se pesan todo junto. Con `onPtCambiado` el nombre de cada botón se
+ * corrige ahí mismo (lápiz al lado): es el nombre corto que va también en el
+ * recuadro "P." del formulario. Se sugiere solo; se corrige una vez por OT.
+ */
+function SelectorProducto({
+  pt,
+  valor,
+  onCambiar,
+  onPtCambiado
+}: {
+  pt: ProductoTerminado
+  valor: number | null
+  onCambiar: (item: number | null) => void
+  onPtCambiado?: (pt: ProductoTerminado) => void
+}) {
+  const { apiBaseUrl } = useConfig()
+  const { sesion } = useAuth()
+  const nombres = nombresCortosItems(pt.items)
+  const [editando, setEditando] = useState<number | null>(null)
+  const [texto, setTexto] = useState('')
+  const guardar = useMutation({
+    mutationFn: ({ numero, nombre }: { numero: number; nombre: string }) =>
+      api.fijarNombreCortoItemPt(apiBaseUrl, sesion!.token, pt.numero_ot, numero, nombre || null),
+    onSuccess: (datos) => {
+      setEditando(null)
+      onPtCambiado?.(datos)
+    }
+  })
+  const opciones: (number | null)[] = [...pt.items.map((i) => i.numero), null]
+  return (
+    <div className="space-y-1">
+      <Label>Producto</Label>
+      <div className="flex flex-wrap items-center gap-2">
+        {opciones.map((numero) =>
+          numero !== null && editando === numero ? (
+            // Un <div> y no un <form>: este selector va dentro del formulario del pesaje.
+            <div key={numero} className="flex items-center gap-1">
+              <Input
+                autoFocus
+                maxLength={30}
+                value={texto}
+                onChange={(e) => setTexto(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    guardar.mutate({ numero, nombre: texto.trim() })
+                  } else if (e.key === 'Escape') {
+                    setEditando(null)
+                  }
+                }}
+                className="h-8 w-36"
+                placeholder="Ej. MANZANA"
+              />
+              <Button
+                type="button"
+                size="sm"
+                title="Guardar el nombre"
+                disabled={guardar.isPending}
+                onClick={() => guardar.mutate({ numero, nombre: texto.trim() })}
+              >
+                <Check className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" size="sm" variant="outline" title="Cancelar" onClick={() => setEditando(null)}>
+                <X className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div key={numero ?? 'sin'} className="flex items-center gap-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={valor === numero ? 'default' : 'outline'}
+                title={numero !== null ? (pt.items.find((i) => i.numero === numero)?.descripcion_producto ?? '') : undefined}
+                onClick={() => onCambiar(numero)}
+              >
+                {nombreProducto(nombres, numero)}
+              </Button>
+              {numero !== null && onPtCambiado && (
+                <button
+                  type="button"
+                  title="Cambiar el nombre de este producto"
+                  onClick={() => {
+                    setTexto(nombres.get(numero) ?? '')
+                    setEditando(numero)
+                  }}
+                  className="rounded-md border border-border p-1 hover:bg-muted"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )
+        )}
+      </div>
+      {guardar.isError && <p className="text-sm text-destructive">{guardar.error.message}</p>}
+    </div>
+  )
 }
 
 type EstadoExportacion =
@@ -146,7 +256,13 @@ function VistaEtiqueta({ pt, pesaje }: { pt: ProductoTerminado; pesaje: Pesaje }
  * se sigue en la misma OT (pedido de Elias; antes era un submódulo aparte con
  * su propia búsqueda).
  */
-export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
+export function RegistroPesoPt({
+  pt,
+  onPtCambiado
+}: {
+  pt: ProductoTerminado
+  onPtCambiado: (pt: ProductoTerminado) => void
+}) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
   const token = sesion!.token
@@ -160,6 +276,9 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
 
   const unidad = pt.unidad
   const rotuloTo = unidad ? ROTULO_TO[unidad] : ''
+  // OT de varios productos (manzana, uva, limón): cada pesaje dice de cuál es.
+  const separa = separaPorProducto(pt.items)
+  const nombres = useMemo(() => nombresCortosItems(pt.items), [pt.items])
 
   const etiquetas = useExportarEtiquetas(pt)
   const [editando, setEditando] = useState<number | null>(null)
@@ -217,6 +336,9 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
             <span className="text-muted-foreground">Pedido total:</span> {textoPedido(pt)}
           </p>
           {pesajes.data && <Avance unidad={unidad} pt={pt} datos={pesajes.data} />}
+          {pesajes.data && separa && (
+            <AvancePorProducto unidad={unidad} nombres={nombres} porItem={pesajes.data.por_item} />
+          )}
         </CardContent>
       </Card>
 
@@ -226,6 +348,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
           pt={pt}
           unidad={unidad}
           ultimo={pesajes.data?.pesajes.at(-1) ?? null}
+          onPtCambiado={onPtCambiado}
           onRegistrado={() =>
             queryClient.invalidateQueries({
               queryKey: ['pesajes-pt', pt.numero_ot]
@@ -283,6 +406,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                   {dia.porcentaje_acumulado !== null && (
                     <span className="font-semibold">{Math.round(dia.porcentaje_acumulado)}% acumulado</span>
                   )}
+                  {separa && <ToPorProductoDelDia pesajes={dia.pesajes} nombres={nombres} unidad={unidad} />}
                   <Button
                     size="sm"
                     variant="outline"
@@ -308,6 +432,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                   <thead className="text-left text-xs text-muted-foreground">
                     <tr>
                       <th className="px-3 py-1">N°</th>
+                      {separa && <th className="px-3 py-1">Producto</th>}
                       <th className="px-3 py-1">Hora</th>
                       <th className="px-3 py-1 text-right">Bruto</th>
                       <th className="px-3 py-1 text-right">Tara</th>
@@ -325,8 +450,9 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                         <FilaEdicion
                           key={p.id}
                           pesaje={p}
+                          pt={pt}
                           unidad={unidad}
-                          columnas={llevaCantidad(unidad) ? 8 : 7}
+                          columnas={(llevaCantidad(unidad) ? 8 : 7) + (separa ? 1 : 0)}
                           onCancelar={() => setEditando(null)}
                           onGuardado={(nuevo) => {
                             setEditando(null)
@@ -339,6 +465,7 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
                       ) : (
                         <tr key={p.id} className="border-t border-border">
                           <td className="px-3 py-1 font-medium">{p.numero}</td>
+                          {separa && <td className="px-3 py-1">{nombreProducto(nombres, p.item_numero)}</td>}
                           <td className="px-3 py-1">{p.hora.slice(0, 5)}</td>
                           <td className="px-3 py-1 text-right">{num(p.peso_bruto)}</td>
                           <td className="px-3 py-1 text-right">{num(p.tara)}</td>
@@ -412,12 +539,14 @@ export function RegistroPesoPt({ pt }: { pt: ProductoTerminado }) {
  */
 function FilaEdicion({
   pesaje,
+  pt,
   unidad,
   columnas,
   onCancelar,
   onGuardado
 }: {
   pesaje: Pesaje
+  pt: ProductoTerminado
   unidad: UnidadPt
   columnas: number
   onCancelar: () => void
@@ -431,6 +560,7 @@ function FilaEdicion({
   const [tara, setTara] = useState(num(pesaje.tara))
   const [cantidad, setCantidad] = useState(pesaje.cantidad !== null ? num(pesaje.cantidad) : '')
   const cantidadNum = cantidadDelCampo(unidad, cantidad)
+  const [item, setItem] = useState<number | null>(pesaje.item_numero)
 
   const bruto = Number(pesoBruto)
   const taraNum = tara === '' ? 0 : Number(tara)
@@ -443,7 +573,8 @@ function FilaEdicion({
         fecha,
         peso_bruto: bruto,
         tara: taraNum,
-        cantidad: conCantidad ? cantidadNum : null
+        cantidad: conCantidad ? cantidadNum : null,
+        item_numero: item
       }),
     onSuccess: onGuardado
   })
@@ -459,6 +590,7 @@ function FilaEdicion({
           }}
         >
           <span className="self-center font-medium">N° {pesaje.numero}</span>
+          {separaPorProducto(pt.items) && <SelectorProducto pt={pt} valor={item} onCambiar={setItem} />}
           <div className="space-y-1">
             <Label htmlFor={`ed-fecha-${pesaje.id}`}>Fecha</Label>
             <Input
@@ -594,16 +726,87 @@ function Avance({
   )
 }
 
+/** Avance de cada producto contra su propio total (OT de varios productos). El
+ * % por producto se ve solo acá; en el formulario va el del total del día. */
+function AvancePorProducto({
+  unidad,
+  nombres,
+  porItem
+}: {
+  unidad: UnidadPt
+  nombres: Map<number, string>
+  porItem: AvanceItemPt[]
+}) {
+  return (
+    <div className="space-y-2 rounded-md border border-border p-3">
+      {porItem.map((a) => (
+        <div key={a.item_numero ?? 'sin'} className="space-y-1">
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <strong className="min-w-28">{nombreProducto(nombres, a.item_numero)}</strong>
+            <span>
+              {num(a.to, 2)} {ROTULO_TO[unidad]}
+              {a.pedido !== null && (
+                <span className="text-muted-foreground">
+                  {' '}
+                  de {num(a.pedido)} {ROTULO_TO[unidad]}
+                </span>
+              )}
+            </span>
+            <span className="text-muted-foreground">
+              {a.paquetes} {a.paquetes === 1 ? 'paquete' : 'paquetes'}
+            </span>
+            {a.porcentaje !== null && <strong>{Math.round(a.porcentaje)}%</strong>}
+          </div>
+          {a.porcentaje !== null && (
+            <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+              <div
+                className={a.porcentaje >= 100 ? 'h-full bg-success' : 'h-full bg-primary'}
+                style={{ width: `${Math.min(100, a.porcentaje)}%` }}
+              />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** To de cada producto en un día ("MANZANA 120 kg · UVA 80 kg"), como lo
+ * separan en el papel. */
+function ToPorProductoDelDia({
+  pesajes,
+  nombres,
+  unidad
+}: {
+  pesajes: Pesaje[]
+  nombres: Map<number, string>
+  unidad: UnidadPt
+}) {
+  const porPeso = !avanzaPorCantidad(unidad)
+  const grupos = new Map<number | null, number>()
+  for (const p of pesajes) {
+    grupos.set(p.item_numero, redondearPeso((grupos.get(p.item_numero) ?? 0) + (porPeso ? p.peso_neto : (p.cantidad ?? 0))))
+  }
+  const orden = [...grupos.keys()].sort((a, b) => (a ?? Infinity) - (b ?? Infinity))
+  return (
+    <span className="basis-full text-muted-foreground">
+      {orden.map((numero) => `${nombreProducto(nombres, numero)}: ${num(grupos.get(numero)!, 2)} ${ROTULO_TO[unidad]}`).join(' · ')}
+    </span>
+  )
+}
+
 function FormularioPesaje({
   pt,
   unidad,
   ultimo,
-  onRegistrado
+  onRegistrado,
+  onPtCambiado
 }: {
   pt: ProductoTerminado
   unidad: UnidadPt
   ultimo: Pesaje | null
   onRegistrado: () => void
+  onPtCambiado: (pt: ProductoTerminado) => void
 }) {
   const { apiBaseUrl } = useConfig()
   const { sesion } = useAuth()
@@ -614,6 +817,12 @@ function FormularioPesaje({
   const [tara, setTara] = useState('')
   const [cantidad, setCantidad] = useState('')
   const cantidadNum = cantidadDelCampo(unidad, cantidad)
+  // Producto elegido (OT de varios productos). Arranca en "Sin separar" (pedido
+  // de Elias) y, una vez elegido uno, queda para los pesajes siguientes, como
+  // la tara: en planta pesan todo un producto y después el otro.
+  const separa = separaPorProducto(pt.items)
+  const [item, setItem] = useState<number | null>(null)
+  const nombres = useMemo(() => nombresCortosItems(pt.items), [pt.items])
   const [registrado, setRegistrado] = useState<Pesaje | null>(null)
   const pesoRef = useRef<HTMLInputElement>(null)
   const etiquetas = useExportarEtiquetas(pt)
@@ -640,7 +849,8 @@ function FormularioPesaje({
         fecha,
         peso_bruto: bruto,
         tara: taraNum,
-        cantidad: conCantidad ? cantidadNum : null
+        cantidad: conCantidad ? cantidadNum : null,
+        item_numero: separa ? item : null
       }),
     onSuccess: (pesaje) => {
       setRegistrado(pesaje)
@@ -665,6 +875,7 @@ function FormularioPesaje({
       </CardHeader>
       <CardContent>
         <form onSubmit={enviar} className="space-y-4">
+          {separa && <SelectorProducto pt={pt} valor={item} onCambiar={setItem} onPtCambiado={onPtCambiado} />}
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="space-y-1">
               <Label htmlFor="pesaje-fecha">Fecha</Label>
@@ -738,7 +949,9 @@ function FormularioPesaje({
           {registrado && !registrar.isError && (
             <div className="space-y-3 rounded-md border border-success/40 bg-success/10 p-3">
               <p className="text-sm text-success">
-                Pesaje N° {registrado.numero} registrado: {num(registrado.peso_neto)} kg netos
+                Pesaje N° {registrado.numero}
+                {separa ? ` (${nombreProducto(nombres, registrado.item_numero)})` : ''} registrado:{' '}
+                {num(registrado.peso_neto)} kg netos
                 {conCantidad && registrado.cantidad !== null
                   ? `, ${num(registrado.cantidad)} ${nombreEnvases(unidad, registrado.cantidad)}`
                   : ''}

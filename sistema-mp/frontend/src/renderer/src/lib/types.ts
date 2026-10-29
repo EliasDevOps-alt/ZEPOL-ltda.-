@@ -596,6 +596,8 @@ export interface ProductoTerminadoItem {
   descripcion_producto: string | null
   // Como en el Excel: en MILLAR va en miles.
   total: number | null
+  // Nombre corto puesto a mano (MANZANA); null = se sugiere (nombreCortoItem).
+  nombre_corto: string | null
 }
 
 export interface ProductoTerminado {
@@ -629,6 +631,8 @@ export interface PesajePtCreate {
   // Bolsas del paquete, en unidades (también en una OT en MILLAR). Sin
   // cantidad en KG.
   cantidad: number | null
+  // De qué ITEM es (OT de 2+ ítems); null = "sin separar" o OT de un ítem.
+  item_numero: number | null
 }
 
 export interface PesajePt {
@@ -642,6 +646,8 @@ export interface PesajePt {
   peso_neto: number
   // Bolsas del paquete, en unidades; null en KG.
   cantidad: number | null
+  // De qué ITEM es (OT de 2+ ítems); null = "sin separar" o OT de un ítem.
+  item_numero: number | null
   // Inicial del usuario que pesó.
   pesador: string
   pesador_nombre: string
@@ -685,8 +691,21 @@ export interface SidDiaPt {
   registrado_en: string | null
 }
 
+/** Avance de un producto en una OT de varios ítems (item_numero null = "sin separar"). */
+export interface AvanceItemPt {
+  item_numero: number | null
+  to: number
+  kg: number
+  paquetes: number
+  // Total del ítem en unidades reales.
+  pedido: number | null
+  porcentaje: number | null
+}
+
 export interface PesajesPt {
   pesajes: PesajePt[]
+  // Vacío en una OT de un solo ítem.
+  por_item: AvanceItemPt[]
   dias: DiaPesajePt[]
   total_to: number
   total_kg: number
