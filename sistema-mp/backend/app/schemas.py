@@ -34,6 +34,18 @@ class UsuarioLoginOut(BaseModel):
     nombre: str
 
 
+class CredencialOfflineOut(BaseModel):
+    """Lo mínimo para que una estación verifique una clave SIN conexión: el hash
+    bcrypt (nunca la clave) más lo que hace falta para armar la sesión."""
+
+    id: int
+    inicial: str
+    nombre: str
+    rol: str
+    modulos_restringidos: List[str] = []
+    password_hash: str
+
+
 class UsuarioAdminOut(BaseModel):
     id: int
     inicial: str

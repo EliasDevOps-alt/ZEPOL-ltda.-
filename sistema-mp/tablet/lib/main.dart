@@ -11,6 +11,7 @@ import 'pantallas/configuracion_servidor.dart';
 import 'pantallas/inicio.dart';
 import 'pantallas/login.dart';
 import 'tema.dart';
+import 'widgets/barra_conexion.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -73,11 +74,14 @@ class _ZepolTabletState extends State<ZepolTablet> with WidgetsBindingObserver {
       providers: [
         ChangeNotifierProvider.value(value: sesion.repo),
         ChangeNotifierProvider.value(value: sesion.actualizador),
+        ChangeNotifierProvider.value(value: sesion.conexion),
       ],
       child: MaterialApp(
         title: 'ZEPOL',
         debugShowCheckedModeBanner: false,
         theme: temaZepol(),
+        // La barra roja / verde de conexión queda arriba de todas las pantallas.
+        builder: (context, child) => Column(children: [const BarraConexion(), Expanded(child: child ?? const SizedBox())]),
         home: pantalla,
       ),
     );

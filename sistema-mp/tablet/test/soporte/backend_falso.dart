@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:bcrypt/bcrypt.dart';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -29,6 +30,25 @@ class BackendFalso {
 
   /// Si se define, toda petición autenticada responde este código (ej. 401).
   int? forzarError;
+
+  /// Hash bcrypt de la clave de cada usuario (como los guarda el backend); se
+  /// calculan una vez y rápido (4 vueltas) para no demorar las pruebas.
+  late final hashes = <String, String>{
+    for (final u in usuarios) u['inicial'] as String: BCrypt.hashpw(clave, BCrypt.gensalt(logRounds: 4)),
+  };
+
+  /// Claves cambiadas en el servidor (inicial → clave nueva); su hash cambia con ellas.
+  final cambiosDeClave = <String, String>{};
+  bool sinFuncionCredenciales = false;
+
+  /// Cambia la clave de un usuario en el servidor.
+  void cambiarClave(String inicial, String nueva) {
+    cambiosDeClave[inicial] = nueva;
+    hashes[inicial] = BCrypt.hashpw(nueva, BCrypt.gensalt(logRounds: 4));
+  }
+
+  /// Usuarios que el servidor NO entrega para entrar sin conexión (dados de baja).
+  final inactivos = <String>{};
 
   /// Versión de la app de la tablet publicada en /updates/tablet (null = ninguna).
   Map<String, dynamic>? manifiestoTablet;
@@ -432,12 +452,23 @@ class BackendFalso {
     if (ruta == '/auth/login') {
       final c = cuerpo();
       final u = usuarios.where((x) => x['inicial'] == c['inicial']).firstOrNull;
-      if (u == null || c['password'] != clave) return _error(401, 'Usuario o clave incorrectos');
+      final claveReal = cambiosDeClave[c['inicial']] ?? clave;
+      if (u == null || inactivos.contains(u['inicial']) || c['password'] != claveReal) {
+        return _error(401, 'Usuario o clave incorrectos');
+      }
       return _json({'access_token': 'tok-${u['inicial']}', 'token_type': 'bearer', 'usuario': u});
     }
 
     final usuario = _usuarioDelToken(req);
     if (usuario == null) return _error(401, 'No autenticado');
+    if (ruta == '/auth/credenciales-offline') {
+      if (sinFuncionCredenciales) return _error(404, 'Not Found');
+      return _json([
+        for (final u in usuarios)
+          if (!inactivos.contains(u['inicial']))
+            {...u, 'password_hash': hashes[u['inicial']]},
+      ]);
+    }
     if (forzarError != null) return _error(forzarError!, 'Error forzado');
     bool puede(String modulo) =>
         usuario['rol'] == 'admin' || !(usuario['modulos_restringidos'] as List).contains(modulo);

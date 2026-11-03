@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../estado/credenciales.dart';
 import 'modelos.dart';
 
 class ApiError implements Exception {
@@ -17,7 +18,8 @@ class ApiError implements Exception {
 /// Cliente de la API del backend (el mismo que usa el escritorio, ver
 /// frontend/src/renderer/src/lib/api.ts). Cada función es un endpoint.
 class Api {
-  Api(this.baseUrl, {this.token, this.alExpirarSesion, this.alEscribir, http.Client? cliente}) : _cliente = cliente;
+  Api(this.baseUrl, {this.token, this.alExpirarSesion, this.alEscribir, this.alResultadoDeRed, http.Client? cliente})
+      : _cliente = cliente;
 
   final String baseUrl;
   // En los tests se pasa un cliente falso (backend en memoria); en la app, null.
@@ -27,6 +29,9 @@ class Api {
   final void Function()? alExpirarSesion;
   // Se llama tras registrar, corregir o borrar algo: la copia local se pone al día.
   final void Function()? alEscribir;
+  // Se llama con cada intento de hablar con el servidor: true si contestó (aunque sea
+  // con un error), false si no hubo red o no respondió a tiempo.
+  final void Function(bool contesto)? alResultadoDeRed;
 
   static const _tiempoLimite = Duration(seconds: 20);
   // Las consultas de TODAS las OT (Historial, listas de pendientes) son grandes:
@@ -45,10 +50,13 @@ class Api {
       final enviado = _cliente != null ? _cliente.send(req) : req.send();
       res = await http.Response.fromStream(await enviado.timeout(limite ?? _tiempoLimite));
     } on TimeoutException {
+      alResultadoDeRed?.call(false);
       throw ApiError('El servidor no respondió a tiempo');
     } catch (_) {
+      alResultadoDeRed?.call(false);
       throw ApiError('No se pudo conectar con el servidor ($baseUrl)');
     }
+    alResultadoDeRed?.call(true);
 
     final texto = utf8.decode(res.bodyBytes);
     if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -87,10 +95,13 @@ class Api {
       try {
         res = await (propio ?? _cliente!).send(req).timeout(_tiempoLimite);
       } catch (_) {
+        alResultadoDeRed?.call(false);
         throw ApiError('No se pudo conectar con el servidor ($baseUrl)');
       }
+      alResultadoDeRed?.call(true);
       if (res.statusCode == 401) {
-        alExpirarSesion?.call();
+        // Sin sesión todavía (entró sin conexión) no es una sesión vencida.
+        if (token != null) alExpirarSesion?.call();
         throw ApiError('Sesión vencida', status: 401);
       }
       if (res.statusCode != 200) throw ApiError('Error ${res.statusCode}', status: res.statusCode);
@@ -125,6 +136,10 @@ class Api {
         as Map<String, dynamic>;
     return (j['access_token'] as String, Usuario.fromJson(j['usuario'] as Map<String, dynamic>));
   }
+
+  /// Los usuarios con el hash de su clave, para entrar cuando no hay conexión (ver estado/credenciales.dart).
+  Future<List<CredencialLocal>> credencialesOffline() async =>
+      _lista(await _pedir('GET', '/auth/credenciales-offline'), CredencialLocal.fromJson);
 
   // ---- Catálogos ----
 

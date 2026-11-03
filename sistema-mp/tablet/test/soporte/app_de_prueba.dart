@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:bcrypt/bcrypt.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -29,6 +30,8 @@ Future<Sesion> montarApp(
   bool forzarTamano = true,
   // Para probar las actualizaciones de la app (null = sin ese mecanismo).
   PlataformaActualizador? plataforma,
+  // Datos ya guardados en la tablet (SharedPreferences), por ejemplo los usuarios para entrar sin conexión.
+  Map<String, Object> guardado = const {},
 }) async {
   if (forzarTamano) tamanoTablet(tester);
   final valores = <String, Object>{};
@@ -37,8 +40,14 @@ Future<Sesion> montarApp(
     final u = backend.usuarios.firstWhere((x) => x['inicial'] == usuario);
     valores['zepol.sesion'] = jsonEncode({'token': 'tok-$usuario', 'usuario': u});
   }
+  valores.addAll(guardado);
   SharedPreferences.setMockInitialValues(valores);
-  final sesion = Sesion(cliente: backend.cliente, plataforma: plataforma);
+  final sesion = Sesion(
+    cliente: backend.cliente,
+    plataforma: plataforma,
+    // Sin hilos aparte: en las pruebas de pantalla el reloj es simulado.
+    verificadorDeClave: (clave, hash) async => BCrypt.checkpw(clave, hash),
+  );
   await sesion.cargar();
   await tester.pumpWidget(ChangeNotifierProvider.value(value: sesion, child: const ZepolTablet()));
   await tester.pumpAndSettle();
@@ -116,3 +125,10 @@ Future<void> elegirEnLista(WidgetTester tester, String rotulo, String opcion) as
   await tester.tap(find.text(opcion).last);
   await tester.pumpAndSettle();
 }
+
+/// Lo que la tablet guarda para entrar sin conexión (como lo dejaría una sincronización).
+Map<String, Object> usuariosParaEntrarSinConexion(BackendFalso backend) => {
+      'zepol.credenciales:${BackendFalso.servidor}': jsonEncode([
+        for (final u in backend.usuarios) {...u, 'password_hash': backend.hashes[u['inicial']]},
+      ]),
+    };

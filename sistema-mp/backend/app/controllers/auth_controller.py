@@ -27,3 +27,14 @@ def listar_usuarios_activos(db: Session) -> List[Usuario]:
     Login — se pide sin estar autenticado todavía, por eso no expone nada
     más (ni rol, ni si tienen o no contraseña)."""
     return db.scalars(select(Usuario).where(Usuario.activo.is_(True)).order_by(Usuario.nombre)).all()
+
+
+def listar_credenciales_offline(db: Session) -> List[Usuario]:
+    """Usuarios activos con clave, para que la tablet pueda iniciar sesión cuando
+    se queda sin conexión al servidor. Se entregan los hashes bcrypt, nunca las
+    claves; hace falta una sesión iniciada (ver auth_view)."""
+    return db.scalars(
+        select(Usuario)
+        .where(Usuario.activo.is_(True), Usuario.password_hash.is_not(None))
+        .order_by(Usuario.nombre)
+    ).all()

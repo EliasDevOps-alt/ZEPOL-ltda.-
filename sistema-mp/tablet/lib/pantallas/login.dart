@@ -27,7 +27,7 @@ class _LoginState extends State<Login> {
   void initState() {
     super.initState();
     final sesion = context.read<Sesion>();
-    _usuarios = sesion.usuariosGuardados();
+    _usuarios = sesion.usuariosGuardados() ?? _deLaCopiaLocal(sesion);
     final ultimo = sesion.ultimoUsuario;
     if (ultimo.isNotEmpty) _inicial = ultimo;
     _cargarUsuarios();
@@ -38,6 +38,10 @@ class _LoginState extends State<Login> {
     _password.dispose();
     super.dispose();
   }
+
+  /// Los usuarios que la tablet guardó para poder entrar sin conexión (null si no hay).
+  List<UsuarioLogin>? _deLaCopiaLocal(Sesion sesion) =>
+      sesion.credenciales.hayGuardadas ? sesion.credenciales.todas.map((c) => c.toLogin()).toList() : null;
 
   Future<void> _cargarUsuarios() async {
     final sesion = context.read<Sesion>();
@@ -54,7 +58,13 @@ class _LoginState extends State<Login> {
         }
         return;
       } catch (e) {
-        if (intento == 2 && mounted) setState(() => _errorUsuarios = '$e');
+        if (intento == 2 && mounted) {
+          setState(() {
+            _errorUsuarios = '$e';
+            // Sin conexión: se ofrecen los usuarios guardados en la tablet.
+            _usuarios ??= _deLaCopiaLocal(sesion);
+          });
+        }
         await Future<void>.delayed(const Duration(milliseconds: 800));
       }
     }
@@ -120,7 +130,10 @@ class _LoginState extends State<Login> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text('No se pudo cargar la lista de usuarios.',
+                          child: Text(
+                              usuarios.isNotEmpty
+                                  ? 'Sin conexión: se usan los usuarios guardados en la tablet.'
+                                  : 'No se pudo cargar la lista de usuarios.',
                               style: TextStyle(color: Theme.of(context).colorScheme.error, fontSize: 13)),
                         ),
                         TextButton(onPressed: _cargarUsuarios, child: const Text('Reintentar')),

@@ -82,6 +82,8 @@ class Equipo {
     await sesion.cargar();
     await sesion.fijarServidor(BackendFalso.servidor);
     await sesion.iniciarSesion(usuario, BackendFalso.clave);
+    // Los usuarios para entrar sin conexión se bajan sin esperar: acá se deja listo.
+    await sesion.sincronizarCredenciales();
     return Equipo._(nombre, backend, red, sesion, d);
   }
 

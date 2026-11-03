@@ -72,6 +72,10 @@ class Repositorio extends ChangeNotifier {
   final Duration intervalo;
   final Duration esperaMaximaReconexion;
 
+  /// Se llama al terminar bien cada ronda completa (la sesión aprovecha para
+  /// renovar los usuarios guardados para entrar sin conexión).
+  void Function()? alRondaCompleta;
+
   // Tablas que se copian: clave → ruta del servidor.
   static const _rutas = {
     'ordenes': '/ordenes-trabajo',
@@ -221,7 +225,11 @@ class Repositorio extends ChangeNotifier {
       } catch (_) {
         // Sin red o servidor caído: se reintenta abajo.
       }
+      final estabaConectado = avisosConectados;
       avisosConectados = false;
+      // Se cortó una conexión que estaba viva: se comprueba YA si hay servidor
+      // (así el aviso de "sin conexión" sale al momento y no a la siguiente ronda).
+      if (estabaConectado && _escuchando && !_cerrado) unawaited(sincronizar());
       primera = false;
       if (!_escuchando || _cerrado) break;
       await Future<void>.delayed(espera);
@@ -350,6 +358,7 @@ class Repositorio extends ChangeNotifier {
         }
       }
       sincronizadoEn = DateTime.now();
+      alRondaCompleta?.call();
       if (_refrescadasEnRonda.isNotEmpty) {
         _otsPorRefrescar.addAll(_refrescadasEnRonda);
         _refrescadasEnRonda.clear();

@@ -177,15 +177,14 @@ void main() {
     expect(servidor.conexionesDeAvisos, 1);
   });
 
-  test('114. si el servidor corta la conexión, la tablet reconecta y se pone al día de lo que se perdió', () async {
-    final sinAviso = await pc.entregar(12, [10]); // pasa mientras no hay conexión
+  test('114. si el servidor corta la conexión, la tablet lo comprueba enseguida, reconecta y se pone al día', () async {
+    final sinAviso = await pc.entregar(12, [10]); // pasa sin que llegue ningún aviso
     servidor.cortarAvisos();
     expect(await esperar(() => !tablet.repo.avisosConectados), isTrue);
-    expect(entrega(sinAviso), isNull);
-    // Reconecta (a los ~1 s) y sincroniza todo.
-    expect(await esperar(() => entrega(sinAviso) != null, limite: const Duration(seconds: 5)), isTrue);
-    expect(servidor.conexionesDeAvisos, 1);
-    // Y los avisos vuelven a funcionar.
+    // Al caerse la conexión se sincroniza todo enseguida (no espera a la ronda de 60 s).
+    expect(await esperar(() => entrega(sinAviso) != null), isTrue);
+    // Reconecta (a los ~1 s) y los avisos vuelven a funcionar.
+    expect(await esperar(() => servidor.conexionesDeAvisos == 1, limite: const Duration(seconds: 5)), isTrue);
     final otro = await pc.entregar(12, [2]);
     servidor.avisar(['1000']);
     expect(await esperar(() => entrega(otro) != null), isTrue);
