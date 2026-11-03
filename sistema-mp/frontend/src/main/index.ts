@@ -5,6 +5,7 @@ import { autoUpdater } from 'electron-updater'
 import log from 'electron-log/main'
 import { construirExcelDesdeHtml, type OrientacionHoja } from './excelFormulario'
 import { imprimirPdfDirecto } from './impresionDirecta'
+import { enviarZpl, IMPRESORA_ETIQUETAS } from './impresionEtiqueta'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
@@ -138,6 +139,27 @@ async function imprimirFormulario(html: string): Promise<ResultadoImpresion> {
     }
   }
   return (await imprimirConDialogo(html)) ? 'dialogo' : 'cancelado'
+}
+
+// Botón "Imprimir etiqueta": manda el ZPL directo a la etiquetadora térmica
+// (SAT TT460 UE) de esta PC o de la que tenga compartida, ver impresionEtiqueta.ts.
+// Devuelve el nombre de la impresora usada; rechaza con un mensaje entendible si
+// esta PC no la tiene instalada, está apagada o desconectada.
+async function imprimirEtiquetas(zpl: string): Promise<string> {
+  const ventana = new BrowserWindow({ show: false, webPreferences: { sandbox: false } })
+  try {
+    const impresoras = await ventana.webContents.getPrintersAsync()
+    const impresora = impresoras.find((p) => IMPRESORA_ETIQUETAS.test(p.name))
+    if (!impresora) {
+      throw new Error(
+        'No encuentro la impresora de etiquetas (SAT TT460) en esta PC. Instala su controlador o conéctala por USB.'
+      )
+    }
+    await enviarZpl(impresora.name, zpl)
+    return impresora.name
+  } finally {
+    ventana.destroy()
+  }
 }
 
 // Imprime el mismo HTML con el cuadro de impresión de Windows (silent: false):
@@ -349,6 +371,7 @@ app.whenReady().then(() => {
     (_event, html: string, nombreSugerido: string) => exportarFormularioPdf(html, nombreSugerido)
   )
   ipcMain.handle('formulario:imprimir', (_event, html: string) => imprimirFormulario(html))
+  ipcMain.handle('etiqueta:imprimir', (_event, zpl: string) => imprimirEtiquetas(zpl))
   ipcMain.handle(
     'formulario:exportarWord',
     (_event, html: string, nombreSugerido: string) => exportarFormularioWord(html, nombreSugerido)

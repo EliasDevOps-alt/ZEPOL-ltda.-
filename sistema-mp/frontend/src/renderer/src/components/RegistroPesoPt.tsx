@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Loader2, Pencil, Printer, Scale, X } from 'lucide-react'
+import { Check, FileText, Loader2, Pencil, Printer, Scale, X } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -27,6 +27,7 @@ import {
   ANCHO_ETIQUETA_MM,
   datosEtiquetaDesdePesaje,
   generarHtmlEtiquetasPt,
+  generarZplEtiquetasPt,
   nombreArchivoEtiquetaPt
 } from '@renderer/lib/etiquetaPt'
 import type { AvanceItemPt, PesajePt as Pesaje, ProductoTerminado, UnidadPt } from '@renderer/lib/types'
@@ -173,18 +174,33 @@ function SelectorProducto({
 }
 
 type EstadoExportacion =
-  { tipo: 'inactivo' } | { tipo: 'exportando' } | { tipo: 'listo'; ruta: string } | { tipo: 'error'; mensaje: string }
+  | { tipo: 'inactivo' }
+  | { tipo: 'exportando' }
+  | { tipo: 'listo'; ruta: string }
+  | { tipo: 'impreso'; cantidad: number; impresora: string }
+  | { tipo: 'error'; accion: 'guardar' | 'imprimir'; mensaje: string }
+
+// Más etiquetas que esto en un solo clic (ej. "Etiquetas del día" de un día de
+// 150 pesajes) piden confirmación: sale papel de verdad y no se puede deshacer.
+const ETIQUETAS_SIN_CONFIRMAR = 10
+
+/** Electron antepone "Error invoking remote method '...': Error: " al mensaje. */
+function mensajeDeError(error: unknown): string {
+  const texto = error instanceof Error ? error.message : String(error)
+  return texto.replace(/^Error invoking remote method '[^']+': (Error: )?/, '')
+}
 
 /**
- * Guarda en un PDF las etiquetas de uno o varios pesajes (una por página).
- * Todavía no hay impresora de etiquetas: por ahora sale en PDF para
- * mostrarlo; cuando la haya, esto pasa a imprimir directo.
+ * Etiquetas de uno o varios pesajes (una por etiqueta): `imprimir` las manda
+ * directo a la etiquetadora térmica (SAT TT460, en ZPL) y `exportar` las guarda
+ * en un PDF, por si hace falta verlas o la impresora no está.
  */
 function useExportarEtiquetas(pt: ProductoTerminado | null) {
+  const confirmar = useConfirm()
   const [estado, setEstado] = useState<EstadoExportacion>({ tipo: 'inactivo' })
 
   useEffect(() => {
-    if (estado.tipo !== 'listo') return
+    if (estado.tipo !== 'listo' && estado.tipo !== 'impreso') return
     const id = setTimeout(() => setEstado({ tipo: 'inactivo' }), 6000)
     return () => clearTimeout(id)
   }, [estado])
@@ -204,14 +220,30 @@ function useExportarEtiquetas(pt: ProductoTerminado | null) {
       )
       setEstado(ruta ? { tipo: 'listo', ruta } : { tipo: 'inactivo' })
     } catch (error) {
-      setEstado({
-        tipo: 'error',
-        mensaje: error instanceof Error ? error.message : String(error)
-      })
+      setEstado({ tipo: 'error', accion: 'guardar', mensaje: mensajeDeError(error) })
     }
   }
 
-  return { estado, exportar }
+  async function imprimir(pesajes: Pesaje[]): Promise<void> {
+    if (!pt || pesajes.length === 0) return
+    if (pesajes.length > ETIQUETAS_SIN_CONFIRMAR) {
+      const seguir = await confirmar(
+        `¿Imprimir ${pesajes.length} etiquetas? Van a salir seguidas por la etiquetadora.`
+      )
+      if (!seguir) return
+    }
+    setEstado({ tipo: 'exportando' })
+    try {
+      const ordenados = [...pesajes].sort((a, b) => a.numero - b.numero)
+      const zpl = generarZplEtiquetasPt(ordenados.map((p) => datosEtiquetaDesdePesaje(pt, p)))
+      const impresora = await window.api.imprimirEtiquetas(zpl)
+      setEstado({ tipo: 'impreso', cantidad: ordenados.length, impresora })
+    } catch (error) {
+      setEstado({ tipo: 'error', accion: 'imprimir', mensaje: mensajeDeError(error) })
+    }
+  }
+
+  return { estado, exportar, imprimir }
 }
 
 function AvisoExportacion({ estado }: { estado: EstadoExportacion }) {
@@ -222,10 +254,18 @@ function AvisoExportacion({ estado }: { estado: EstadoExportacion }) {
       </p>
     )
   }
+  if (estado.tipo === 'impreso') {
+    return (
+      <p className="rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success">
+        {estado.cantidad === 1 ? 'Etiqueta enviada' : `${estado.cantidad} etiquetas enviadas`} a la impresora (
+        {estado.impresora}).
+      </p>
+    )
+  }
   if (estado.tipo === 'error') {
     return (
       <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-        No se pudo guardar la etiqueta: {estado.mensaje}
+        No se pudo {estado.accion === 'imprimir' ? 'imprimir' : 'guardar'} la etiqueta: {estado.mensaje}
       </p>
     )
   }
@@ -382,7 +422,7 @@ export function RegistroPesoPt({
                   size="sm"
                   variant="outline"
                   disabled={etiquetas.estado.tipo === 'exportando'}
-                  onClick={() => etiquetas.exportar([corregido])}
+                  onClick={() => etiquetas.imprimir([corregido])}
                 >
                   <Printer className="h-3.5 w-3.5" />
                   Imprimir etiqueta corregida
@@ -413,7 +453,7 @@ export function RegistroPesoPt({
                     variant="outline"
                     className="ml-auto"
                     disabled={etiquetas.estado.tipo === 'exportando'}
-                    onClick={() => etiquetas.exportar(dia.pesajes)}
+                    onClick={() => etiquetas.imprimir(dia.pesajes)}
                   >
                     <Printer className="h-3.5 w-3.5" />
                     Etiquetas del día
@@ -500,12 +540,21 @@ export function RegistroPesoPt({
                             </button>
                             <button
                               type="button"
+                              title="Imprimir la etiqueta"
+                              disabled={etiquetas.estado.tipo === 'exportando'}
+                              onClick={() => etiquetas.imprimir([p])}
+                              className="rounded-md border border-border p-1 hover:bg-muted"
+                            >
+                              <Printer className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               title="Guardar la etiqueta en PDF"
                               disabled={etiquetas.estado.tipo === 'exportando'}
                               onClick={() => etiquetas.exportar([p])}
                               className="rounded-md border border-border p-1 hover:bg-muted"
                             >
-                              <Printer className="h-3.5 w-3.5" />
+                              <FileText className="h-3.5 w-3.5" />
                             </button>
                             <button
                               type="button"
@@ -959,19 +1008,35 @@ function FormularioPesaje({
                 .
               </p>
               <div className="flex flex-wrap items-end gap-4">
-                <VistaEtiqueta pt={pt} pesaje={registrado} />
-                <Button
-                  type="button"
-                  disabled={etiquetas.estado.tipo === 'exportando'}
-                  onClick={() => etiquetas.exportar([registrado])}
-                >
-                  {etiquetas.estado.tipo === 'exportando' ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Printer className="h-4 w-4" />
-                  )}
-                  Guardar etiqueta en PDF
-                </Button>
+                <div className="space-y-1">
+                  <VistaEtiqueta pt={pt} pesaje={registrado} />
+                  <p className="text-xs text-muted-foreground">
+                    Vista previa aproximada: la impresora usa su propia letra.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <Button
+                    type="button"
+                    disabled={etiquetas.estado.tipo === 'exportando'}
+                    onClick={() => etiquetas.imprimir([registrado])}
+                  >
+                    {etiquetas.estado.tipo === 'exportando' ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Printer className="h-4 w-4" />
+                    )}
+                    Imprimir etiqueta
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={etiquetas.estado.tipo === 'exportando'}
+                    onClick={() => etiquetas.exportar([registrado])}
+                  >
+                    <FileText className="h-4 w-4" />
+                    Guardar en PDF
+                  </Button>
+                </div>
               </div>
               <AvisoExportacion estado={etiquetas.estado} />
             </div>
