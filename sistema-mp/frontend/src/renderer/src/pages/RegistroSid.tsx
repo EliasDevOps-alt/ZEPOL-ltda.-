@@ -1353,6 +1353,10 @@ function MovimientoRow({
           {sidCompletadoPor ? ` ${sidCompletadoPor}` : ''}
         </p>
       )}
+      {/* Los SID marcados antes de que el sistema guardara la fecha están registrados, pero sin fecha. */}
+      {completado && !sidCompletadoEn && (
+        <p className="mt-1 pl-6 text-muted-foreground">Registro SID — registrado, sin fecha guardada (antiguo)</p>
+      )}
     </div>
   )
 }

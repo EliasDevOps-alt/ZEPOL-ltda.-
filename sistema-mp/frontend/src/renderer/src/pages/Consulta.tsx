@@ -10,7 +10,7 @@ import { useAuth } from '@renderer/lib/AuthContext'
 import { useConfig } from '@renderer/lib/ConfigContext'
 import * as api from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
-import { formatearFecha } from '@renderer/lib/fechas'
+import { formatearFecha, formatearFechaHoraCompleta } from '@renderer/lib/fechas'
 import { letrasDeEntregas } from '@renderer/lib/letrasEntrega'
 import { CodigoConLetra, LetraEntrega } from '@renderer/components/LetraEntrega'
 import { redondearPeso } from '@renderer/lib/utils'
@@ -108,6 +108,23 @@ function armarFilas(
     }
   }
   return filas
+}
+
+/** El SID de UNA entrega (cada entrega de un pedido con varias se tramita por su cuenta),
+ * con su fecha de registro. Los marcados antes de que se guardara la fecha dicen "sin fecha". */
+function SidDeEntrega({ entregas }: { entregas: Entrega[] }) {
+  const completo = entregas.length > 0 && entregas.every((e) => e.sid_completado)
+  const fechas = entregas.map((e) => e.sid_completado_en).filter((f): f is string => !!f)
+  return (
+    <div>
+      <span className={completo ? 'font-medium text-success' : undefined}>{completo ? 'COMPLETADO' : 'PENDIENTE'}</span>
+      {completo && (
+        <div className="text-xs font-normal">
+          {fechas.length > 0 ? formatearFechaHoraCompleta(fechas[0]) : 'sin fecha guardada'}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function Consulta() {
@@ -392,7 +409,13 @@ export function Consulta() {
                         {sinEntrega ? '' : delPedido(<BadgeEstado estado={row.estado_entrega} />)}
                       </td>
                       <td className="px-2 py-3 align-top text-muted-foreground">
-                        {sinEntrega ? '' : delPedido(row.estado_sid)}
+                        {sinEntrega ? (
+                          ''
+                        ) : destino ? (
+                          <SidDeEntrega entregas={destino.entregas} />
+                        ) : (
+                          delPedido(row.estado_sid)
+                        )}
                       </td>
                     </tr>
                   )
