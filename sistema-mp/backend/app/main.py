@@ -16,6 +16,7 @@ from .views import (
     consumo_view,
     devoluciones_view,
     entregas_view,
+    eventos_view,
     maquinas_view,
     materiales_view,
     ordenes_view,
@@ -37,6 +38,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_view.router)
+app.include_router(eventos_view.router)
 app.include_router(catalogos_view.router)
 app.include_router(entregas_view.router)
 app.include_router(devoluciones_view.router)
@@ -61,6 +63,14 @@ app.include_router(usuarios_view.router)
 UPDATES_DIR = Path(os.environ.get("UPDATES_DIR", Path(__file__).resolve().parent.parent / "updates"))
 UPDATES_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/updates", StaticFiles(directory=str(UPDATES_DIR)), name="updates")
+
+
+@app.on_event("startup")
+def activar_avisos_de_cambios() -> None:
+    # Detecta cada commit y avisa a las estaciones qué OT cambió (services/eventos.py).
+    from .services import eventos
+
+    eventos.instalar()
 
 
 @app.get("/health")

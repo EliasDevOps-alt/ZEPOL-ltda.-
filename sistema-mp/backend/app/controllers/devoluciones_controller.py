@@ -5,7 +5,7 @@ from typing import List, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import schemas
 from sqlalchemy import func, or_
@@ -147,11 +147,32 @@ def listar_devoluciones_por_ot(db: Session, numero_ot: Optional[str] = None) -> 
             OrdenTrabajo.id == func.coalesce(OtProceso.ot_id, OtMaterialPendiente.ot_id),
         )
         .order_by(Devolucion.id)
+        # Todo lo que lee devoluciones_view._serializar, en bloque (mismo
+        # problema y arreglo que entregas_controller.listar_entregas_por_ot).
+        .options(*_CARGA_PARA_SERIALIZAR)
     )
     if numero_ot is not None:
         stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot.strip().upper())
     return db.scalars(stmt).all()
 
+
+
+_pedido = selectinload(Devolucion.ot_material)
+_pendiente = selectinload(Devolucion.ot_material_pendiente)
+_CARGA_PARA_SERIALIZAR = (
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.ot),
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.proceso),
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.maquina),
+    _pedido.selectinload(OtMaterial.devoluciones).selectinload(Devolucion.bobinas),
+    _pendiente.selectinload(OtMaterialPendiente.ot),
+    _pendiente.selectinload(OtMaterialPendiente.ingresos).selectinload(Devolucion.bobinas),
+    selectinload(Devolucion.material),
+    selectinload(Devolucion.bobinas),
+    selectinload(Devolucion.usuario),
+    selectinload(Devolucion.sid_completado_por),
+    selectinload(Devolucion.editado_por),
+    selectinload(Devolucion.entrega),
+)
 
 def _bloquear_si_devolucion_tiene_sid(devolucion: Devolucion) -> None:
     # Ver la nota equivalente en entregas_controller._bloquear_si_entrega_tiene_sid.

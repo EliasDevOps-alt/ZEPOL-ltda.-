@@ -5,10 +5,11 @@ from typing import List, Optional, Tuple
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .. import schemas
 from ..models import (
+    Devolucion,
     Entrega,
     EntregaBobina,
     Material,
@@ -136,10 +137,32 @@ def listar_entregas_por_ot(db: Session, numero_ot: Optional[str] = None) -> List
         .join(OtProceso, OtProceso.id == OtMaterial.ot_proceso_id)
         .join(OrdenTrabajo, OrdenTrabajo.id == OtProceso.ot_id)
         .order_by(Entrega.id)
+        # Todo lo que lee entregas_view._serializar, en bloque. Sin esto cada
+        # entrega disparaba ~6 consultas sueltas (3712 para 616 entregas, ~9 s
+        # con el servidor ocupado); así son ~22 consultas en total.
+        .options(*_CARGA_PARA_SERIALIZAR)
     )
     if numero_ot is not None:
         stmt = stmt.where(OrdenTrabajo.numero_ot == numero_ot.strip().upper())
     return db.scalars(stmt).all()
+
+
+_pedido = selectinload(Entrega.ot_material)
+_CARGA_PARA_SERIALIZAR = (
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.ot),
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.proceso),
+    _pedido.selectinload(OtMaterial.ot_proceso).selectinload(OtProceso.maquina),
+    _pedido.selectinload(OtMaterial.material),
+    _pedido.selectinload(OtMaterial.entregas).selectinload(Entrega.bobinas),
+    selectinload(Entrega.ot_proceso).selectinload(OtProceso.proceso),
+    selectinload(Entrega.ot_proceso).selectinload(OtProceso.maquina),
+    selectinload(Entrega.material),
+    selectinload(Entrega.bobinas),
+    selectinload(Entrega.usuario),
+    selectinload(Entrega.sid_completado_por),
+    selectinload(Entrega.editado_por),
+    selectinload(Entrega.devoluciones_vinculadas).selectinload(Devolucion.bobinas),
+)
 
 
 def _bloquear_si_entrega_tiene_sid(entrega: Entrega) -> None:

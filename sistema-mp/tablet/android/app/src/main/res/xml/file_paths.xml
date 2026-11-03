@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Carpeta donde la app guarda el APK de la actualización que baja del servidor,
+     para poder pasárselo al instalador de Android. -->
+<paths>
+    <cache-path name="actualizaciones" path="." />
+    <files-path name="actualizaciones_archivos" path="." />
+</paths>

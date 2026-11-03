@@ -370,6 +370,35 @@ número más alto que el que tienen instalado las estaciones ahora mismo
 instalación), espera a que una estación revise (o ciérrala y ábrela de
 nuevo), y confirma que aparece el diálogo de actualización.
 
+## 11b. Publicar actualizaciones de la tablet (sin reinstalar)
+
+La app de la tablet (Android, `sistema-mp/tablet`) se actualiza sola desde este mismo servidor, igual que
+las estaciones de escritorio: no hay que llevar la tablet a una PC ni reinstalar.
+
+**Cómo funciona:** la tablet mira `http://<servidor>:8000/updates/tablet/latest.json` al abrirse, al volver a la
+app y cada hora. Si el `version_code` publicado es mayor que el instalado, baja el APK (comprueba tamaño y
+SHA-256) y muestra un aviso con **Instalar ahora**. Android pide una confirmación ("¿Quieres instalar una
+actualización?") que hay que aceptar con un toque; la sesión y la dirección del servidor se conservan. Es una
+regla de Android: una app común no puede instalarse en silencio.
+
+**Publicar una versión** (desde la laptop de desarrollo, en `sistema-mp/tablet`):
+
+1. Subir la versión en `pubspec.yaml`: `version: 1.0.3+4` (el número después del `+` **tiene que subir siempre**).
+2. `flutter build apk --release` (si falla el primer intento tras cambiar la versión, repetirlo).
+3. `python scripts/publicar_actualizacion.py --ssh zepol --notas "Qué cambió"`
+   - sube el APK, comprueba que llegó igual (SHA-256) y **recién entonces** publica `latest.json`;
+   - se niega a publicar si el APK compilado no es el de la versión de `pubspec.yaml`;
+   - sin `--ssh` copia a `sistema-mp/backend/updates/tablet/` (servidor local de pruebas).
+4. No hace falta reiniciar el backend: se sirve como archivo estático (carpeta `updates/`, fuera de git).
+
+**Primera vez en cada tablet:** Android pide una sola vez permitir a ZEPOL instalar actualizaciones
+(*Permitir de esta fuente*). La app abre esa pantalla sola cuando hace falta.
+
+**Importante — la firma:** Android solo actualiza si el APK nuevo está firmado con la **misma llave** que el
+instalado. Hoy se firma con la llave de depuración de la laptop de desarrollo (`%USERPROFILE%\.android\debug.keystore`).
+**Hacer una copia de ese archivo en un lugar seguro**: si se pierde o se compila en otra PC con otra llave,
+las tablets no podrán actualizarse y habrá que desinstalar/reinstalar una vez. No subirla al repo (es público).
+
 ## 12. Actualizar el servidor cuando la versión trae cambios de base de datos
 
 Algunas versiones, no todas, agregan tablas o columnas nuevas. En esas, además
