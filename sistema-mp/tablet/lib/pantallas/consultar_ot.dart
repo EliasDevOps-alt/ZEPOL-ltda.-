@@ -398,11 +398,19 @@ class _TarjetaFila extends StatelessWidget {
                   ])),
                   if (sustituido) Etiqueta('pedido: ${p.codigoMp}', color: Colores.aviso, icono: Icons.swap_horiz),
                 ],
-                // Lo del pedido entero, solo en su primera tarjeta.
-                if (fila.primera && sinEntrega == null) ...[
-                  Etiqueta(p.estadoEntrega, color: colorEstado),
+                // Lo del pedido entero (estado de entrega y, si es una sola tarjeta, su SID).
+                if (fila.primera && sinEntrega == null) Etiqueta(p.estadoEntrega, color: colorEstado),
+                if (sinEntrega == null && entrega == null && fila.primera)
                   Etiqueta('SID ${p.estadoSid}', color: Colores.textoApagado),
-                ],
+                // En una tarjeta de UNA entrega el SID es el de ESA entrega (cada una se tramita
+                // por su cuenta), con su fecha; los marcados antes de guardar la fecha dicen "sin fecha".
+                if (entrega != null)
+                  Etiqueta(
+                    entrega.sidCompletado
+                        ? 'SID COMPLETADO${entrega.sidCompletadoEn != null ? ' · ${formatearFechaHoraCompleta(entrega.sidCompletadoEn!)}' : ' · sin fecha guardada'}'
+                        : 'SID PENDIENTE',
+                    color: entrega.sidCompletado ? Colores.exito : Colores.textoApagado,
+                  ),
               ],
             ),
             const SizedBox(height: 10),

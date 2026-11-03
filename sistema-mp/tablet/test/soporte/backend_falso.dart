@@ -344,7 +344,7 @@ class BackendFalso {
       'descripcion_entregado': mEntregado['descripcion'],
       'usa_bobinas': mEntregado['usa_bobinas'],
       'sid_completado': e['sid'],
-      'sid_completado_en': null,
+      'sid_completado_en': e['sid_en'],
       'sid_completado_por': null,
       'total_devuelto_entrega': _suma(devoluciones
           .where((d) => d['entrega_id'] == e['id'] && d['ingreso'] != true)

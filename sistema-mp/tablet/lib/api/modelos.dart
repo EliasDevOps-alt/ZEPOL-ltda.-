@@ -207,6 +207,7 @@ class Entrega {
     required this.totalDevueltoEntrega,
     required this.usuario,
     required this.sidCompletado,
+    this.sidCompletadoEn,
     required this.editadoPor,
     required this.editadoEn,
   });
@@ -236,6 +237,8 @@ class Entrega {
   final String usuario;
   // Con el SID ya registrado no se puede corregir ni borrar.
   final bool sidCompletado;
+  // Cuándo se registró el SID; null en los marcados antes de que se guardara la fecha.
+  final String? sidCompletadoEn;
   final String? editadoPor;
   final String? editadoEn;
 
@@ -263,6 +266,7 @@ class Entrega {
         totalDevueltoEntrega: _num(j['total_devuelto_entrega']),
         usuario: j['usuario'] as String? ?? '',
         sidCompletado: j['sid_completado'] as bool? ?? false,
+        sidCompletadoEn: j['sid_completado_en'] as String?,
         editadoPor: j['editado_por'] as String?,
         editadoEn: j['editado_en'] as String?,
       );
