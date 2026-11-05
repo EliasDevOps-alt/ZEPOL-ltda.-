@@ -226,21 +226,12 @@ export async function construirExcelDesdeHtml(html: string, orientacion: Orienta
           bottom: bordeExcel(c.bordes.bottom),
           right: bordeExcel(c.bordes.right)
         }
+        // En exceljs las celdas de un rango combinado comparten UN estilo: darle a
+        // cada una solo su lado (como se hacía antes) hacía que la última pisara a
+        // las demás y el rango perdía el borde izquierdo (se vio con los recuadros
+        // del formulario de PT, 2026-10-27). Con los cuatro lados en todas, Excel
+        // dibuja solo el contorno del rango combinado.
         celda.border = bordes
-        // El borde de una celda combinada se dibuja con las celdas del perímetro:
-        // se lo da a cada una de las que quedan debajo / a la derecha también.
-        if (c.colspan > 1 || c.rowspan > 1) {
-          for (let rr = 0; rr < c.rowspan; rr++) {
-            for (let cc = 0; cc < c.colspan; cc++) {
-              hoja.getCell(fila0 + rr, col0 + cc).border = {
-                top: rr === 0 ? bordes.top : undefined,
-                bottom: rr === c.rowspan - 1 ? bordes.bottom : undefined,
-                left: cc === 0 ? bordes.left : undefined,
-                right: cc === c.colspan - 1 ? bordes.right : undefined
-              }
-            }
-          }
-        }
         if (c.imagen) {
           const coincidencia = c.imagen.src.match(/^data:image\/(png|jpe?g|gif);base64,(.+)$/)
           if (coincidencia) {

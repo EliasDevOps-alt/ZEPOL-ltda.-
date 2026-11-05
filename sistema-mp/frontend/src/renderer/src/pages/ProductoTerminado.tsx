@@ -28,12 +28,12 @@ const MAX_ITEMS_FORMULARIO = 5
 // Las dos de siempre; cualquier otra se escribe con "Otra".
 const MONEDAS = ['Bs.', '$us']
 
-// Hoja carta a 96dpi, y el área útil que queda descontando los márgenes que
-// define el @page del formulario (0.72in arriba/abajo, 0.645in a los lados).
-const PAGINA_ANCHO_PX = 816
-const PAGINA_ALTO_PX = 1056
-const MARGEN_VERTICAL_PX = 69
-const MARGEN_HORIZONTAL_PX = 62
+// Hoja carta HORIZONTAL a 96dpi, y el área útil que queda descontando los
+// márgenes que define el @page del formulario (0.5in arriba/abajo, 0.45in a los lados).
+const PAGINA_ANCHO_PX = 1056
+const PAGINA_ALTO_PX = 816
+const MARGEN_VERTICAL_PX = 48
+const MARGEN_HORIZONTAL_PX = 43
 
 type Pestana = 'formulario' | 'peso' | 'sid'
 
@@ -217,7 +217,7 @@ export function ProductoTerminado() {
         formato === 'pdf'
           ? await window.api.exportarFormularioPdf(html, nombreArchivo)
           : formato === 'excel'
-            ? await window.api.exportarFormularioExcel(html, nombreArchivo, 'portrait')
+            ? await window.api.exportarFormularioExcel(html, nombreArchivo, 'landscape')
             : await window.api.exportarFormularioWord(generarDocumentoWordFormularioPt(datos), nombreArchivo)
       setEstado(ruta ? { tipo: 'listo', ruta } : { tipo: 'cancelado' })
     } catch (error) {
@@ -225,6 +225,30 @@ export function ProductoTerminado() {
         tipo: 'error',
         mensaje: error instanceof Error ? error.message : String(error)
       })
+    }
+  }
+
+  const [imprimiendo, setImprimiendo] = useState(false)
+  const [avisoImpresion, setAvisoImpresion] = useState<{ error: boolean; texto: string } | null>(null)
+
+  useEffect(() => {
+    if (!avisoImpresion || avisoImpresion.error) return
+    const id = setTimeout(() => setAvisoImpresion(null), 8000)
+    return () => clearTimeout(id)
+  }, [avisoImpresion])
+
+  async function imprimir(): Promise<void> {
+    setImprimiendo(true)
+    setAvisoImpresion(null)
+    try {
+      const modo = await window.api.imprimirFormulario(html)
+      if (modo === 'directo') {
+        setAvisoImpresion({ error: false, texto: 'Formulario enviado a la impresora (carta, horizontal, ambas caras).' })
+      }
+    } catch (error) {
+      setAvisoImpresion({ error: true, texto: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setImprimiendo(false)
     }
   }
 
@@ -314,7 +338,7 @@ export function ProductoTerminado() {
 
       {pestana === 'peso' &&
         (pt ? (
-          <RegistroPesoPt key={pt.numero_ot} pt={pt} />
+          <RegistroPesoPt key={pt.numero_ot} pt={pt} onPtCambiado={setPt} />
         ) : (
           <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
             Busca una OT para registrar sus pesajes.
@@ -335,7 +359,11 @@ export function ProductoTerminado() {
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3">
           <CardTitle className="text-base">Formulario de ingreso de productos terminados</CardTitle>
           <div className="flex items-center gap-2">
-            <Button onClick={() => exportar('pdf')} disabled={exportando}>
+            <Button onClick={imprimir} disabled={imprimiendo || exportando}>
+              {imprimiendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
+              Imprimir
+            </Button>
+            <Button variant="outline" onClick={() => exportar('pdf')} disabled={exportando}>
               {exportando && estado.formato === 'pdf' ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
@@ -364,8 +392,8 @@ export function ProductoTerminado() {
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
             {pt
-              ? 'Formato P-LOG-001-F-04/V.4.0, tamaño carta. Así se va a ver impreso.'
-              : 'Formato P-LOG-001-F-04/V.4.0 en blanco, tamaño carta. Busca una OT para llenarlo con sus datos.'}
+              ? 'Formato P-LOG-001-F-04/V.4.0, tamaño carta horizontal. Así se va a ver impreso.'
+              : 'Formato P-LOG-001-F-04/V.4.0 en blanco, tamaño carta horizontal. Busca una OT para llenarlo con sus datos.'}
           </p>
 
           {pt && (
@@ -461,6 +489,17 @@ export function ProductoTerminado() {
           {estado.tipo === 'cancelado' && (
             <p className="rounded-md border border-border bg-muted px-3 py-2 text-sm text-muted-foreground">
               Exportación cancelada.
+            </p>
+          )}
+          {avisoImpresion && (
+            <p
+              className={
+                avisoImpresion.error
+                  ? 'rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive'
+                  : 'rounded-md border border-success/40 bg-success/10 px-3 py-2 text-sm text-success'
+              }
+            >
+              {avisoImpresion.error ? `No se pudo imprimir: ${avisoImpresion.texto}` : avisoImpresion.texto}
             </p>
           )}
           {estado.tipo === 'error' && (

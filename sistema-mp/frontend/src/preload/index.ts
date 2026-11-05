@@ -17,6 +17,12 @@ const api = {
   // Devuelven la ruta donde se guardó, o null si se canceló el diálogo.
   exportarFormularioPdf: (html: string, nombreSugerido: string): Promise<string | null> =>
     ipcRenderer.invoke('formulario:exportarPdf', html, nombreSugerido),
+  // 'directo' = salió a la HP sin preguntar; 'dialogo' = se usó el cuadro de
+  // impresión de Windows (la PC no tiene la HP o un lector de PDF); 'cancelado'.
+  imprimirFormulario: (html: string): Promise<'directo' | 'dialogo' | 'cancelado'> =>
+    ipcRenderer.invoke('formulario:imprimir', html),
+  // Etiquetas ZPL a la etiquetadora térmica; devuelve el nombre de la impresora usada.
+  imprimirEtiquetas: (zpl: string): Promise<string> => ipcRenderer.invoke('etiqueta:imprimir', zpl),
   exportarFormularioWord: (html: string, nombreSugerido: string): Promise<string | null> =>
     ipcRenderer.invoke('formulario:exportarWord', html, nombreSugerido),
   exportarFormularioExcel: (

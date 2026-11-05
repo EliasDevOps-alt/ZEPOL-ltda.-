@@ -197,6 +197,20 @@ export function confirmarUnidadPt(baseUrl: string, token: string, numeroOt: stri
   )
 }
 
+export function fijarNombreCortoItemPt(
+  baseUrl: string,
+  token: string,
+  numeroOt: string,
+  numero: number,
+  nombre: string | null
+) {
+  return request<ProductoTerminado>(
+    baseUrl,
+    `/producto-terminado/${encodeURIComponent(numeroOt)}/items/${numero}/nombre-corto`,
+    { method: 'PUT', token, body: { nombre } }
+  )
+}
+
 export function fijarMonedaPt(baseUrl: string, token: string, numeroOt: string, moneda: string | null) {
   return request<ProductoTerminado>(
     baseUrl,

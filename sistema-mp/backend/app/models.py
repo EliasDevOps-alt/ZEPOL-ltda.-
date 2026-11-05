@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Numeric,
+    SmallInteger,
     String,
     Text,
     Time,
@@ -517,8 +518,9 @@ class ProductoTerminado(Base):
 
 class ProductoTerminadoItem(Base):
     """Un ITEM del formulario (ITEM 1..5): código, descripción y el total de
-    ese producto. Solo informativo — el pesaje va contra el pedido_total de
-    toda la OT, sin distinguir de qué ítem es cada bobina o paquete."""
+    ese producto. En una OT de varios ítems cada pesaje puede decir de cuál es
+    (PesajePt.item_numero, ej. OT 58091: manzana, uva y limón); si no, se pesa
+    todo junto contra el pedido_total de la OT."""
 
     __tablename__ = "producto_terminado_items"
     __table_args__ = (UniqueConstraint("producto_terminado_id", "numero"),)
@@ -531,6 +533,8 @@ class ProductoTerminadoItem(Base):
     codigo_producto: Mapped[Optional[str]] = mapped_column(String(50))
     descripcion_producto: Mapped[Optional[str]] = mapped_column(String(255))
     total: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
+    # Nombre corto (MANZANA) para el formulario y los botones; None = sugerido.
+    nombre_corto: Mapped[Optional[str]] = mapped_column(String(30))
 
     producto_terminado: Mapped["ProductoTerminado"] = relationship(back_populates="items")
 
@@ -555,6 +559,9 @@ class PesajePt(Base):
     peso_bruto: Mapped[float] = mapped_column(Numeric(10, 3))
     tara: Mapped[float] = mapped_column(Numeric(10, 3), default=0)
     cantidad: Mapped[Optional[float]] = mapped_column(Numeric(14, 3))
+    # De qué ITEM es (ProductoTerminadoItem.numero, no su id: la sincronización
+    # con el Excel reescribe los ítems). None = OT de un ítem, o "sin separar".
+    item_numero: Mapped[Optional[int]] = mapped_column(SmallInteger)
     usuario_id: Mapped[int] = mapped_column(ForeignKey("usuarios.id"))
     creado_en: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     # Quién lo corrigió y cuándo — mismo criterio que Entrega.editado_por_id.

@@ -51,6 +51,7 @@ def _serializar_pesaje(pesaje: PesajePt) -> schemas.PesajePtOut:
         tara=float(pesaje.tara),
         peso_neto=float(pesaje.peso_bruto) - float(pesaje.tara),
         cantidad=cantidad,
+        item_numero=pesaje.item_numero,
         pesador=pesaje.usuario.inicial,
         pesador_nombre=pesaje.usuario.nombre,
         editado_por=pesaje.editado_por.inicial if pesaje.editado_por else None,
@@ -114,7 +115,7 @@ def editar_pesaje(
     usuario: Usuario = Depends(security.get_current_usuario),
 ):
     pesaje = producto_terminado_controller.editar_pesaje(
-        db, pesaje_id, data.fecha, data.peso_bruto, data.tara, data.cantidad, usuario
+        db, pesaje_id, data.fecha, data.peso_bruto, data.tara, data.cantidad, usuario, data.item_numero
     )
     return _serializar_pesaje(pesaje)
 
@@ -145,6 +146,15 @@ def abrir(numero_ot: str, db: Session = Depends(get_db)):
 )
 def confirmar_unidad(numero_ot: str, data: schemas.ConfirmarUnidadPtIn, db: Session = Depends(get_db)):
     return _serializar(producto_terminado_controller.confirmar_unidad(db, numero_ot, data.unidad))
+
+
+@router.put(
+    "/{numero_ot}/items/{numero}/nombre-corto",
+    response_model=schemas.ProductoTerminadoOut,
+    dependencies=[Depends(security.requiere_modulo("producto_terminado"))],
+)
+def fijar_nombre_corto(numero_ot: str, numero: int, data: schemas.NombreCortoItemPtIn, db: Session = Depends(get_db)):
+    return _serializar(producto_terminado_controller.fijar_nombre_corto(db, numero_ot, numero, data.nombre))
 
 
 @router.put(
@@ -188,6 +198,6 @@ def registrar_pesaje(
     usuario: Usuario = Depends(security.get_current_usuario),
 ):
     pesaje = producto_terminado_controller.registrar_pesaje(
-        db, numero_ot, data.fecha, data.peso_bruto, data.tara, data.cantidad, usuario
+        db, numero_ot, data.fecha, data.peso_bruto, data.tara, data.cantidad, usuario, data.item_numero
     )
     return _serializar_pesaje(pesaje)

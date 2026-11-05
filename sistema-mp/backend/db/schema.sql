@@ -390,6 +390,9 @@ CREATE TABLE producto_terminado_items (
     codigo_producto        VARCHAR(50),
     descripcion_producto   VARCHAR(255),
     total                  NUMERIC(14,3),
+    -- Nombre corto del producto (MANZANA, UVA...) para el recuadro "P." del
+    -- formulario y los botones de Registro de peso. NULL = se sugiere solo.
+    nombre_corto           VARCHAR(30),
     UNIQUE (producto_terminado_id, numero)
 );
 
@@ -407,6 +410,10 @@ CREATE TABLE pesajes_pt (
     -- Todo menos KG (NULL en KG). Unidades del paquete (bolsas, bobinas o
     -- láminas), también cuando el pedido está en millares.
     cantidad               NUMERIC(14,3) CHECK (cantidad > 0),
+    -- De qué ITEM es (producto_terminado_items.numero; por número y no por id
+    -- porque la sincronización con el Excel reescribe los ítems). NULL = OT de
+    -- un solo ítem, o "sin separar" en una de varios.
+    item_numero            SMALLINT      CHECK (item_numero > 0),
     usuario_id             INTEGER       NOT NULL REFERENCES usuarios(id),
     creado_en              TIMESTAMP     NOT NULL DEFAULT now(),
     -- Quién lo corrigió y cuándo (mismo criterio que entregas.editado_por_id).
