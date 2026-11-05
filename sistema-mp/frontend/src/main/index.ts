@@ -6,11 +6,15 @@ import log from 'electron-log/main'
 import { construirExcelDesdeHtml, type OrientacionHoja } from './excelFormulario'
 import { imprimirPdfDirecto } from './impresionDirecta'
 import { enviarZpl, IMPRESORA_ETIQUETAS } from './impresionEtiqueta'
+import { crearBalanza, listarPuertosCom } from './balanza'
 
 const CONFIG_PATH = join(app.getPath('userData'), 'config.json')
 
 interface AppConfig {
   apiBaseUrl: string
+  /** Puertos COM de las balanzas de ESTA PC (ej. "COM10"); vacío = sin esa balanza. */
+  puertoBalanza?: string
+  puertoBalanza2?: string
 }
 
 const DEFAULT_CONFIG: AppConfig = { apiBaseUrl: 'http://localhost:8000' }
@@ -349,12 +353,59 @@ app.on('second-instance', () => {
   ventanaPrincipal.focus()
 })
 
+// Hasta dos balanzas a la vez, cada una en su puerto COM (convertidor USB-serial).
+const balanzas = [crearBalanza(), crearBalanza()]
+type NumeroBalanza = 1 | 2
+
+function puertoDeBalanza(numero: NumeroBalanza): string {
+  const config = readConfig()
+  return (numero === 1 ? config.puertoBalanza : config.puertoBalanza2) ?? ''
+}
+
+function estadosDeBalanzas() {
+  return balanzas.map((b) => b.estado())
+}
+
+function enviarARenderer(canal: string, datos: unknown): void {
+  if (ventanaPrincipal && !ventanaPrincipal.isDestroyed()) {
+    ventanaPrincipal.webContents.send(canal, datos)
+  }
+}
+
+/** Abre (o cierra, si no hay puerto configurado) una de las balanzas de esta PC. */
+function arrancarBalanza(numero: NumeroBalanza): void {
+  const control = balanzas[numero - 1]
+  const puerto = puertoDeBalanza(numero)
+  if (!puerto) {
+    control.detener()
+    return
+  }
+  control.iniciar(puerto, {
+    estado: (estado) => enviarARenderer('balanza:estado', { numero, estado }),
+    lectura: (lectura) => enviarARenderer('balanza:lectura', { numero, lectura })
+  })
+}
+
 app.whenReady().then(() => {
   if (!esLaUnicaInstancia) return
   ipcMain.handle('config:get', () => readConfig())
-  ipcMain.handle('config:set', (_event, config: AppConfig) => {
-    writeConfig(config)
+  // Se mezcla con lo guardado: quien cambia solo la URL del servidor no debe
+  // borrar el puerto de la balanza (ni al revés).
+  ipcMain.handle('config:set', (_event, config: Partial<AppConfig>) => {
+    writeConfig({ ...readConfig(), ...config })
     return readConfig()
+  })
+  ipcMain.handle('balanza:puertos', () => listarPuertosCom())
+  ipcMain.handle('balanza:estado', () => estadosDeBalanzas())
+  ipcMain.handle('balanza:configurar', (_event, numero: NumeroBalanza, puerto: string) => {
+    if (numero !== 1 && numero !== 2) throw new Error('Número de balanza no válido')
+    const otra = puertoDeBalanza(numero === 1 ? 2 : 1)
+    if (puerto && puerto.toUpperCase() === otra.toUpperCase()) {
+      throw new Error(`${puerto} ya está asignado a la otra balanza.`)
+    }
+    writeConfig({ ...readConfig(), [numero === 1 ? 'puertoBalanza' : 'puertoBalanza2']: puerto })
+    arrancarBalanza(numero)
+    return estadosDeBalanzas()
   })
   ipcMain.handle('dialog:elegirArchivoExcel', async () => {
     const resultado = await dialog.showOpenDialog({
@@ -384,6 +435,8 @@ app.whenReady().then(() => {
 
   createWindow()
   iniciarAutoUpdate()
+  arrancarBalanza(1)
+  arrancarBalanza(2)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
